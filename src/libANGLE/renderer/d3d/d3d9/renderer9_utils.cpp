@@ -456,7 +456,10 @@ static gl::TextureCaps GenerateTextureFormatCaps(GLenum internalFormat,
         {
             textureCaps.textureAttachment = SUCCEEDED(
                 d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_DEPTHSTENCIL,
-                                        D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat));
+                                        D3DRTYPE_TEXTURE, d3dFormatInfo.renderFormat))
+                || SUCCEEDED(
+                d3d9->CheckDeviceFormat(adapter, deviceType, adapterFormat, D3DUSAGE_DEPTHSTENCIL,
+                                        D3DRTYPE_SURFACE, d3dFormatInfo.renderFormat));
         }
         textureCaps.renderbuffer = textureCaps.textureAttachment;
         textureCaps.blendable    = textureCaps.renderbuffer;
