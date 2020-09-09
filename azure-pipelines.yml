@@ -1,0 +1,43 @@
+variables:
+   Depot.Tools.Win.Toolchain: 0
+
+jobs:
+- job: Windows
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '2.7'
+    displayName: 'Use Python 2.7'
+
+  - task: CmdLine@2
+    displayName: 'Install Depot Tools'
+    inputs:
+      script: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+
+  - powershell: Write-Host "##vso[task.prependpath]$(Build.SourcesDirectory)\depot_tools"
+    displayName: Add depot_tools to PATH
+
+  - task: CmdLine@2
+    displayName: 'Prepare Sources'
+    inputs:
+      script: |
+        python scripts/bootstrap.py
+        ./depot_tools/gclient.bat sync
+      
+  - task: CmdLine@2
+    displayName: 'Generate Ninja'
+    inputs:
+      script: |
+        gn gen target_cpu="x64" is_debug=false out/Release
+
+  - task: CmdLine@2
+    displayName: 'Build Angle'
+    inputs:
+      script:  |
+        autoninja -C out/Release
+
+
+
