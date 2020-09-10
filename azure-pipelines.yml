@@ -4,7 +4,7 @@ variables:
 jobs:
 - job: Windows
   pool:
-    vmImage: 'windows-latest'
+    name: 'AvaloniaPool'
   steps:
   - task: UsePythonVersion@0
     inputs:
@@ -12,20 +12,11 @@ jobs:
     displayName: 'Use Python 2.7'
 
   - task: CmdLine@2
-    displayName: 'Install Depot Tools'
-    inputs:
-      script: |
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-
-  - powershell: Write-Host "##vso[task.prependpath]$(Build.SourcesDirectory)\depot_tools"
-    displayName: Add depot_tools to PATH
-
-  - task: CmdLine@2
     displayName: 'Prepare Sources'
     inputs:
       script: |
         python scripts/bootstrap.py
-        ./depot_tools/gclient.bat sync
+        gclient sync
       
   - task: CmdLine@2
     displayName: 'Generate Ninja'
