@@ -31,9 +31,15 @@ jobs:
       script:  |
         autoninja -C out/Release
 
+  - task: CopyFiles@2
+    inputs:
+      sourceFolder: '$(Build.SourcesDirectory)/out/Release'
+      contents: '*' 
+      targetFolder: '$(Build.SourcesDirectory)/artifacts/bin'
+        
   - task: PublishBuildArtifacts@1
     inputs:
-      pathToPublish: '$(Build.SourcesDirectory)/out/Release'
+      pathToPublish: '$(Build.SourcesDirectory)/artifacts/bin'
       artifactName: 'Angle'
     condition: succeeded()
 
