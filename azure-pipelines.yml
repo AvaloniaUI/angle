@@ -29,7 +29,7 @@ jobs:
     displayName: 'Build Angle'
     inputs:
       script:  |
-        autoninja target_cpu="x64" is_debug=false -j8 -C out/Release
+        autoninja -C out/Release
 
 
 
