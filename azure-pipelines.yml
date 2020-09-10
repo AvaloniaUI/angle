@@ -31,5 +31,11 @@ jobs:
       script:  |
         autoninja -C out/Release
 
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathToPublish: '$(Build.SourcesDirectory)/out/Release'
+      artifactName: 'Angle'
+    condition: succeeded()
+
 
 
