@@ -8,10 +8,15 @@ jobs:
   steps:
 
   - task: CmdLine@2
-    displayName: 'Prepare Sources'
+    displayName: 'Bootstrap'
     inputs:
       script: |
         python scripts/bootstrap.py
+  
+  - task: CmdLine@2
+    displayName: 'GClient Sync'
+    inputs:
+      script: |
         gclient sync
       
   - task: CmdLine@2
