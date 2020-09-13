@@ -1,0 +1,5 @@
+# Set build arguments here. See `gn help buildargs`.
+target_cpu = "x64"
+is_clang = false
+is_debug = false
+dcheck_always_on = false
