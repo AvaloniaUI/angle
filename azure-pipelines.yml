@@ -20,37 +20,37 @@ jobs:
         gclient sync
       
   - task: CmdLine@2
-    displayName: 'Generate Ninja'
+    displayName: 'Generate Ninja (x64)'
     inputs:
       script: |
         gn gen out/x64
 
   - task: CmdLine@2
-    displayName: 'Build Angle'
+    displayName: 'Build Angle (x64)'
     inputs:
       script:  |
         autoninja -C out/x64
 
   - task: CmdLine@2
-    displayName: 'Generate Ninja'
+    displayName: 'Generate Ninja (x86)'
     inputs:
       script: |
         gn gen out/x86
 
   - task: CmdLine@2
-    displayName: 'Build Angle'
+    displayName: 'Build Angle (x86)'
     inputs:
       script:  |
         autoninja -C out/x86
 
   - task: CmdLine@2
-    displayName: 'Generate Ninja'
+    displayName: 'Generate Ninja (arm64)'
     inputs:
       script: |
         gn gen out/arm64
 
   - task: CmdLine@2
-    displayName: 'Build Angle'
+    displayName: 'Build Angle (arm64)'
     inputs:
       script:  |
         autoninja -C out/arm64
