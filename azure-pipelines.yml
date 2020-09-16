@@ -55,10 +55,16 @@ jobs:
       script:  |
         autoninja -C out/arm64
 
+  - task: CmdLine@2
+    displayName: 'Generate Nuget Package'
+    inputs:
+      script:  |
+        dotnet pack -c Release $(Build.SourcesDirectory)/nuget/Avalonia.Angle.Windows.Natives.csproj
+
   - task: CopyFiles@2
     inputs:
-      sourceFolder: '$(Build.SourcesDirectory)/out/Release'
-      contents: '*' 
+      sourceFolder: '$(Build.SourcesDirectory)/nuget/bin/Release/'
+      contents: '*.nupkg' 
       targetFolder: '$(Build.SourcesDirectory)/artifacts/bin'
         
   - task: PublishBuildArtifacts@1
