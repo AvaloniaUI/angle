@@ -23,13 +23,37 @@ jobs:
     displayName: 'Generate Ninja'
     inputs:
       script: |
-        gn gen out/Release
+        gn gen out/x64
 
   - task: CmdLine@2
     displayName: 'Build Angle'
     inputs:
       script:  |
-        autoninja -C out/Release
+        autoninja -C out/x64
+
+  - task: CmdLine@2
+    displayName: 'Generate Ninja'
+    inputs:
+      script: |
+        gn gen out/x86
+
+  - task: CmdLine@2
+    displayName: 'Build Angle'
+    inputs:
+      script:  |
+        autoninja -C out/x86
+
+  - task: CmdLine@2
+    displayName: 'Generate Ninja'
+    inputs:
+      script: |
+        gn gen out/arm64
+
+  - task: CmdLine@2
+    displayName: 'Build Angle'
+    inputs:
+      script:  |
+        autoninja -C out/arm64
 
   - task: CopyFiles@2
     inputs:
