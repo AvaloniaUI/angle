@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<Authors>Avalonia UI</Authors>
+		<PackageVersion>2.1.0.2020091601</PackageVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Content Include="..\out\x64\libglesv2.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+
+		<Content Include="..\out\x64\libegl.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+
+		<Content Include="..\out\x86\libglesv2.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+
+		<Content Include="..\out\x86\libegl.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+
+
+		<Content Include="..\out\arm64\libglesv2.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+
+		<Content Include="..\out\arm64\libegl.dll">
+			<Pack>true</Pack>
+			<PackagePath>runtimes\win7-x64</PackagePath>
+		</Content>
+	</ItemGroup>
+
+</Project>
