@@ -62,14 +62,12 @@ jobs:
         autoninja -C out/x86 libGLESv2.dll.lib
 
   - task: CmdLine@2
-    displayName: 'Build Angle (x86)'
+    displayName: 'Prefix DLLs'
     inputs:
       script:  |
-        ren ./out/arm64/libGLESv2.dll av_libGLESv2.dll
-        ren ./out/x64/libGLESv2.dll av_libGLESv2.dll
-        ren ./out/x86/libGLESv2.dll av_libGLESv2.dll
-
-
+        ren .\out\arm64/libGLESv2.dll av_libGLESv2.dll
+        ren .\out\x64/libGLESv2.dll av_libGLESv2.dll
+        ren .\out\x86/libGLESv2.dll av_libGLESv2.dll
 
   - task: CmdLine@2
     displayName: 'Generate Nuget Package'
