@@ -53,7 +53,7 @@ jobs:
     displayName: 'Generate Ninja (arm64)'
     inputs:
       script: |
-        gn gen out/arm64 --args="is_debug=false target_cpu=\"arm64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false"
+        gn gen out/arm64 --args="is_debug=false is_clang=false target_cpu=\"arm64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false" 
 
   - task: CmdLine@2
     displayName: 'Build Angle (arm64)'
