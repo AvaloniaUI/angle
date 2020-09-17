@@ -23,7 +23,7 @@ jobs:
     displayName: 'Generate Ninja (x64)'
     inputs:
       script: |
-        gn gen out/x64
+        gn gen out/x64 --args="is_debug=false target_cpu=\"x64\" is_official_build=true  dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false"
 
   - task: CmdLine@2
     displayName: 'Build Angle (x64)'
@@ -35,7 +35,7 @@ jobs:
     displayName: 'Generate Ninja (x86)'
     inputs:
       script: |
-        gn gen out/x86
+        gn gen out/x86 --args="is_debug=false target_cpu=\"x86\" is_official_build=true  dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false"
 
   - task: CmdLine@2
     displayName: 'Build Angle (x86)'
@@ -47,7 +47,7 @@ jobs:
     displayName: 'Generate Ninja (arm64)'
     inputs:
       script: |
-        gn gen out/arm64
+        gn gen out/arm64 --args="is_debug=false target_cpu=\"arm64\" is_official_build=true  dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false"
 
   - task: CmdLine@2
     displayName: 'Build Angle (arm64)'
