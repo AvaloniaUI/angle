@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+    <!-- if ShouldIncludeNativeAngleBinaries == False then don't include the native libAngleBinaries -->
+    <PropertyGroup>
+        <ShouldIncludeNativeAngleBinaries Condition=" '$(ShouldIncludeNativeAngleBinaries)' == '' ">True</ShouldIncludeNativeAngleBinaries>
+    </PropertyGroup>
+
+    <!-- get the preferred architecture -->
+    <PropertyGroup>
+        <!-- handle VS 2017 live unit testing -->
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' and '$(BuildingForLiveUnitTesting)' == 'true' and '$(PlatformTarget)' == '' ">x86</PreferredNativeAngleBinaries>
+
+        <!-- handle x86/x64 specifically -->
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' and ( '$(PlatformTarget)' == 'x64' or '$(PlatformTarget)' == 'x86' ) ">$(PlatformTarget)</PreferredNativeAngleBinaries> 
+        <!-- handle Any CPU, considering Prefer32Bit -->
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' and '$(Prefer32Bit)' == 'False' ">x64</PreferredNativeAngleBinaries>  
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' and '$(Prefer32Bit)' == 'True' ">x86</PreferredNativeAngleBinaries> 
+        <!-- fall back to x64 on 64-bit machines -->
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' and $([System.Environment]::Is64BitOperatingSystem) ">x64</PreferredNativeAngleBinaries> 
+        <!-- fall back to x86 -->
+        <PreferredNativeAngleBinaries Condition=" '$(PreferredNativeAngleBinaries)' == '' ">x86</PreferredNativeAngleBinaries>
+    </PropertyGroup>
+
+    <!-- get the preferred paths -->
+    <PropertyGroup>
+        <WindowsNativeAngleBinariesPath>$(MSBuildThisFileDirectory)..\..\runtimes\win-$(PreferredNativeAngleBinaries)\native\libAngleBinaries.dll</WindowsNativeAngleBinariesPath>
+    </PropertyGroup>
+
+    <ItemGroup Condition=" '$(ShouldIncludeNativeAngleBinaries)' != 'False' ">
+        <None Include="$(WindowsNativeAngleBinariesPath)\libglesv2.dll" >
+            <Link>$([System.IO.Path]::GetFilename('$(WindowsNativeAngleBinariesPath)\libglesv2.dll'))</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+		<None Include="$(WindowsNativeAngleBinariesPath)\libegl.dll" >
+            <Link>$([System.IO.Path]::GetFilename('$(WindowsNativeAngleBinariesPath)\libegl.dll'))</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+</Project>
