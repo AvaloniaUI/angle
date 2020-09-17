@@ -64,16 +64,17 @@ jobs:
         ren .\out\x86\libGLESv2.dll av_libGLESv2.dll
 
   - task: CmdLine@2
-    displayName: 'Generate Nuget Package'
-    inputs:
-      script:  |
-        dotnet pack -c Release $(Build.SourcesDirectory)/nuget/Avalonia.Angle.Windows.Natives.csproj
-
-  - task: CmdLine@2
     displayName: 'Clear Artifacts Dir'
     inputs:
       script:  |
         rmdir /Q /S artifacts
+        rmdir /Q /s nuget\bin
+
+  - task: CmdLine@2
+    displayName: 'Generate Nuget Package'
+    inputs:
+      script:  |
+        dotnet pack -c Release $(Build.SourcesDirectory)/nuget/Avalonia.Angle.Windows.Natives.csproj
 
   - task: CopyFiles@2
     inputs:
