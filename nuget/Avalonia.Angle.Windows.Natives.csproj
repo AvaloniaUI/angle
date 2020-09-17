@@ -13,28 +13,12 @@
 			<PackagePath>runtimes\native\win7-x64</PackagePath>
 		</Content>
 
-		<Content Include="..\out\x64\libegl.dll">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win7-x64</PackagePath>
-		</Content>
-
 		<Content Include="..\out\x86\libglesv2.dll">
 			<Pack>true</Pack>
 			<PackagePath>runtimes\native\win7-x86</PackagePath>
 		</Content>
 
-		<Content Include="..\out\x86\libegl.dll">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win7-x86</PackagePath>
-		</Content>
-
-
 		<Content Include="..\out\arm64\libglesv2.dll">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win-arm64</PackagePath>
-		</Content>
-
-		<Content Include="..\out\arm64\libegl.dll">
 			<Pack>true</Pack>
 			<PackagePath>runtimes\native\win-arm64</PackagePath>
 		</Content>
