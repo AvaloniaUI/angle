@@ -20,12 +20,6 @@ jobs:
         gclient sync
 
   - task: CmdLine@2
-    displayName: 'Clear Output Dir'
-    inputs:
-      script:  |
-        rmdir /Q /S out
-
-  - task: CmdLine@2
     displayName: 'Generate Ninja (arm64)'
     inputs:
       script: |
