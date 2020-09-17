@@ -24,6 +24,18 @@ jobs:
     inputs:
       script:  |
         rmdir /Q /S out
+
+  - task: CmdLine@2
+    displayName: 'Generate Ninja (arm64)'
+    inputs:
+      script: |
+        gn gen out/arm64 --args="is_debug=false is_clang=false target_cpu=\"arm64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false" 
+
+  - task: CmdLine@2
+    displayName: 'Build Angle (arm64)'
+    inputs:
+      script:  |
+        autoninja -C out/arm64 libGLESv2.dll.lib
       
   - task: CmdLine@2
     displayName: 'Generate Ninja (x64)'
@@ -50,16 +62,14 @@ jobs:
         autoninja -C out/x86 libGLESv2.dll.lib
 
   - task: CmdLine@2
-    displayName: 'Generate Ninja (arm64)'
-    inputs:
-      script: |
-        gn gen out/arm64 --args="is_debug=false is_clang=false target_cpu=\"arm64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false" 
-
-  - task: CmdLine@2
-    displayName: 'Build Angle (arm64)'
+    displayName: 'Build Angle (x86)'
     inputs:
       script:  |
-        autoninja -C out/arm64 libGLESv2.dll.lib
+        ren ./out/arm64/libGLESv2.dll av_libGLESv2.dll
+        ren ./out/x64/libGLESv2.dll av_libGLESv2.dll
+        ren ./out/x86/libGLESv2.dll av_libGLESv2.dll
+
+
 
   - task: CmdLine@2
     displayName: 'Generate Nuget Package'
