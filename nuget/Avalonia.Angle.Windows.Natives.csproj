@@ -4,23 +4,23 @@
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<Authors>Avalonia UI</Authors>
-		<PackageVersion>2.1.0.2020091702</PackageVersion>
+		<PackageVersion>2.1.0.2020091703</PackageVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<Content Include="..\out\x64\av_libglesv2.dll">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win7-x64</PackagePath>
+			<PackagePath>runtimes\win7-x64\native</PackagePath>
 		</Content>
 
 		<Content Include="..\out\x86\av_libglesv2.dll">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win7-x86</PackagePath>
+			<PackagePath>runtimes\win7-x86\native</PackagePath>
 		</Content>
 
 		<Content Include="..\out\arm64\av_libglesv2.dll">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\native\win-arm64</PackagePath>
+			<PackagePath>runtimes\win-arm64\native</PackagePath>
 		</Content>
 	</ItemGroup>
 
