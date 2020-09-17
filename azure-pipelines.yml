@@ -65,7 +65,7 @@ jobs:
     displayName: 'Clear Output Dir'
     inputs:
       script:  |
-        rmdir /Q /S '$(Build.SourcesDirectory)/artifacts'
+        rmdir /Q /S artifacts
 
   - task: CopyFiles@2
     inputs:
