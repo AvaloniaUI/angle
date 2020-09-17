@@ -72,35 +72,11 @@ jobs:
       sourceFolder: '$(Build.SourcesDirectory)/nuget/bin/Release/'
       contents: '*.nupkg' 
       targetFolder: '$(Build.SourcesDirectory)/artifacts/nuget'
-
-  - task: CopyFiles@2
-    inputs:
-      sourceFolder: '$(Build.SourcesDirectory)/out/x64'
-      contents: '*.pdb' 
-      targetFolder: '$(Build.SourcesDirectory)/artifacts/bin/x64'
-
-  - task: CopyFiles@2
-    inputs:
-      sourceFolder: '$(Build.SourcesDirectory)/out/x86'
-      contents: '*.pdb' 
-      targetFolder: '$(Build.SourcesDirectory)/artifacts/bin/x86'
-
-  - task: CopyFiles@2
-    inputs:
-      sourceFolder: '$(Build.SourcesDirectory)/out/arm64'
-      contents: '*.pdb' 
-      targetFolder: '$(Build.SourcesDirectory)/artifacts/bin/arm64'
         
   - task: PublishBuildArtifacts@1
     inputs:
       pathToPublish: '$(Build.SourcesDirectory)/artifacts/nuget'
       artifactName: 'Nuget'
-    condition: succeeded()
-
-  - task: PublishBuildArtifacts@1
-    inputs:
-      pathToPublish: '$(Build.SourcesDirectory)/artifacts/bin'
-      artifactName: 'PDBs'
     condition: succeeded()
 
 
