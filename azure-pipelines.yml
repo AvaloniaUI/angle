@@ -61,6 +61,12 @@ jobs:
       script:  |
         dotnet pack -c Release $(Build.SourcesDirectory)/nuget/Avalonia.Angle.Windows.Natives.csproj
 
+  - task: CmdLine@2
+    displayName: 'Clear Output Dir'
+    inputs:
+      script:  |
+        rmdir /Q /S $(Build.SourcesDirectory)/artifacts
+
   - task: CopyFiles@2
     inputs:
       sourceFolder: '$(Build.SourcesDirectory)/nuget/bin/Release/'
