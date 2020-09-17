@@ -94,13 +94,13 @@ jobs:
   - task: PublishBuildArtifacts@1
     inputs:
       pathToPublish: '$(Build.SourcesDirectory)/artifacts/nuget'
-      artifactName: 'Angle'
+      artifactName: 'Nuget'
     condition: succeeded()
 
   - task: PublishBuildArtifacts@1
     inputs:
       pathToPublish: '$(Build.SourcesDirectory)/artifacts/bin'
-      artifactName: 'Angle'
+      artifactName: 'PDBs'
     condition: succeeded()
 
 
