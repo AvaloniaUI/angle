@@ -18,6 +18,12 @@ jobs:
     inputs:
       script: |
         gclient sync
+
+  - task: CmdLine@2
+    displayName: 'Clear Output Dir'
+    inputs:
+      script:  |
+        rmdir /Q /S out
       
   - task: CmdLine@2
     displayName: 'Generate Ninja (x64)'
@@ -62,7 +68,7 @@ jobs:
         dotnet pack -c Release $(Build.SourcesDirectory)/nuget/Avalonia.Angle.Windows.Natives.csproj
 
   - task: CmdLine@2
-    displayName: 'Clear Output Dir'
+    displayName: 'Clear Artifacts Dir'
     inputs:
       script:  |
         rmdir /Q /S artifacts
