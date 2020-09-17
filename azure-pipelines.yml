@@ -29,7 +29,7 @@ jobs:
     displayName: 'Build Angle (x64)'
     inputs:
       script:  |
-        autoninja -C out/x64
+        autoninja -C out/x64 libGLESv2.dll.lib
 
   - task: CmdLine@2
     displayName: 'Generate Ninja (x86)'
@@ -41,7 +41,7 @@ jobs:
     displayName: 'Build Angle (x86)'
     inputs:
       script:  |
-        autoninja -C out/x86
+        autoninja -C out/x86 libGLESv2.dll.lib
 
   - task: CmdLine@2
     displayName: 'Generate Ninja (arm64)'
@@ -53,7 +53,7 @@ jobs:
     displayName: 'Build Angle (arm64)'
     inputs:
       script:  |
-        autoninja -C out/arm64
+        autoninja -C out/arm64 libGLESv2.dll.lib
 
   - task: CmdLine@2
     displayName: 'Generate Nuget Package'
