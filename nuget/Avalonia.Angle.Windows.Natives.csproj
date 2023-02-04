@@ -10,12 +10,12 @@
 	<ItemGroup>
 		<Content Include="..\out\x64\av_libglesv2.dll">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\win7-x64\native</PackagePath>
+			<PackagePath>runtimes\win-x64\native</PackagePath>
 		</Content>
 
 		<Content Include="..\out\x86\av_libglesv2.dll">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\win7-x86\native</PackagePath>
+			<PackagePath>runtimes\win-x86\native</PackagePath>
 		</Content>
 
 		<Content Include="..\out\arm64\av_libglesv2.dll">
