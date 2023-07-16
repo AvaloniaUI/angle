@@ -89,6 +89,20 @@ void main (void)
     o_color += u_color;
 })";
 
+// Coherent version of a 1.0 GLSL fragment shader that writes to 4 attachments with constant indices
+static constexpr char k100Coherent4AttachmentFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_EXT_draw_buffers : require
+uniform highp vec4 u_color;
+
+void main (void)
+{
+    gl_FragData[0] = gl_LastFragData[0] + u_color;
+    gl_FragData[1] = gl_LastFragData[1] + u_color;
+    gl_FragData[2] = gl_LastFragData[2] + u_color;
+    gl_FragData[3] = gl_LastFragData[3] + u_color;
+})";
+
 // Coherent version of a 3.1 GLSL fragment shader that writes to 4 attachments
 static constexpr char k310Coherent4AttachmentFS[] = R"(#version 310 es
 #extension GL_EXT_shader_framebuffer_fetch : require
@@ -157,6 +171,81 @@ void main (void)
     o_color3 += u_color;
 })";
 
+// Coherent version of a 1.0 GLSL fragment shader with complex interactions
+static constexpr char k100CoherentComplexFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_EXT_draw_buffers : require
+precision highp float;
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastFragData, vec4 color)
+{
+    return lastFragData + color;
+}
+
+void addLastFragData(inout vec4 outVar, vec4 lastFragData)
+{
+    outVar += lastFragData;
+}
+
+void main (void)
+{
+    // Leave gl_LastFragData[0] unused, as well as gl_LastFragData[2]
+    gl_FragData[0] = u_color;
+    gl_FragData[1] = addColor(gl_LastFragData[1], u_color);
+    gl_FragData[2] = u_color;
+    gl_FragData[3] = addColor(gl_LastFragData[3], u_color);
+
+    // Make sure gl_LastFragData is not clobbered by a write to gl_FragData.
+    gl_FragData[1] -= gl_LastFragData[1];
+    gl_FragData[3] -= gl_LastFragData[3];
+    // Test passing to inout variables.
+    addLastFragData(gl_FragData[1], gl_LastFragData[1]);
+    addLastFragData(gl_FragData[3], gl_LastFragData[3]);
+})";
+
+// Coherent version of a 3.1 GLSL fragment shader with complex interactions
+static constexpr char k310CoherentComplexFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch : require
+precision highp float;
+layout(location = 0) inout highp vec4 o_color0;
+layout(location = 1) inout highp vec4 o_color1;
+layout(location = 2) inout highp vec4 o_color2[2];
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastValue, vec4 color)
+{
+    return lastValue + color;
+}
+
+vec4 getColor2_1()
+{
+    return o_color2[1];
+}
+
+void addUniform(inout vec4 outVar)
+{
+    outVar += u_color;
+}
+
+void main (void)
+{
+    // o_color0 and o_color2[0] don't use the input value.
+    o_color0 = u_color;
+    o_color2[0] = u_color;
+
+    addUniform(o_color1);
+    addUniform(o_color2[1]);
+
+    // Make sure reading back from the output variables returns the latest value and not the
+    // original input value.
+    vec4 temp1 = o_color1;
+    vec4 temp3 = getColor2_1();
+
+    o_color1 = temp1;
+    o_color2[1] = temp3;
+})";
+
 // Shared Non-Coherent Fragment Shaders for the tests below
 //
 // Non-coherent version of a 1.0 GLSL fragment shader that uses gl_LastFragData
@@ -196,6 +285,22 @@ void main (void)
     uint index = uint(gl_FragCoord.y) * 16u + uint(gl_FragCoord.x);
     data[index] = o_color;
     o_color += u_color;
+})";
+
+// Non-coherent version of a 1.0 GLSL fragment shader that writes to 4 attachments with constant
+// indices
+static constexpr char k100NonCoherent4AttachmentFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch_non_coherent : require
+#extension GL_EXT_draw_buffers : require
+layout(noncoherent) mediump vec4 gl_LastFragData[gl_MaxDrawBuffers];
+uniform highp vec4 u_color;
+
+void main (void)
+{
+    gl_FragData[0] = gl_LastFragData[0] + u_color;
+    gl_FragData[1] = gl_LastFragData[1] + u_color;
+    gl_FragData[2] = gl_LastFragData[2] + u_color;
+    gl_FragData[3] = gl_LastFragData[3] + u_color;
 })";
 
 // Non-coherent version of a 3.1 GLSL fragment shader that writes to 4 attachments
@@ -266,7 +371,240 @@ void main (void)
     o_color3 += u_color;
 })";
 
-class FramebufferFetchES31 : public ANGLETest
+// Non-coherent version of a 1.0 GLSL fragment shader with complex interactions
+static constexpr char k100NonCoherentComplexFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch_non_coherent : require
+#extension GL_EXT_draw_buffers : require
+precision highp float;
+layout(noncoherent) mediump vec4 gl_LastFragData[gl_MaxDrawBuffers];
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastFragData, vec4 color)
+{
+    return lastFragData + color;
+}
+
+void addLastFragData(inout vec4 outVar, vec4 lastFragData)
+{
+    outVar += lastFragData;
+}
+
+void main (void)
+{
+    // Leave gl_LastFragData[0] unused, as well as gl_LastFragData[2]
+    gl_FragData[0] = u_color;
+    gl_FragData[1] = addColor(gl_LastFragData[1], u_color);
+    gl_FragData[2] = u_color;
+    gl_FragData[3] = addColor(gl_LastFragData[3], u_color);
+
+    // Make sure gl_LastFragData is not clobbered by a write to gl_FragData.
+    gl_FragData[1] -= gl_LastFragData[1];
+    gl_FragData[3] -= gl_LastFragData[3];
+    // Test passing to inout variables.
+    addLastFragData(gl_FragData[1], gl_LastFragData[1]);
+    addLastFragData(gl_FragData[3], gl_LastFragData[3]);
+})";
+
+// Non-coherent version of a 3.1 GLSL fragment shader with complex interactions
+static constexpr char k310NonCoherentComplexFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch_non_coherent : require
+precision highp float;
+layout(location = 0) out highp vec4 o_color0;
+layout(noncoherent, location = 1) inout highp vec4 o_color1;
+layout(noncoherent, location = 2) inout highp vec4 o_color2[2];
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastValue, vec4 color)
+{
+    return lastValue + color;
+}
+
+vec4 getColor2_1()
+{
+    return o_color2[1];
+}
+
+void addUniform(inout vec4 outVar)
+{
+    outVar += u_color;
+}
+
+void main (void)
+{
+    // o_color0 and o_color2[0] don't use the input value.
+    o_color0 = u_color;
+    o_color2[0] = u_color;
+
+    addUniform(o_color1);
+    addUniform(o_color2[1]);
+
+    // Make sure reading back from the output variables returns the latest value and not the
+    // original input value.
+    vec4 temp1 = o_color1;
+    vec4 temp3 = getColor2_1();
+
+    o_color1 = temp1;
+    o_color2[1] = temp3;
+})";
+
+// Shared Coherent Fragment Shaders for the tests below
+//
+// Coherent version of a 1.0 GLSL fragment shader that uses gl_LastFragColorARM
+static constexpr char k100ARMFS[] = R"(#version 100
+#extension GL_ARM_shader_framebuffer_fetch : require
+mediump vec4 gl_LastFragColorARM;
+uniform highp vec4 u_color;
+
+void main (void)
+{
+    gl_FragColor = u_color + gl_LastFragColorARM;
+})";
+
+// ARM version of a 3.1 GLSL fragment shader that writes to 1 attachment
+static constexpr char k310ARM1AttachmentFS[] = R"(#version 310 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+// ARM version of a 3.1 GLSL fragment shader that writes the output to a storage buffer.
+static constexpr char k310ARMStorageBuffer[] = R"(#version 310 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+layout(location = 0) out highp vec4 o_color;
+
+layout(std140, binding = 0) buffer outBlock {
+    highp vec4 data[256];
+};
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    uint index = uint(gl_FragCoord.y) * 16u + uint(gl_FragCoord.x);
+    data[index] = gl_LastFragColorARM;
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+// Variants that use both EXT and ARM simultaneously.  At least one app has been observed to do
+// this.
+static constexpr char k100BothFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_ARM_shader_framebuffer_fetch : require
+uniform highp vec4 u_color;
+
+void main (void)
+{
+    gl_FragColor = u_color + (gl_LastFragColorARM + gl_LastFragData[0]) / 2.;
+})";
+
+static constexpr char k310Both1AttachmentFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_ARM_shader_framebuffer_fetch : require
+inout highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + (o_color + gl_LastFragColorARM) / 2.;
+})";
+
+static constexpr char k100Both4AttachmentFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_ARM_shader_framebuffer_fetch : require
+#extension GL_EXT_draw_buffers : require
+uniform highp vec4 u_color;
+
+void main (void)
+{
+    gl_FragData[0] = (gl_LastFragData[0] + gl_LastFragColorARM) / 2. + u_color;
+    gl_FragData[1] = gl_LastFragData[1] + u_color;
+    gl_FragData[2] = gl_LastFragData[2] + u_color;
+    gl_FragData[3] = gl_LastFragData[3] + u_color;
+})";
+
+static constexpr char k100BothComplexFS[] = R"(#version 100
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_ARM_shader_framebuffer_fetch : require
+#extension GL_EXT_draw_buffers : require
+precision highp float;
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastFragData, vec4 color)
+{
+    return lastFragData + color;
+}
+
+void addLastFragData(inout vec4 outVar, vec4 lastFragData)
+{
+    outVar += lastFragData;
+}
+
+void main (void)
+{
+    // Leave gl_LastFragData[1] unused, as well as gl_LastFragData[3]
+    gl_FragData[0] = addColor((gl_LastFragData[0] + gl_LastFragColorARM) / 2., u_color);
+    gl_FragData[1] = u_color;
+    gl_FragData[2] = addColor(gl_LastFragData[2], u_color);
+    gl_FragData[3] = u_color;
+
+    // Make sure gl_LastFragData is not clobbered by a write to gl_FragData.
+    gl_FragData[0] -= gl_LastFragColorARM;
+    gl_FragData[2] -= gl_LastFragData[2];
+    // Test passing to inout variables.
+    addLastFragData(gl_FragData[0], gl_LastFragData[0]);
+    addLastFragData(gl_FragData[2], gl_LastFragData[2]);
+})";
+
+static constexpr char k310BothComplexFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch : require
+#extension GL_ARM_shader_framebuffer_fetch : require
+precision highp float;
+layout(location = 0) inout highp vec4 o_color0;
+layout(location = 1) inout highp vec4 o_color1;
+layout(location = 2) inout highp vec4 o_color2[2];
+uniform vec4 u_color;
+
+vec4 addColor(vec4 lastValue, vec4 color)
+{
+    return lastValue + color;
+}
+
+vec4 getColor2_0()
+{
+    return o_color2[0];
+}
+
+void addUniform(inout vec4 outVar)
+{
+    outVar += u_color;
+}
+
+void main (void)
+{
+    // o_color1 and o_color2[1] don't use the input value.
+    o_color1 = u_color;
+    o_color2[1] = u_color;
+
+    o_color0 = gl_LastFragColorARM + u_color;
+    addUniform(o_color2[0]);
+
+    // Make sure reading back from the output variables returns the latest value and not the
+    // original input value.
+    vec4 temp0 = o_color0;
+    vec4 temp2 = getColor2_0();
+
+    o_color0 = temp0;
+    o_color2[0] = temp2;
+
+    // Make sure gl_LastFragColorARM is not clobberred by the write to o_color0
+    if (gl_LastFragColorARM == o_color0)
+        o_color0 = vec4(0);
+})";
+
+class FramebufferFetchES31 : public ANGLETest<>
 {
   protected:
     static constexpr GLuint kMaxColorBuffer = 4u;
@@ -284,16 +622,22 @@ class FramebufferFetchES31 : public ANGLETest
         setConfigDepthBits(24);
 
         mCoherentExtension = false;
+        mARMExtension      = false;
+        mBothExtensions    = false;
     }
 
     enum WhichExtension
     {
         COHERENT,
         NON_COHERENT,
+        ARM,
+        BOTH,
     };
     void setWhichExtension(WhichExtension whichExtension)
     {
-        mCoherentExtension = (whichExtension == COHERENT) ? true : false;
+        mCoherentExtension = whichExtension != NON_COHERENT;
+        mARMExtension      = whichExtension == ARM;
+        mBothExtensions    = whichExtension == BOTH;
     }
 
     enum WhichFragmentShader
@@ -302,14 +646,56 @@ class FramebufferFetchES31 : public ANGLETest
         GLSL310_NO_FETCH_1ATTACHMENT,
         GLSL310_1ATTACHMENT,
         GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER,
+        GLSL100_4ATTACHMENT,
+        GLSL100_COMPLEX,
         GLSL310_4ATTACHMENT,
         GLSL310_4ATTACHMENT_ARRAY,
         GLSL310_4ATTACHMENT_DIFFERENT1,
         GLSL310_4ATTACHMENT_DIFFERENT2,
+        GLSL310_COMPLEX,
     };
     const char *getFragmentShader(WhichFragmentShader whichFragmentShader)
     {
-        if (mCoherentExtension)
+        if (mBothExtensions)
+        {
+            switch (whichFragmentShader)
+            {
+                case GLSL100:
+                    return k100BothFS;
+                case GLSL310_NO_FETCH_1ATTACHMENT:
+                    return k310NoFetch1AttachmentFS;
+                case GLSL310_1ATTACHMENT:
+                    return k310Both1AttachmentFS;
+                case GLSL100_4ATTACHMENT:
+                    return k100Both4AttachmentFS;
+                case GLSL100_COMPLEX:
+                    return k100BothComplexFS;
+                case GLSL310_COMPLEX:
+                    return k310BothComplexFS;
+                default:
+                    UNREACHABLE();
+                    return nullptr;
+            }
+        }
+        else if (mARMExtension)
+        {
+            // gl_LastFragColorARM cannot support multiple attachments
+            switch (whichFragmentShader)
+            {
+                case GLSL100:
+                    return k100ARMFS;
+                case GLSL310_NO_FETCH_1ATTACHMENT:
+                    return k310NoFetch1AttachmentFS;
+                case GLSL310_1ATTACHMENT:
+                    return k310ARM1AttachmentFS;
+                case GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER:
+                    return k310ARMStorageBuffer;
+                default:
+                    UNREACHABLE();
+                    return nullptr;
+            }
+        }
+        else if (mCoherentExtension)
         {
             switch (whichFragmentShader)
             {
@@ -321,6 +707,8 @@ class FramebufferFetchES31 : public ANGLETest
                     return k310Coherent1AttachmentFS;
                 case GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER:
                     return k310CoherentStorageBuffer;
+                case GLSL100_4ATTACHMENT:
+                    return k100Coherent4AttachmentFS;
                 case GLSL310_4ATTACHMENT:
                     return k310Coherent4AttachmentFS;
                 case GLSL310_4ATTACHMENT_ARRAY:
@@ -329,6 +717,10 @@ class FramebufferFetchES31 : public ANGLETest
                     return k310CoherentDifferent4AttachmentFS1;
                 case GLSL310_4ATTACHMENT_DIFFERENT2:
                     return k310CoherentDifferent4AttachmentFS2;
+                case GLSL100_COMPLEX:
+                    return k100CoherentComplexFS;
+                case GLSL310_COMPLEX:
+                    return k310CoherentComplexFS;
                 default:
                     UNREACHABLE();
                     return nullptr;
@@ -346,6 +738,8 @@ class FramebufferFetchES31 : public ANGLETest
                     return k310NonCoherent1AttachmentFS;
                 case GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER:
                     return k310NonCoherentStorageBuffer;
+                case GLSL100_4ATTACHMENT:
+                    return k100NonCoherent4AttachmentFS;
                 case GLSL310_4ATTACHMENT:
                     return k310NonCoherent4AttachmentFS;
                 case GLSL310_4ATTACHMENT_ARRAY:
@@ -354,6 +748,10 @@ class FramebufferFetchES31 : public ANGLETest
                     return k310NonCoherentDifferent4AttachmentFS1;
                 case GLSL310_4ATTACHMENT_DIFFERENT2:
                     return k310NonCoherentDifferent4AttachmentFS2;
+                case GLSL100_COMPLEX:
+                    return k100NonCoherentComplexFS;
+                case GLSL310_COMPLEX:
+                    return k310NonCoherentComplexFS;
                 default:
                     UNREACHABLE();
                     return nullptr;
@@ -424,14 +822,14 @@ class FramebufferFetchES31 : public ANGLETest
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
-    void MultipleRenderTargetTest(GLProgram &program)
+    void MultipleRenderTargetTest(GLProgram &program, WhichFragmentShader whichFragmentShader)
     {
         GLFramebuffer framebuffer;
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        std::vector<GLColor> color0(kViewportWidth * kViewportHeight, GLColor::black);
+        std::vector<GLColor> color0(kViewportWidth * kViewportHeight, GLColor::cyan);
         std::vector<GLColor> color1(kViewportWidth * kViewportHeight, GLColor::green);
         std::vector<GLColor> color2(kViewportWidth * kViewportHeight, GLColor::blue);
-        std::vector<GLColor> color3(kViewportWidth * kViewportHeight, GLColor::cyan);
+        std::vector<GLColor> color3(kViewportWidth * kViewportHeight, GLColor::black);
         GLTexture colorBufferTex[kMaxColorBuffer];
         GLenum colorAttachments[kMaxColorBuffer] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
                                                     GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
@@ -466,14 +864,40 @@ class FramebufferFetchES31 : public ANGLETest
 
         ASSERT_GL_NO_ERROR();
 
+        // All fragment shaders add the input color with the uniform.  Except the COMPLEX shaders
+        // which initialize attachments 0 and 2, or 1 and 3 with the uniform only (and don't use
+        // input attachments for these indices).
+        GLColor expect0 = GLColor::white;
+        GLColor expect1 = GLColor::yellow;
+        GLColor expect2 = GLColor::magenta;
+        GLColor expect3 = GLColor::red;
+        switch (whichFragmentShader)
+        {
+            case GLSL100_COMPLEX:
+            case GLSL310_COMPLEX:
+                if (mBothExtensions)
+                {
+                    expect1 = GLColor::red;
+                    expect3 = GLColor::red;
+                }
+                else
+                {
+                    expect0 = GLColor::red;
+                    expect2 = GLColor::red;
+                }
+                break;
+            default:
+                break;
+        }
+
         glReadBuffer(colorAttachments[0]);
-        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, expect0);
         glReadBuffer(colorAttachments[1]);
-        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::yellow);
+        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, expect1);
         glReadBuffer(colorAttachments[2]);
-        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, expect2);
         glReadBuffer(colorAttachments[3]);
-        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::white);
+        EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, expect3);
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
@@ -1230,6 +1654,8 @@ class FramebufferFetchES31 : public ANGLETest
     }
 
     bool mCoherentExtension;
+    bool mARMExtension;
+    bool mBothExtensions;
 };
 
 // Test coherent extension with inout qualifier
@@ -1288,6 +1714,51 @@ TEST_P(FramebufferFetchES31, BasicLastFragData_NonCoherent)
     BasicTest(program);
 }
 
+// Testing coherent extension with multiple render target, using gl_FragData with constant indices
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Coherent_FragData)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_4ATTACHMENT));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_4ATTACHMENT);
+}
+
+// Testing coherent extension with multiple render target, using gl_FragData with complex
+// expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Coherent_FragData_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_COMPLEX);
+}
+
+// Testing coherent extension with multiple render target, using inouts with complex expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Coherent_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k310VS, getFragmentShader(GLSL310_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL310_COMPLEX);
+}
+
 // Testing coherent extension with multiple render target
 TEST_P(FramebufferFetchES31, MultipleRenderTarget_Coherent)
 {
@@ -1299,7 +1770,53 @@ TEST_P(FramebufferFetchES31, MultipleRenderTarget_Coherent)
     glUseProgram(program);
     ASSERT_GL_NO_ERROR();
 
-    MultipleRenderTargetTest(program);
+    MultipleRenderTargetTest(program, GLSL310_4ATTACHMENT);
+}
+
+// Testing non-coherent extension with multiple render target, using gl_FragData with constant
+// indices
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_NonCoherent_FragData)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch_non_coherent"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(NON_COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_4ATTACHMENT));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_4ATTACHMENT);
+}
+
+// Testing non-coherent extension with multiple render target, using gl_FragData with complex
+// expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_NonCoherent_FragData_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch_non_coherent"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(NON_COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_COMPLEX);
+}
+
+// Testing non-coherent extension with multiple render target, using inouts with complex expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_NonCoherent_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch_non_coherent"));
+    setWhichExtension(NON_COHERENT);
+
+    GLProgram program;
+    program.makeRaster(k310VS, getFragmentShader(GLSL310_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL310_COMPLEX);
 }
 
 // Testing non-coherent extension with multiple render target
@@ -1313,7 +1830,7 @@ TEST_P(FramebufferFetchES31, MultipleRenderTarget_NonCoherent)
     glUseProgram(program);
     ASSERT_GL_NO_ERROR();
 
-    MultipleRenderTargetTest(program);
+    MultipleRenderTargetTest(program, GLSL310_4ATTACHMENT);
 }
 
 // Testing non-coherent extension with multiple render target using inout array
@@ -1327,7 +1844,7 @@ TEST_P(FramebufferFetchES31, MultipleRenderTargetWithInoutArray_NonCoherent)
     glUseProgram(program);
     ASSERT_GL_NO_ERROR();
 
-    MultipleRenderTargetTest(program);
+    MultipleRenderTargetTest(program, GLSL310_4ATTACHMENT);
 }
 
 // Testing coherent extension with multiple render target using inout array
@@ -1341,7 +1858,7 @@ TEST_P(FramebufferFetchES31, MultipleRenderTargetWithInoutArray_Coherent)
     glUseProgram(program);
     ASSERT_GL_NO_ERROR();
 
-    MultipleRenderTargetTest(program);
+    MultipleRenderTargetTest(program, GLSL310_4ATTACHMENT);
 }
 
 // Test coherent extension with multiple draw
@@ -2052,6 +2569,799 @@ void main (void)
     render(fetchPositionLocation, false);
     EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::yellow);
     ASSERT_GL_NO_ERROR();
+}
+
+// Verify that switching between single sampled framebuffer fetch and multi sampled framebuffer
+// fetch works fine
+TEST_P(FramebufferFetchES31, SingleSampledMultiSampledMixedTest)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(COHERENT);
+
+    // Create a program that fetches from the framebuffer
+    GLProgram fetchProgram;
+    fetchProgram.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    GLint positionLocation = glGetAttribLocation(fetchProgram, "a_position");
+    GLint colorLocation    = glGetUniformLocation(fetchProgram, "u_color");
+    ASSERT_GL_NO_ERROR();
+
+    // Create two single sampled framebuffer
+    GLRenderbuffer singleSampledRenderbuffer1;
+    glBindRenderbuffer(GL_RENDERBUFFER, singleSampledRenderbuffer1);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer singleSampledFramebuffer1;
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              singleSampledRenderbuffer1);
+
+    GLRenderbuffer singleSampledRenderbuffer2;
+    glBindRenderbuffer(GL_RENDERBUFFER, singleSampledRenderbuffer2);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer singleSampledFramebuffer2;
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              singleSampledRenderbuffer2);
+
+    // Create one multi sampled framebuffer
+    GLRenderbuffer multiSampledRenderbuffer;
+    glBindRenderbuffer(GL_RENDERBUFFER, multiSampledRenderbuffer);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer multiSampledFramebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              multiSampledRenderbuffer);
+
+    // Create a singlesampled render buffer for blit and read
+    GLRenderbuffer resolvedRbo;
+    glBindRenderbuffer(GL_RENDERBUFFER, resolvedRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer resolvedFbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, resolvedFbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, resolvedRbo);
+
+    // Clear three Framebuffers with different colors
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::black);
+
+    glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::blue);
+
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::green);
+
+    // Bind first single sampled framebuffer, draw once with red, fetching black from the
+    // framebuffer
+    glUseProgram(fetchProgram);
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    render(positionLocation, false);
+    ASSERT_GL_NO_ERROR();
+
+    // Bind the multi sampled framebuffer, draw once with red, fetching green from the framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    render(positionLocation, false);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    ASSERT_GL_NO_ERROR();
+
+    // Bind the single sampled framebuffer, draw once with red, fetching blue from the framebuffer
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    render(positionLocation, false);
+    ASSERT_GL_NO_ERROR();
+
+    // Verify the rendering result on all three framebuffers
+
+    // Verify the last framebuffer being drawn: singleSampledFramebuffer2
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+
+    // Verify the second last framebuffer being drawn: multisampledFramebuffer
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, multiSampledFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::yellow);
+
+    // Verify the first framebuffer being drawn: singleSampledFramebuffer1
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+}
+
+// Verify that calling glFramebufferFetchBarrierEXT without an open render pass is ok.
+TEST_P(FramebufferFetchES31, BarrierBeforeDraw)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch") ||
+                       !IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch_non_coherent"));
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+
+    glFramebufferFetchBarrierEXT();
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.0f);
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Test ARM extension with gl_LastFragColorARM
+TEST_P(FramebufferFetchES31, BasicLastFragData_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    BasicTest(program);
+}
+
+// Test ARM extension with multiple draw
+TEST_P(FramebufferFetchES31, MultipleDraw_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLProgram program;
+    program.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleDrawTest(program);
+}
+
+// Testing ARM extension with the order of non-fetch program and fetch program
+TEST_P(FramebufferFetchES31, DrawNonFetchDrawFetch_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    ASSERT_GL_NO_ERROR();
+
+    DrawNonFetchDrawFetchTest(programNonFetch, programFetch);
+}
+
+// Testing ARM extension with the order of fetch program and non-fetch program
+TEST_P(FramebufferFetchES31, DrawFetchDrawNonFetch_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    ASSERT_GL_NO_ERROR();
+
+    DrawFetchDrawNonFetchTest(programNonFetch, programFetch);
+}
+
+// Testing ARM extension with framebuffer fetch read in combination with color attachment mask
+TEST_P(FramebufferFetchES31, DrawNonFetchDrawFetchInStorageBuffer_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLint maxFragmentShaderStorageBlocks = 0;
+    glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &maxFragmentShaderStorageBlocks);
+    ANGLE_SKIP_TEST_IF(maxFragmentShaderStorageBlocks == 0);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER));
+    ASSERT_GL_NO_ERROR();
+
+    DrawNonFetchDrawFetchInStorageBufferTest(programNonFetch, programFetch,
+                                             StorageBufferTestPostFetchAction::Nothing);
+}
+
+// Testing ARM extension with framebuffer fetch read in combination with color attachment mask
+// and clear
+TEST_P(FramebufferFetchES31, DrawNonFetchDrawFetchInStorageBufferThenClear_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    GLint maxFragmentShaderStorageBlocks = 0;
+    glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &maxFragmentShaderStorageBlocks);
+    ANGLE_SKIP_TEST_IF(maxFragmentShaderStorageBlocks == 0);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT_WITH_STORAGE_BUFFER));
+    ASSERT_GL_NO_ERROR();
+
+    DrawNonFetchDrawFetchInStorageBufferTest(programNonFetch, programFetch,
+                                             StorageBufferTestPostFetchAction::Clear);
+}
+
+// Testing ARM extension with program pipeline
+TEST_P(FramebufferFetchES31, ProgramPipeline_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    ProgramPipelineTest(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT),
+                        getFragmentShader(GLSL310_1ATTACHMENT));
+}
+
+// Verify we can use the default framebuffer
+// http://anglebug.com/6893
+TEST_P(FramebufferFetchES31, DefaultFramebufferTest_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+
+    constexpr char kVS[] = R"(#version 300 es
+in highp vec4 a_position;
+
+void main (void)
+{
+    gl_Position = a_position;
+})";
+
+    constexpr char kFS[] = R"(#version 300 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+    GLProgram program;
+    program.makeRaster(kVS, kFS);
+    glUseProgram(program);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Ensure that we're rendering to the default framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Start with a clear buffer
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    GLint positionLocation = glGetAttribLocation(program, "a_position");
+    GLint colorLocation    = glGetUniformLocation(program, "u_color");
+
+    // Draw once with red
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    render(positionLocation, GL_FALSE);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+    ASSERT_GL_NO_ERROR();
+
+    // Draw again with blue, adding it to the existing red, ending up with magenta
+    glUniform4fv(colorLocation, 1, GLColor::blue.toNormalizedVector().data());
+    render(positionLocation, GL_FALSE);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Verify we can redeclare gl_LastFragColorARM with a new precision
+// http://anglebug.com/6893
+TEST_P(FramebufferFetchES31, NondefaultPrecisionTest_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+
+    constexpr char kVS[] = R"(#version 300 es
+in highp vec4 a_position;
+
+void main (void)
+{
+    gl_Position = a_position;
+})";
+
+    constexpr char kFS[] = R"(#version 300 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+highp vec4 gl_LastFragColorARM;
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+    GLProgram program;
+    program.makeRaster(kVS, kFS);
+    glUseProgram(program);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Ensure that we're rendering to the default framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Start with a clear buffer
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    GLint positionLocation = glGetAttribLocation(program, "a_position");
+    GLint colorLocation    = glGetUniformLocation(program, "u_color");
+
+    // Draw once with red
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    render(positionLocation, GL_FALSE);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+    ASSERT_GL_NO_ERROR();
+
+    // Draw again with blue, adding it to the existing red, ending up with magenta
+    glUniform4fv(colorLocation, 1, GLColor::blue.toNormalizedVector().data());
+    render(positionLocation, GL_FALSE);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Verify we can render to the default framebuffer without fetch, then switch to a program
+// that does fetch.
+// http://anglebug.com/6893
+TEST_P(FramebufferFetchES31, DefaultFramebufferMixedProgramsTest_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+
+    constexpr char kVS[] = R"(#version 300 es
+in highp vec4 a_position;
+
+void main (void)
+{
+    gl_Position = a_position;
+})";
+
+    constexpr char kFS[] = R"(#version 300 es
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color;
+})";
+
+    constexpr char kFetchFS[] = R"(#version 300 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+    // Create a program that simply writes out a color, no fetching
+    GLProgram program;
+    program.makeRaster(kVS, kFS);
+    glUseProgram(program);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Ensure that we're rendering to the default framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Start with a clear buffer
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    GLint positionLocation = glGetAttribLocation(program, "a_position");
+    GLint colorLocation    = glGetUniformLocation(program, "u_color");
+
+    // Draw once with red
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    render(positionLocation, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+    ASSERT_GL_NO_ERROR();
+
+    // Create another program that DOES fetch from the framebuffer
+    GLProgram program2;
+    program2.makeRaster(kVS, kFetchFS);
+    glUseProgram(program2);
+
+    GLint positionLocation2 = glGetAttribLocation(program2, "a_position");
+    GLint colorLocation2    = glGetUniformLocation(program2, "u_color");
+
+    // Draw again with blue, fetching red from the framebuffer, adding it together
+    glUniform4fv(colorLocation2, 1, GLColor::blue.toNormalizedVector().data());
+    render(positionLocation2, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+    ASSERT_GL_NO_ERROR();
+
+    // Switch back to the non-fetched framebuffer, and render green
+    glUseProgram(program);
+    glUniform4fv(colorLocation, 1, GLColor::green.toNormalizedVector().data());
+    render(positionLocation, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::green);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Verify we can render to a framebuffer with fetch, then switch to another framebuffer (without
+// changing programs) http://anglebug.com/6893
+TEST_P(FramebufferFetchES31, FramebufferMixedFetchTest_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+
+    constexpr char kVS[] = R"(#version 300 es
+in highp vec4 a_position;
+
+void main (void)
+{
+    gl_Position = a_position;
+})";
+
+    constexpr char kFS[] = R"(#version 300 es
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color;
+})";
+
+    constexpr char kFetchFS[] = R"(#version 300 es
+#extension GL_ARM_shader_framebuffer_fetch : require
+layout(location = 0) out highp vec4 o_color;
+
+uniform highp vec4 u_color;
+void main (void)
+{
+    o_color = u_color + gl_LastFragColorARM;
+})";
+
+    // Create a program that simply writes out a color, no fetching
+    GLProgram program;
+    program.makeRaster(kVS, kFS);
+    GLint positionLocation = glGetAttribLocation(program, "a_position");
+    GLint colorLocation    = glGetUniformLocation(program, "u_color");
+    ASSERT_GL_NO_ERROR();
+
+    // Create a program that DOES fetch from the framebuffer
+    GLProgram fetchProgram;
+    fetchProgram.makeRaster(kVS, kFetchFS);
+    GLint fetchPositionLocation = glGetAttribLocation(fetchProgram, "a_position");
+    GLint fetchColorLocation    = glGetUniformLocation(fetchProgram, "u_color");
+    ASSERT_GL_NO_ERROR();
+
+    // Create an empty framebuffer to use without fetch
+    GLFramebuffer framebuffer1;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer1);
+    std::vector<GLColor> clearColor(kViewportWidth * kViewportHeight, GLColor::transparentBlack);
+    GLTexture colorBufferTex1;
+    glBindTexture(GL_TEXTURE_2D, colorBufferTex1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kViewportWidth, kViewportHeight, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, clearColor.data());
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorBufferTex1, 0);
+    ASSERT_GL_NO_ERROR();
+
+    // Draw to it with green, without using fetch, overwriting any contents
+    glUseProgram(program);
+    glUniform4fv(colorLocation, 1, GLColor::green.toNormalizedVector().data());
+    render(positionLocation, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::green);
+    ASSERT_GL_NO_ERROR();
+
+    // Create another framebuffer to use WITH fetch, and initialize it with blue
+    GLFramebuffer framebuffer2;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer2);
+    std::vector<GLColor> blueColor(kViewportWidth * kViewportHeight, GLColor::blue);
+    GLTexture colorBufferTex2;
+    glBindTexture(GL_TEXTURE_2D, colorBufferTex2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kViewportWidth, kViewportHeight, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, blueColor.data());
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorBufferTex2, 0);
+    ASSERT_GL_NO_ERROR();
+
+    // Draw once with red, fetching blue from the framebuffer, adding it together
+    glUseProgram(fetchProgram);
+    glUniform4fv(fetchColorLocation, 1, GLColor::red.toNormalizedVector().data());
+    render(fetchPositionLocation, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+    ASSERT_GL_NO_ERROR();
+
+    // Now use the same program (WITH fetch) and render to the other framebuffer that was NOT used
+    // with fetch. This verifies the framebuffer state is appropriately updated to match the
+    // program.
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer1);
+    render(fetchPositionLocation, false);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::yellow);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Verify that switching between single sampled framebuffer fetch and multi sampled framebuffer
+// fetch works fine
+TEST_P(FramebufferFetchES31, SingleSampledMultiSampledMixedTest_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    setWhichExtension(ARM);
+
+    // Create a program that fetches from the framebuffer
+    GLProgram fetchProgram;
+    fetchProgram.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    GLint positionLocation = glGetAttribLocation(fetchProgram, "a_position");
+    GLint colorLocation    = glGetUniformLocation(fetchProgram, "u_color");
+    ASSERT_GL_NO_ERROR();
+
+    // Create two single sampled framebuffer
+    GLRenderbuffer singleSampledRenderbuffer1;
+    glBindRenderbuffer(GL_RENDERBUFFER, singleSampledRenderbuffer1);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer singleSampledFramebuffer1;
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              singleSampledRenderbuffer1);
+
+    GLRenderbuffer singleSampledRenderbuffer2;
+    glBindRenderbuffer(GL_RENDERBUFFER, singleSampledRenderbuffer2);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer singleSampledFramebuffer2;
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              singleSampledRenderbuffer2);
+
+    // Create one multi sampled framebuffer
+    GLRenderbuffer multiSampledRenderbuffer;
+    glBindRenderbuffer(GL_RENDERBUFFER, multiSampledRenderbuffer);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer multiSampledFramebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              multiSampledRenderbuffer);
+
+    // Create a singlesampled render buffer for blit and read
+    GLRenderbuffer resolvedRbo;
+    glBindRenderbuffer(GL_RENDERBUFFER, resolvedRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kViewportWidth, kViewportHeight);
+    GLFramebuffer resolvedFbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, resolvedFbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, resolvedRbo);
+
+    // Clear three Framebuffers with different colors
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::black);
+
+    glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::blue);
+
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::green);
+
+    // Bind first single sampled framebuffer, draw once with red, fetching black from the
+    // framebuffer
+    glUseProgram(fetchProgram);
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    render(positionLocation, false);
+    ASSERT_GL_NO_ERROR();
+
+    // Bind the multi sampled framebuffer, draw once with red, fetching green from the framebuffer
+    glBindFramebuffer(GL_FRAMEBUFFER, multiSampledFramebuffer);
+    render(positionLocation, false);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    ASSERT_GL_NO_ERROR();
+
+    // Bind the single sampled framebuffer, draw once with red, fetching blue from the framebuffer
+    glUniform4fv(colorLocation, 1, GLColor::red.toNormalizedVector().data());
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer2);
+    render(positionLocation, false);
+    ASSERT_GL_NO_ERROR();
+
+    // Verify the rendering result on all three framebuffers
+
+    // Verify the last framebuffer being drawn: singleSampledFramebuffer2
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::magenta);
+
+    // Verify the second last framebuffer being drawn: multisampledFramebuffer
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, multiSampledFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolvedFbo);
+    glBlitFramebuffer(0, 0, kViewportWidth, kViewportHeight, 0, 0, kViewportWidth, kViewportHeight,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, resolvedFbo);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::yellow);
+
+    // Verify the first framebuffer being drawn: singleSampledFramebuffer1
+    glBindFramebuffer(GL_FRAMEBUFFER, singleSampledFramebuffer1);
+    EXPECT_PIXEL_COLOR_EQ(kViewportWidth / 2, kViewportHeight / 2, GLColor::red);
+}
+
+// Test ARM extension with new tokens
+TEST_P(FramebufferFetchES31, BasicTokenUsage_ARM)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+
+    // GL_FETCH_PER_SAMPLE_ARM can be set and queried
+    GLboolean isFetchPerSampleEnabledBool = false;
+    GLint isFetchPerSampleEnabledInt      = -1;
+    GLfloat isFetchPerSampleEnabledFloat  = -1.0f;
+
+    // Set GL_FETCH_PER_SAMPLE_ARM true
+    glEnable(GL_FETCH_PER_SAMPLE_ARM);
+    EXPECT_GL_TRUE(glIsEnabled(GL_FETCH_PER_SAMPLE_ARM));
+
+    // Ensure it returns true
+    glGetBooleanv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledBool);
+    EXPECT_GL_TRUE(isFetchPerSampleEnabledBool);
+    glGetIntegerv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledInt);
+    ASSERT_EQ(isFetchPerSampleEnabledInt, 1);
+    glGetFloatv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledFloat);
+    ASSERT_EQ(isFetchPerSampleEnabledFloat, 1.0);
+
+    // Set GL_FETCH_PER_SAMPLE_ARM false
+    glDisable(GL_FETCH_PER_SAMPLE_ARM);
+    EXPECT_GL_FALSE(glIsEnabled(GL_FETCH_PER_SAMPLE_ARM));
+
+    // Ensure it returns false
+    glGetBooleanv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledBool);
+    EXPECT_GL_FALSE(isFetchPerSampleEnabledBool);
+    glGetIntegerv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledInt);
+    ASSERT_EQ(isFetchPerSampleEnabledInt, 0);
+    glGetFloatv(GL_FETCH_PER_SAMPLE_ARM, &isFetchPerSampleEnabledFloat);
+    ASSERT_EQ(isFetchPerSampleEnabledFloat, 0.0);
+
+    ASSERT_GL_NO_ERROR();
+
+    // GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM can only be queried
+    GLboolean isFragmentShaderFramebufferFetchMrtBool = false;
+    GLint isFragmentShaderFramebufferFetchMrtInt      = -1;
+    GLfloat isFragmentShaderFramebufferFetchMrtFloat  = -1.0f;
+
+    // Try to set it, ensure we can't
+    glEnable(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
+    glDisable(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
+
+    // Ensure we can't query its state with isEnabled
+    // Commented out due to http://anglebug.com/8025
+    // glIsEnabled(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM);
+    // EXPECT_GL_ERROR(GL_INVALID_ENUM);
+
+    // Ensure GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM returns false
+    glGetBooleanv(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM,
+                  &isFragmentShaderFramebufferFetchMrtBool);
+    EXPECT_GL_FALSE(isFragmentShaderFramebufferFetchMrtBool);
+    glGetIntegerv(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM,
+                  &isFragmentShaderFramebufferFetchMrtInt);
+    ASSERT_EQ(isFragmentShaderFramebufferFetchMrtInt, 0);
+    glGetFloatv(GL_FRAGMENT_SHADER_FRAMEBUFFER_FETCH_MRT_ARM,
+                &isFragmentShaderFramebufferFetchMrtFloat);
+    ASSERT_EQ(isFragmentShaderFramebufferFetchMrtFloat, 0.0);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test using both extensions simultaneously with gl_LastFragData and gl_LastFragColorARM
+TEST_P(FramebufferFetchES31, BasicLastFragData_Both)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(BOTH);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    BasicTest(program);
+}
+
+// Test using both extentions simultaneously with multiple draw
+TEST_P(FramebufferFetchES31, MultipleDraw_Both)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(BOTH);
+
+    GLProgram program;
+    program.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleDrawTest(program);
+}
+
+// Testing using both extentions simultaneously with the order of non-fetch program and fetch
+// program
+TEST_P(FramebufferFetchES31, DrawNonFetchDrawFetch_Both)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(BOTH);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    ASSERT_GL_NO_ERROR();
+
+    DrawNonFetchDrawFetchTest(programNonFetch, programFetch);
+}
+
+// Testing using both extentions simultaneously with the order of fetch program and non-fetch
+// program
+TEST_P(FramebufferFetchES31, DrawFetchDrawNonFetch_Both)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(BOTH);
+
+    GLProgram programNonFetch, programFetch;
+    programNonFetch.makeRaster(k310VS, getFragmentShader(GLSL310_NO_FETCH_1ATTACHMENT));
+    programFetch.makeRaster(k310VS, getFragmentShader(GLSL310_1ATTACHMENT));
+    ASSERT_GL_NO_ERROR();
+
+    DrawFetchDrawNonFetchTest(programNonFetch, programFetch);
+}
+
+// Testing using both extentions simultaneously with multiple render target, using gl_FragData with
+// constant indices
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Both_FragData)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(BOTH);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_4ATTACHMENT));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_4ATTACHMENT);
+}
+
+// Testing using both extentions simultaneously with multiple render target, using gl_FragData with
+// complex expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Both_FragData_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_draw_buffers"));
+    setWhichExtension(BOTH);
+
+    GLProgram program;
+    program.makeRaster(k100VS, getFragmentShader(GLSL100_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL100_COMPLEX);
+}
+
+// Testing using both extentions simultaneously with multiple render target, using inouts with
+// complex expressions
+TEST_P(FramebufferFetchES31, MultipleRenderTarget_Both_Complex)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ARM_shader_framebuffer_fetch"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+    setWhichExtension(BOTH);
+
+    GLProgram program;
+    program.makeRaster(k310VS, getFragmentShader(GLSL310_COMPLEX));
+    glUseProgram(program);
+    ASSERT_GL_NO_ERROR();
+
+    MultipleRenderTargetTest(program, GLSL310_COMPLEX);
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(FramebufferFetchES31);

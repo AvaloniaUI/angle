@@ -45,7 +45,7 @@ DisplayImpl::DisplayImpl(const egl::DisplayState &state)
 
 DisplayImpl::~DisplayImpl()
 {
-    ASSERT(mState.surfaceSet.empty());
+    ASSERT(mState.surfaceMap.empty());
 }
 
 egl::Error DisplayImpl::prepareForCall()
@@ -75,6 +75,11 @@ egl::Error DisplayImpl::handleGPUSwitch()
 }
 
 egl::Error DisplayImpl::forceGPUSwitch(EGLint gpuIDHigh, EGLint gpuIDLow)
+{
+    return egl::NoError();
+}
+
+egl::Error DisplayImpl::waitUntilWorkScheduled()
 {
     return egl::NoError();
 }
@@ -126,6 +131,16 @@ bool DisplayImpl::isX11() const
     return false;
 }
 
+bool DisplayImpl::isWayland() const
+{
+    return false;
+}
+
+bool DisplayImpl::isGBM() const
+{
+    return false;
+}
+
 bool DisplayImpl::supportsDmaBufFormat(EGLint format) const
 {
     UNREACHABLE();
@@ -147,5 +162,4 @@ egl::Error DisplayImpl::queryDmaBufModifiers(EGLint format,
     UNREACHABLE();
     return egl::NoError();
 }
-
 }  // namespace rx

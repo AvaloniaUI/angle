@@ -17,6 +17,8 @@
 namespace gl
 {
 class Context;
+class PrivateState;
+class ErrorSet;
 
 // GL_AMD_performance_monitor
 bool ValidateBeginPerfMonitorAMD(const Context *context,
@@ -94,7 +96,7 @@ bool ValidateDrawElementsInstancedBaseVertexBaseInstanceANGLE(const Context *con
                                                               PrimitiveMode modePacked,
                                                               GLsizei count,
                                                               DrawElementsType typePacked,
-                                                              const GLvoid *indices,
+                                                              const void *indices,
                                                               GLsizei instanceCount,
                                                               GLint baseVertex,
                                                               GLuint baseInstance);
@@ -111,11 +113,13 @@ bool ValidateMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(const Context
                                                                    PrimitiveMode modePacked,
                                                                    const GLsizei *counts,
                                                                    DrawElementsType typePacked,
-                                                                   const GLvoid *const *indices,
+                                                                   const void *const *indices,
                                                                    const GLsizei *instanceCounts,
                                                                    const GLint *baseVertices,
                                                                    const GLuint *baseInstances,
                                                                    GLsizei drawcount);
+
+// GL_ANGLE_clip_cull_distance
 
 // GL_ANGLE_copy_texture_3d
 bool ValidateCopyTexture3DANGLE(const Context *context,
@@ -228,6 +232,12 @@ bool ValidateVertexAttribDivisorANGLE(const Context *context,
                                       GLuint index,
                                       GLuint divisor);
 
+// GL_ANGLE_logic_op
+bool ValidateLogicOpANGLE(const PrivateState &state,
+                          ErrorSet *errors,
+                          angle::EntryPoint entryPoint,
+                          LogicalOperation opcodePacked);
+
 // GL_ANGLE_memory_object_flags
 bool ValidateTexStorageMemFlags2DANGLE(const Context *context,
                                        angle::EntryPoint entryPoint,
@@ -309,25 +319,35 @@ bool ValidateMultiDrawElementsANGLE(const Context *context,
                                     PrimitiveMode modePacked,
                                     const GLsizei *counts,
                                     DrawElementsType typePacked,
-                                    const GLvoid *const *indices,
+                                    const void *const *indices,
                                     GLsizei drawcount);
 bool ValidateMultiDrawElementsInstancedANGLE(const Context *context,
                                              angle::EntryPoint entryPoint,
                                              PrimitiveMode modePacked,
                                              const GLsizei *counts,
                                              DrawElementsType typePacked,
-                                             const GLvoid *const *indices,
+                                             const void *const *indices,
                                              const GLsizei *instanceCounts,
                                              GLsizei drawcount);
 
 // GL_ANGLE_pack_reverse_row_order
 
+// GL_ANGLE_polygon_mode
+bool ValidatePolygonModeANGLE(const PrivateState &state,
+                              ErrorSet *errors,
+                              angle::EntryPoint entryPoint,
+                              GLenum face,
+                              PolygonMode modePacked);
+
 // GL_ANGLE_program_binary
 
 // GL_ANGLE_provoking_vertex
-bool ValidateProvokingVertexANGLE(const Context *context,
+bool ValidateProvokingVertexANGLE(const PrivateState &state,
+                                  ErrorSet *errors,
                                   angle::EntryPoint entryPoint,
-                                  ProvokingVertexConvention modePacked);
+                                  ProvokingVertexConvention provokeModePacked);
+
+// GL_ANGLE_renderability_validation
 
 // GL_ANGLE_request_extension
 bool ValidateRequestExtensionANGLE(const Context *context,
@@ -527,7 +547,7 @@ bool ValidateCompressedTexImage2DRobustANGLE(const Context *context,
                                              GLint border,
                                              GLsizei imageSize,
                                              GLsizei dataSize,
-                                             const GLvoid *data);
+                                             const void *data);
 bool ValidateCompressedTexSubImage2DRobustANGLE(const Context *context,
                                                 angle::EntryPoint entryPoint,
                                                 TextureTarget targetPacked,
@@ -539,7 +559,7 @@ bool ValidateCompressedTexSubImage2DRobustANGLE(const Context *context,
                                                 GLenum format,
                                                 GLsizei imageSize,
                                                 GLsizei dataSize,
-                                                const GLvoid *data);
+                                                const void *data);
 bool ValidateCompressedTexImage3DRobustANGLE(const Context *context,
                                              angle::EntryPoint entryPoint,
                                              TextureTarget targetPacked,
@@ -551,7 +571,7 @@ bool ValidateCompressedTexImage3DRobustANGLE(const Context *context,
                                              GLint border,
                                              GLsizei imageSize,
                                              GLsizei dataSize,
-                                             const GLvoid *data);
+                                             const void *data);
 bool ValidateCompressedTexSubImage3DRobustANGLE(const Context *context,
                                                 angle::EntryPoint entryPoint,
                                                 TextureTarget targetPacked,
@@ -565,7 +585,7 @@ bool ValidateCompressedTexSubImage3DRobustANGLE(const Context *context,
                                                 GLenum format,
                                                 GLsizei imageSize,
                                                 GLsizei dataSize,
-                                                const GLvoid *data);
+                                                const void *data);
 bool ValidateGetQueryivRobustANGLE(const Context *context,
                                    angle::EntryPoint entryPoint,
                                    QueryType targetPacked,
@@ -845,6 +865,69 @@ bool ValidateImportSemaphoreZirconHandleANGLE(const Context *context,
                                               HandleType handleTypePacked,
                                               GLuint handle);
 
+// GL_ANGLE_shader_pixel_local_storage
+bool ValidateFramebufferMemorylessPixelLocalStorageANGLE(const Context *context,
+                                                         angle::EntryPoint entryPoint,
+                                                         GLint plane,
+                                                         GLenum internalformat);
+bool ValidateFramebufferTexturePixelLocalStorageANGLE(const Context *context,
+                                                      angle::EntryPoint entryPoint,
+                                                      GLint plane,
+                                                      TextureID backingtexturePacked,
+                                                      GLint level,
+                                                      GLint layer);
+bool ValidateFramebufferPixelLocalClearValuefvANGLE(const Context *context,
+                                                    angle::EntryPoint entryPoint,
+                                                    GLint plane,
+                                                    const GLfloat *value);
+bool ValidateFramebufferPixelLocalClearValueivANGLE(const Context *context,
+                                                    angle::EntryPoint entryPoint,
+                                                    GLint plane,
+                                                    const GLint *value);
+bool ValidateFramebufferPixelLocalClearValueuivANGLE(const Context *context,
+                                                     angle::EntryPoint entryPoint,
+                                                     GLint plane,
+                                                     const GLuint *value);
+bool ValidateBeginPixelLocalStorageANGLE(const Context *context,
+                                         angle::EntryPoint entryPoint,
+                                         GLsizei n,
+                                         const GLenum *loadops);
+bool ValidateEndPixelLocalStorageANGLE(const Context *context,
+                                       angle::EntryPoint entryPoint,
+                                       GLsizei n,
+                                       const GLenum *storeops);
+bool ValidatePixelLocalStorageBarrierANGLE(const Context *context, angle::EntryPoint entryPoint);
+bool ValidateFramebufferPixelLocalStorageInterruptANGLE(const Context *context,
+                                                        angle::EntryPoint entryPoint);
+bool ValidateFramebufferPixelLocalStorageRestoreANGLE(const Context *context,
+                                                      angle::EntryPoint entryPoint);
+bool ValidateGetFramebufferPixelLocalStorageParameterfvANGLE(const Context *context,
+                                                             angle::EntryPoint entryPoint,
+                                                             GLint plane,
+                                                             GLenum pname,
+                                                             const GLfloat *params);
+bool ValidateGetFramebufferPixelLocalStorageParameterivANGLE(const Context *context,
+                                                             angle::EntryPoint entryPoint,
+                                                             GLint plane,
+                                                             GLenum pname,
+                                                             const GLint *params);
+bool ValidateGetFramebufferPixelLocalStorageParameterfvRobustANGLE(const Context *context,
+                                                                   angle::EntryPoint entryPoint,
+                                                                   GLint plane,
+                                                                   GLenum pname,
+                                                                   GLsizei bufSize,
+                                                                   const GLsizei *length,
+                                                                   const GLfloat *params);
+bool ValidateGetFramebufferPixelLocalStorageParameterivRobustANGLE(const Context *context,
+                                                                   angle::EntryPoint entryPoint,
+                                                                   GLint plane,
+                                                                   GLenum pname,
+                                                                   GLsizei bufSize,
+                                                                   const GLsizei *length,
+                                                                   const GLint *params);
+
+// GL_ANGLE_stencil_texturing
+
 // GL_ANGLE_texture_compression_dxt3
 
 // GL_ANGLE_texture_compression_dxt5
@@ -878,7 +961,8 @@ bool ValidateGetMultisamplefvANGLE(const Context *context,
                                    GLenum pname,
                                    GLuint index,
                                    const GLfloat *val);
-bool ValidateSampleMaskiANGLE(const Context *context,
+bool ValidateSampleMaskiANGLE(const PrivateState &state,
+                              ErrorSet *errors,
                               angle::EntryPoint entryPoint,
                               GLuint maskNumber,
                               GLbitfield mask);
@@ -889,7 +973,7 @@ bool ValidateSampleMaskiANGLE(const Context *context,
 bool ValidateGetTranslatedShaderSourceANGLE(const Context *context,
                                             angle::EntryPoint entryPoint,
                                             ShaderProgramID shaderPacked,
-                                            GLsizei bufsize,
+                                            GLsizei bufSize,
                                             const GLsizei *length,
                                             const GLchar *source);
 
@@ -908,6 +992,8 @@ bool ValidateReleaseTexturesANGLE(const Context *context,
 // GL_APPLE_clip_distance
 
 // GL_ARB_sync
+
+// GL_ARM_shader_framebuffer_fetch
 
 // GL_CHROMIUM_bind_uniform_location
 bool ValidateBindUniformLocationCHROMIUM(const Context *context,
@@ -953,7 +1039,8 @@ bool ValidateCopySubTextureCHROMIUM(const Context *context,
                                     GLboolean unpackUnmultiplyAlpha);
 
 // GL_CHROMIUM_framebuffer_mixed_samples
-bool ValidateCoverageModulationCHROMIUM(const Context *context,
+bool ValidateCoverageModulationCHROMIUM(const PrivateState &state,
+                                        ErrorSet *errors,
                                         angle::EntryPoint entryPoint,
                                         GLenum components);
 
@@ -969,12 +1056,12 @@ bool ValidateLoseContextCHROMIUM(const Context *context,
 bool ValidateEGLImageTargetTexStorageEXT(const Context *context,
                                          angle::EntryPoint entryPoint,
                                          GLenum target,
-                                         GLeglImageOES image,
+                                         egl::ImageID imagePacked,
                                          const GLint *attrib_list);
 bool ValidateEGLImageTargetTextureStorageEXT(const Context *context,
                                              angle::EntryPoint entryPoint,
                                              GLuint texture,
-                                             GLeglImageOES image,
+                                             egl::ImageID imagePacked,
                                              const GLint *attrib_list);
 
 // GL_EXT_YUV_target
@@ -989,9 +1076,9 @@ bool ValidateDrawArraysInstancedBaseInstanceEXT(const Context *context,
                                                 GLuint baseinstance);
 bool ValidateDrawElementsInstancedBaseInstanceEXT(const Context *context,
                                                   angle::EntryPoint entryPoint,
-                                                  GLenum mode,
+                                                  PrimitiveMode modePacked,
                                                   GLsizei count,
-                                                  GLenum type,
+                                                  DrawElementsType typePacked,
                                                   const void *indices,
                                                   GLsizei instancecount,
                                                   GLuint baseinstance);
@@ -1038,16 +1125,19 @@ bool ValidateBufferStorageEXT(const Context *context,
                               GLbitfield flags);
 
 // GL_EXT_clip_control
-bool ValidateClipControlEXT(const Context *context,
+bool ValidateClipControlEXT(const PrivateState &state,
+                            ErrorSet *errors,
                             angle::EntryPoint entryPoint,
-                            GLenum origin,
-                            GLenum depth);
+                            ClipOrigin originPacked,
+                            ClipDepthMode depthPacked);
 
 // GL_EXT_clip_cull_distance
 
 // GL_EXT_color_buffer_float
 
 // GL_EXT_color_buffer_half_float
+
+// GL_EXT_conservative_depth
 
 // GL_EXT_copy_image
 bool ValidateCopyImageSubDataEXT(const Context *context,
@@ -1093,6 +1183,8 @@ bool ValidatePushGroupMarkerEXT(const Context *context,
                                 angle::EntryPoint entryPoint,
                                 GLsizei length,
                                 const GLchar *marker);
+
+// GL_EXT_depth_clamp
 
 // GL_EXT_discard_framebuffer
 bool ValidateDiscardFramebufferEXT(const Context *context,
@@ -1159,43 +1251,51 @@ bool ValidateDrawBuffersEXT(const Context *context,
                             const GLenum *bufs);
 
 // GL_EXT_draw_buffers_indexed
-bool ValidateBlendEquationSeparateiEXT(const Context *context,
+bool ValidateBlendEquationSeparateiEXT(const PrivateState &state,
+                                       ErrorSet *errors,
                                        angle::EntryPoint entryPoint,
                                        GLuint buf,
                                        GLenum modeRGB,
                                        GLenum modeAlpha);
-bool ValidateBlendEquationiEXT(const Context *context,
+bool ValidateBlendEquationiEXT(const PrivateState &state,
+                               ErrorSet *errors,
                                angle::EntryPoint entryPoint,
                                GLuint buf,
                                GLenum mode);
-bool ValidateBlendFuncSeparateiEXT(const Context *context,
+bool ValidateBlendFuncSeparateiEXT(const PrivateState &state,
+                                   ErrorSet *errors,
                                    angle::EntryPoint entryPoint,
                                    GLuint buf,
                                    GLenum srcRGB,
                                    GLenum dstRGB,
                                    GLenum srcAlpha,
                                    GLenum dstAlpha);
-bool ValidateBlendFunciEXT(const Context *context,
+bool ValidateBlendFunciEXT(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLuint buf,
                            GLenum src,
                            GLenum dst);
-bool ValidateColorMaskiEXT(const Context *context,
+bool ValidateColorMaskiEXT(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLuint index,
                            GLboolean r,
                            GLboolean g,
                            GLboolean b,
                            GLboolean a);
-bool ValidateDisableiEXT(const Context *context,
+bool ValidateDisableiEXT(const PrivateState &state,
+                         ErrorSet *errors,
                          angle::EntryPoint entryPoint,
                          GLenum target,
                          GLuint index);
-bool ValidateEnableiEXT(const Context *context,
+bool ValidateEnableiEXT(const PrivateState &state,
+                        ErrorSet *errors,
                         angle::EntryPoint entryPoint,
                         GLenum target,
                         GLuint index);
-bool ValidateIsEnablediEXT(const Context *context,
+bool ValidateIsEnablediEXT(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLenum target,
                            GLuint index);
@@ -1231,7 +1331,7 @@ bool ValidateMultiDrawElementsBaseVertexEXT(const Context *context,
                                             const GLsizei *count,
                                             DrawElementsType typePacked,
                                             const void *const *indices,
-                                            GLsizei primcount,
+                                            GLsizei drawcount,
                                             const GLint *basevertex);
 
 // GL_EXT_external_buffer
@@ -1412,10 +1512,21 @@ bool ValidateRenderbufferStorageMultisampleEXT(const Context *context,
                                                GLsizei width,
                                                GLsizei height);
 
+// GL_EXT_multisampled_render_to_texture2
+
 // GL_EXT_occlusion_query_boolean
 
+// GL_EXT_polygon_offset_clamp
+bool ValidatePolygonOffsetClampEXT(const PrivateState &state,
+                                   ErrorSet *errors,
+                                   angle::EntryPoint entryPoint,
+                                   GLfloat factor,
+                                   GLfloat units,
+                                   GLfloat clamp);
+
 // GL_EXT_primitive_bounding_box
-bool ValidatePrimitiveBoundingBoxEXT(const Context *context,
+bool ValidatePrimitiveBoundingBoxEXT(const PrivateState &state,
+                                     ErrorSet *errors,
                                      angle::EntryPoint entryPoint,
                                      GLfloat minX,
                                      GLfloat minY,
@@ -1431,6 +1542,8 @@ bool ValidatePrimitiveBoundingBoxEXT(const Context *context,
 // GL_EXT_pvrtc_sRGB
 
 // GL_EXT_read_format_bgra
+
+// GL_EXT_render_snorm
 
 // GL_EXT_robustness
 bool ValidateGetGraphicsResetStatusEXT(const Context *context, angle::EntryPoint entryPoint);
@@ -1783,7 +1896,8 @@ bool ValidateFramebufferFetchBarrierEXT(const Context *context, angle::EntryPoin
 // GL_EXT_shadow_samplers
 
 // GL_EXT_tessellation_shader
-bool ValidatePatchParameteriEXT(const Context *context,
+bool ValidatePatchParameteriEXT(const PrivateState &state,
+                                ErrorSet *errors,
                                 angle::EntryPoint entryPoint,
                                 GLenum pname,
                                 GLint value);
@@ -1844,6 +1958,8 @@ bool ValidateTexBufferRangeEXT(const Context *context,
                                GLintptr offset,
                                GLsizeiptr size);
 
+// GL_EXT_texture_compression_astc_decode_mode
+
 // GL_EXT_texture_compression_bptc
 
 // GL_EXT_texture_compression_dxt1
@@ -1858,9 +1974,13 @@ bool ValidateTexBufferRangeEXT(const Context *context,
 
 // GL_EXT_texture_filter_anisotropic
 
+// GL_EXT_texture_filter_minmax
+
 // GL_EXT_texture_format_BGRA8888
 
 // GL_EXT_texture_format_sRGB_override
+
+// GL_EXT_texture_mirror_clamp_to_edge
 
 // GL_EXT_texture_norm16
 
@@ -2042,7 +2162,16 @@ bool ValidateBlitFramebufferNV(const Context *context,
 
 // GL_NV_pixel_buffer_object
 
+// GL_NV_polygon_mode
+bool ValidatePolygonModeNV(const PrivateState &state,
+                           ErrorSet *errors,
+                           angle::EntryPoint entryPoint,
+                           GLenum face,
+                           PolygonMode modePacked);
+
 // GL_NV_read_depth
+
+// GL_NV_read_depth_stencil
 
 // GL_NV_read_stencil
 
@@ -2054,17 +2183,19 @@ bool ValidateBlitFramebufferNV(const Context *context,
 bool ValidateEGLImageTargetRenderbufferStorageOES(const Context *context,
                                                   angle::EntryPoint entryPoint,
                                                   GLenum target,
-                                                  GLeglImageOES image);
+                                                  egl::ImageID imagePacked);
 bool ValidateEGLImageTargetTexture2DOES(const Context *context,
                                         angle::EntryPoint entryPoint,
                                         TextureType targetPacked,
-                                        GLeglImageOES image);
+                                        egl::ImageID imagePacked);
 
 // GL_OES_EGL_image_external
 
 // GL_OES_EGL_image_external_essl3
 
 // GL_OES_compressed_ETC1_RGB8_texture
+
+// GL_OES_compressed_paletted_texture
 
 // GL_OES_copy_image
 bool ValidateCopyImageSubDataOES(const Context *context,
@@ -2092,43 +2223,51 @@ bool ValidateCopyImageSubDataOES(const Context *context,
 // GL_OES_depth_texture
 
 // GL_OES_draw_buffers_indexed
-bool ValidateBlendEquationSeparateiOES(const Context *context,
+bool ValidateBlendEquationSeparateiOES(const PrivateState &state,
+                                       ErrorSet *errors,
                                        angle::EntryPoint entryPoint,
                                        GLuint buf,
                                        GLenum modeRGB,
                                        GLenum modeAlpha);
-bool ValidateBlendEquationiOES(const Context *context,
+bool ValidateBlendEquationiOES(const PrivateState &state,
+                               ErrorSet *errors,
                                angle::EntryPoint entryPoint,
                                GLuint buf,
                                GLenum mode);
-bool ValidateBlendFuncSeparateiOES(const Context *context,
+bool ValidateBlendFuncSeparateiOES(const PrivateState &state,
+                                   ErrorSet *errors,
                                    angle::EntryPoint entryPoint,
                                    GLuint buf,
                                    GLenum srcRGB,
                                    GLenum dstRGB,
                                    GLenum srcAlpha,
                                    GLenum dstAlpha);
-bool ValidateBlendFunciOES(const Context *context,
+bool ValidateBlendFunciOES(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLuint buf,
                            GLenum src,
                            GLenum dst);
-bool ValidateColorMaskiOES(const Context *context,
+bool ValidateColorMaskiOES(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLuint index,
                            GLboolean r,
                            GLboolean g,
                            GLboolean b,
                            GLboolean a);
-bool ValidateDisableiOES(const Context *context,
+bool ValidateDisableiOES(const PrivateState &state,
+                         ErrorSet *errors,
                          angle::EntryPoint entryPoint,
                          GLenum target,
                          GLuint index);
-bool ValidateEnableiOES(const Context *context,
+bool ValidateEnableiOES(const PrivateState &state,
+                        ErrorSet *errors,
                         angle::EntryPoint entryPoint,
                         GLenum target,
                         GLuint index);
-bool ValidateIsEnablediOES(const Context *context,
+bool ValidateIsEnablediOES(const PrivateState &state,
+                           ErrorSet *errors,
                            angle::EntryPoint entryPoint,
                            GLenum target,
                            GLuint index);
@@ -2341,7 +2480,8 @@ bool ValidatePointSizePointerOES(const Context *context,
 // GL_OES_point_sprite
 
 // GL_OES_primitive_bounding_box
-bool ValidatePrimitiveBoundingBoxOES(const Context *context,
+bool ValidatePrimitiveBoundingBoxOES(const PrivateState &state,
+                                     ErrorSet *errors,
                                      angle::EntryPoint entryPoint,
                                      GLfloat minX,
                                      GLfloat minY,
@@ -2361,7 +2501,8 @@ bool ValidateQueryMatrixxOES(const Context *context,
 // GL_OES_rgb8_rgba8
 
 // GL_OES_sample_shading
-bool ValidateMinSampleShadingOES(const Context *context,
+bool ValidateMinSampleShadingOES(const PrivateState &state,
+                                 ErrorSet *errors,
                                  angle::EntryPoint entryPoint,
                                  GLfloat value);
 
@@ -2609,8 +2750,13 @@ bool ValidateFramebufferTextureMultiviewOVR(const Context *context,
 
 // GL_OVR_multiview2
 
+// GL_QCOM_render_shared_exponent
+
 // GL_QCOM_shading_rate
-bool ValidateShadingRateQCOM(const Context *context, angle::EntryPoint entryPoint, GLenum rate);
+bool ValidateShadingRateQCOM(const PrivateState &state,
+                             ErrorSet *errors,
+                             angle::EntryPoint entryPoint,
+                             GLenum rate);
 }  // namespace gl
 
 #endif  // LIBANGLE_VALIDATION_ESEXT_AUTOGEN_H_

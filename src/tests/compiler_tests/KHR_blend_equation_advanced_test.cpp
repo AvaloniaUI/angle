@@ -165,10 +165,11 @@ class KHRBlendEquationAdvancedTest : public sh::ShaderExtensionTest
         const char *shaderStrings[] = {testing::get<1>(GetParam()), pragma,
                                        testing::get<2>(GetParam())};
 
-        ShCompileOptions compileFlags = SH_VARIABLES | SH_OBJECT_CODE;
+        ShCompileOptions compileFlags = {};
+        compileFlags.objectCode       = true;
         if (emulate == Emulation::Enabled)
         {
-            compileFlags |= SH_ADD_ADVANCED_BLEND_EQUATIONS_EMULATION;
+            compileFlags.addAdvancedBlendEquationsEmulation = true;
         }
 
         bool success = sh::Compile(mCompilerList[shaderOutputType], shaderStrings, 3, compileFlags);

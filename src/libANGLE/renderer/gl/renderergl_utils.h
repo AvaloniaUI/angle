@@ -63,6 +63,7 @@ struct SwapControlData
 };
 
 VendorID GetVendorID(const FunctionsGL *functions);
+ShShaderOutput GetShaderOutputType(const FunctionsGL *functions);
 
 // Helpers for extracting the GL helper objects out of a context
 const FunctionsGL *GetFunctionsGL(const gl::Context *context);
@@ -83,6 +84,13 @@ angle::Result CheckError(const gl::Context *context,
                          const char *file,
                          const char *function,
                          unsigned int line);
+// Propagates a single error, marking it as handled, and checks for more errors.
+angle::Result HandleError(const gl::Context *context,
+                          GLenum error,
+                          const char *call,
+                          const char *file,
+                          const char *function,
+                          unsigned int line);
 
 #define ANGLE_GL_TRY_ALWAYS_CHECK(context, call)                      \
     (ClearErrors(context, __FILE__, __FUNCTION__, __LINE__), (call)); \
@@ -104,7 +112,8 @@ void GenerateCaps(const FunctionsGL *functions,
                   gl::Extensions *extensions,
                   gl::Limitations *limitations,
                   gl::Version *maxSupportedESVersion,
-                  MultiviewImplementationTypeGL *multiviewImplementationType);
+                  MultiviewImplementationTypeGL *multiviewImplementationType,
+                  ShPixelLocalStorageOptions *);
 
 void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *features);
 void InitializeFrontendFeatures(const FunctionsGL *functions, angle::FrontendFeatures *features);

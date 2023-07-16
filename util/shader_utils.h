@@ -80,6 +80,9 @@ ANGLE_UTIL_EXPORT const char *Zero();
 // A shader that sets gl_Position to attribute a_position.
 ANGLE_UTIL_EXPORT const char *Simple();
 
+// A shader that sets gl_Position to attribute a_position, and sets gl_PointSize to 1.
+ANGLE_UTIL_EXPORT const char *SimpleForPoints();
+
 // A shader that passes through attribute a_position, setting it to gl_Position and varying
 // v_position.
 ANGLE_UTIL_EXPORT const char *Passthrough();
@@ -87,6 +90,7 @@ ANGLE_UTIL_EXPORT const char *Passthrough();
 // A shader that simply passes through attribute a_position, setting it to gl_Position and varying
 // texcoord.
 ANGLE_UTIL_EXPORT const char *Texture2D();
+ANGLE_UTIL_EXPORT const char *Texture2DArray();
 
 }  // namespace vs
 
@@ -116,6 +120,7 @@ ANGLE_UTIL_EXPORT const char *Blue();
 
 // A shader that samples the texture
 ANGLE_UTIL_EXPORT const char *Texture2D();
+ANGLE_UTIL_EXPORT const char *Texture2DArray();
 
 }  // namespace fs
 }  // namespace essl1_shaders
@@ -135,6 +140,9 @@ ANGLE_UTIL_EXPORT const char *Zero();
 
 // A shader that sets gl_Position to attribute a_position.
 ANGLE_UTIL_EXPORT const char *Simple();
+
+// A shader that sets gl_Position to attribute a_position, and sets gl_PointSize to 1.
+ANGLE_UTIL_EXPORT const char *SimpleForPoints();
 
 // A shader that simply passes through attribute a_position, setting it to gl_Position and varying
 // v_position.

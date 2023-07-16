@@ -14,7 +14,7 @@
 #include "libANGLE/State.h"
 #include "libANGLE/angletypes.h"
 #include "libANGLE/renderer/gl/functionsgl_typedefs.h"
-#include "platform/FeaturesGL_autogen.h"
+#include "platform/autogen/FeaturesGL_autogen.h"
 
 #include <array>
 #include <map>
@@ -59,13 +59,18 @@ struct ExternalContextState
     GLfloat lineWidth;
     GLfloat polygonOffsetFactor;
     GLfloat polygonOffsetUnits;
+    GLfloat polygonOffsetClamp;
     GLfloat sampleCoverageValue;
     bool sampleCoverageInvert;
     GLenum blendEquationRgb;
     GLenum blendEquationAlpha;
 
     bool enableDither;
+    GLenum polygonMode;
+    bool enablePolygonOffsetPoint;
+    bool enablePolygonOffsetLine;
     bool enablePolygonOffsetFill;
+    bool enableDepthClamp;
     bool enableSampleAlphaToCoverage;
     bool enableSampleCoverage;
     bool multisampleEnabled;
@@ -77,6 +82,8 @@ struct ExternalContextState
     GLenum blendDestAlpha;
     GLenum activeTexture;
     gl::Rectangle viewport;
+    GLenum clipOrigin;
+    GLenum clipDepthMode;
     bool scissorTest;
     gl::Rectangle scissorBox;
 
@@ -198,6 +205,7 @@ class StateManagerGL final : angle::NonCopyable
 
     void setViewport(const gl::Rectangle &viewport);
     void setDepthRange(float near, float far);
+    void setClipControl(gl::ClipOrigin origin, gl::ClipDepthMode depth);
 
     void setBlendEnabled(bool enabled);
     void setBlendEnabledIndexed(const gl::DrawBufferMask blendEnabledMask);
@@ -225,8 +233,12 @@ class StateManagerGL final : angle::NonCopyable
     void setCullFaceEnabled(bool enabled);
     void setCullFace(gl::CullFaceMode cullFace);
     void setFrontFace(GLenum frontFace);
+    void setPolygonMode(gl::PolygonMode mode);
+    void setPolygonOffsetPointEnabled(bool enabled);
+    void setPolygonOffsetLineEnabled(bool enabled);
     void setPolygonOffsetFillEnabled(bool enabled);
-    void setPolygonOffset(float factor, float units);
+    void setPolygonOffset(float factor, float units, float clamp);
+    void setDepthClampEnabled(bool enabled);
     void setRasterizerDiscardEnabled(bool enabled);
     void setLineWidth(float width);
 
@@ -259,7 +271,10 @@ class StateManagerGL final : angle::NonCopyable
 
     void setProvokingVertex(GLenum mode);
 
-    void setClipDistancesEnable(const gl::State::ClipDistanceEnableBits &enables);
+    void setClipDistancesEnable(const gl::ClipDistanceEnableBits &enables);
+
+    void setLogicOpEnabled(bool enabled);
+    void setLogicOp(gl::LogicalOperation opcode);
 
     void pauseTransformFeedback();
     angle::Result pauseAllQueries(const gl::Context *context);
@@ -269,8 +284,10 @@ class StateManagerGL final : angle::NonCopyable
     angle::Result onMakeCurrent(const gl::Context *context);
 
     angle::Result syncState(const gl::Context *context,
-                            const gl::State::DirtyBits &glDirtyBits,
-                            const gl::State::DirtyBits &bitMask);
+                            const gl::state::DirtyBits &glDirtyBits,
+                            const gl::state::DirtyBits &bitMask,
+                            const gl::state::ExtendedDirtyBits &extendedDirtyBits,
+                            const gl::state::ExtendedDirtyBits &extendedBitMask);
 
     ANGLE_INLINE void updateMultiviewBaseViewLayerIndexUniform(
         const gl::Program *program,
@@ -326,6 +343,10 @@ class StateManagerGL final : angle::NonCopyable
     void syncSamplersState(const gl::Context *context);
     void syncTransformFeedbackState(const gl::Context *context);
 
+    void updateEmulatedClipDistanceState(const gl::ProgramExecutable *executable,
+                                         const gl::Program *program,
+                                         const gl::ClipDistanceEnableBits enables) const;
+
     void updateMultiviewBaseViewLayerIndexUniformImpl(
         const gl::Program *program,
         const gl::FramebufferState &drawFramebufferState) const;
@@ -369,6 +390,7 @@ class StateManagerGL final : angle::NonCopyable
 
     GLuint mProgram;
 
+    const bool mSupportsVertexArrayObjects;
     GLuint mVAO;
     std::vector<gl::VertexAttribCurrentValueData> mVertexAttribCurrentValues;
 
@@ -441,12 +463,17 @@ class StateManagerGL final : angle::NonCopyable
     // TODO(jmadill): Convert to std::array when available
     std::vector<GLenum> mFramebuffers;
     GLuint mRenderbuffer;
+    GLuint mPlaceholderFbo;
+    GLuint mPlaceholderRbo;
 
     bool mScissorTestEnabled;
     gl::Rectangle mScissor;
     gl::Rectangle mViewport;
     float mNear;
     float mFar;
+
+    gl::ClipOrigin mClipOrigin;
+    gl::ClipDepthMode mClipDepthMode;
 
     gl::ColorF mBlendColor;
     gl::BlendStateExt mBlendStateExt;
@@ -481,9 +508,14 @@ class StateManagerGL final : angle::NonCopyable
     bool mCullFaceEnabled;
     gl::CullFaceMode mCullFace;
     GLenum mFrontFace;
+    gl::PolygonMode mPolygonMode;
+    bool mPolygonOffsetPointEnabled;
+    bool mPolygonOffsetLineEnabled;
     bool mPolygonOffsetFillEnabled;
     GLfloat mPolygonOffsetFactor;
     GLfloat mPolygonOffsetUnits;
+    GLfloat mPolygonOffsetClamp;
+    bool mDepthClampEnabled;
     bool mRasterizerDiscardEnabled;
     float mLineWidth;
 
@@ -510,10 +542,14 @@ class StateManagerGL final : angle::NonCopyable
 
     GLenum mProvokingVertex;
 
-    gl::State::ClipDistanceEnableBits mEnabledClipDistances;
+    gl::ClipDistanceEnableBits mEnabledClipDistances;
     const size_t mMaxClipDistances;
 
-    gl::State::DirtyBits mLocalDirtyBits;
+    bool mLogicOpEnabled;
+    gl::LogicalOperation mLogicOp;
+
+    gl::state::DirtyBits mLocalDirtyBits;
+    gl::state::ExtendedDirtyBits mLocalExtendedDirtyBits;
     gl::AttributesMask mLocalDirtyCurrentValues;
 };
 

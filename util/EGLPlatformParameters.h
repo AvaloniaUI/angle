@@ -10,7 +10,7 @@
 
 #include "util/util_gl.h"
 
-#include "angle_features_autogen.h"
+#include "autogen/angle_features_autogen.h"
 
 #include <string>
 #include <tuple>
@@ -27,9 +27,19 @@ struct PlatformMethods;
 enum class GLESDriverType
 {
     AngleEGL,
+    AngleVulkanSecondariesEGL,
     SystemEGL,
     SystemWGL,
+    ZinkEGL,
 };
+
+inline bool IsANGLE(angle::GLESDriverType driverType)
+{
+    return driverType == angle::GLESDriverType::AngleEGL ||
+           driverType == angle::GLESDriverType::AngleVulkanSecondariesEGL;
+}
+
+GLESDriverType GetDriverTypeFromString(const char *driverName, GLESDriverType defaultDriverType);
 }  // namespace angle
 
 struct EGLPlatformParameters

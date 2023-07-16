@@ -84,6 +84,15 @@ struct FogParameters
     ColorF color;
 };
 
+struct AlphaTestParameters
+{
+    AlphaTestParameters();
+    bool operator!=(const AlphaTestParameters &other) const;
+
+    AlphaTestFunc func = AlphaTestFunc::AlwaysPass;
+    GLfloat ref        = 0.0f;
+};
+
 struct TextureEnvironmentParameters
 {
     TextureEnvironmentParameters();
@@ -116,7 +125,17 @@ struct TextureEnvironmentParameters
     GLfloat alphaScale = 1.0f;
 
     bool pointSpriteCoordReplace = false;
+
+    auto tie() const
+    {
+        return std::tie(mode, combineRgb, combineAlpha, src0Rgb, src0Alpha, src1Rgb, src1Alpha,
+                        src2Rgb, src2Alpha, op0Rgb, op0Alpha, op1Rgb, op1Alpha, op2Rgb, op2Alpha,
+                        color, rgbScale, alphaScale, pointSpriteCoordReplace);
+    }
 };
+
+bool operator==(const TextureEnvironmentParameters &a, const TextureEnvironmentParameters &b);
+bool operator!=(const TextureEnvironmentParameters &a, const TextureEnvironmentParameters &b);
 
 struct PointParameters
 {
@@ -143,7 +162,7 @@ struct ClipPlaneParameters
 
 class Context;
 class GLES1Renderer;
-class State;
+class PrivateState;
 
 class GLES1State final : angle::NonCopyable
 {
@@ -151,9 +170,11 @@ class GLES1State final : angle::NonCopyable
     GLES1State();
     ~GLES1State();
 
-    void initialize(const Context *context, const State *state);
+    void initialize(const Context *context, const PrivateState *state);
 
-    void setAlphaFunc(AlphaTestFunc func, GLfloat ref);
+    void setAlphaTestParameters(AlphaTestFunc func, GLfloat ref);
+    const AlphaTestParameters &getAlphaTestParameters() const;
+
     void setClientTextureUnit(unsigned int unit);
     unsigned int getClientTextureUnit() const;
 
@@ -184,6 +205,7 @@ class GLES1State final : angle::NonCopyable
     void loadMatrix(const angle::Mat4 &m);
     void multMatrix(const angle::Mat4 &m);
 
+    void setLogicOpEnabled(bool enabled);
     void setLogicOp(LogicalOperation opcodePacked);
 
     void setClientStateEnabled(ClientVertexArrayType clientState, bool enable);
@@ -249,11 +271,11 @@ class GLES1State final : angle::NonCopyable
     void setAllDirty() { mDirtyBits.set(); }
 
   private:
-    friend class State;
+    friend class PrivateState;
     friend class GLES1Renderer;
 
     // Back pointer for reading from State.
-    const State *mGLState;
+    const PrivateState *mGLState;
 
     using DirtyBits = angle::BitSet<DIRTY_GLES1_MAX>;
     DirtyBits mDirtyBits;
@@ -321,8 +343,7 @@ class GLES1State final : angle::NonCopyable
     PointParameters mPointParameters;
 
     // Table 6.16
-    AlphaTestFunc mAlphaTestFunc;
-    GLfloat mAlphaTestRef;
+    AlphaTestParameters mAlphaTestParameters;
     LogicalOperation mLogicOp;
 
     // Table 6.7

@@ -16,9 +16,9 @@
     void drawTransformFeedbackStream(GLenum mode, TransformFeedbackID idPacked, GLuint stream);    \
     void endQueryIndexed(GLenum target, GLuint index);                                             \
     void getActiveSubroutineName(ShaderProgramID programPacked, GLenum shadertype, GLuint index,   \
-                                 GLsizei bufsize, GLsizei *length, GLchar *name);                  \
+                                 GLsizei bufSize, GLsizei *length, GLchar *name);                  \
     void getActiveSubroutineUniformName(ShaderProgramID programPacked, GLenum shadertype,          \
-                                        GLuint index, GLsizei bufsize, GLsizei *length,            \
+                                        GLuint index, GLsizei bufSize, GLsizei *length,            \
                                         GLchar *name);                                             \
     void getActiveSubroutineUniformiv(ShaderProgramID programPacked, GLenum shadertype,            \
                                       GLuint index, GLenum pname, GLint *values);                  \
@@ -103,14 +103,6 @@
     void scissorArrayv(GLuint first, GLsizei count, const GLint *v);                               \
     void scissorIndexed(GLuint index, GLint left, GLint bottom, GLsizei width, GLsizei height);    \
     void scissorIndexedv(GLuint index, const GLint *v);                                            \
-    void vertexAttribL1d(GLuint index, GLdouble x);                                                \
-    void vertexAttribL1dv(GLuint index, const GLdouble *v);                                        \
-    void vertexAttribL2d(GLuint index, GLdouble x, GLdouble y);                                    \
-    void vertexAttribL2dv(GLuint index, const GLdouble *v);                                        \
-    void vertexAttribL3d(GLuint index, GLdouble x, GLdouble y, GLdouble z);                        \
-    void vertexAttribL3dv(GLuint index, const GLdouble *v);                                        \
-    void vertexAttribL4d(GLuint index, GLdouble x, GLdouble y, GLdouble z, GLdouble w);            \
-    void vertexAttribL4dv(GLuint index, const GLdouble *v);                                        \
     void vertexAttribLPointer(GLuint index, GLint size, GLenum type, GLsizei stride,               \
                               const void *pointer);                                                \
     void viewportArrayv(GLuint first, GLsizei count, const GLfloat *v);                            \
@@ -126,8 +118,8 @@
                          const void *data);                                                        \
     void clearBufferSubData(GLenum target, GLenum internalformat, GLintptr offset,                 \
                             GLsizeiptr size, GLenum format, GLenum type, const void *data);        \
-    void getInternalformati64v(GLenum target, GLenum internalformat, GLenum pname,                 \
-                               GLsizei bufSize, GLint64 *params);                                  \
+    void getInternalformati64v(GLenum target, GLenum internalformat, GLenum pname, GLsizei count,  \
+                               GLint64 *params);                                                   \
     void invalidateBufferData(BufferID bufferPacked);                                              \
     void invalidateBufferSubData(BufferID bufferPacked, GLintptr offset, GLsizeiptr length);       \
     void invalidateTexImage(TextureID texturePacked, GLint level);                                 \
@@ -350,7 +342,6 @@
                                       GLsizei maxdrawcount, GLsizei stride);                       \
     void multiDrawElementsIndirectCount(GLenum mode, GLenum type, const void *indirect,            \
                                         GLintptr drawcount, GLsizei maxdrawcount, GLsizei stride); \
-    void polygonOffsetClamp(GLfloat factor, GLfloat units, GLfloat clamp);                         \
     void specializeShader(GLuint shader, const GLchar *pEntryPoint,                                \
                           GLuint numSpecializationConstants, const GLuint *pConstantIndex,         \
                           const GLuint *pConstantValue);

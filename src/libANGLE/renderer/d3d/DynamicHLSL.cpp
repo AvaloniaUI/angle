@@ -10,7 +10,7 @@
 
 #include "common/string_utils.h"
 #include "common/utilities.h"
-#include "compiler/translator/blocklayoutHLSL.h"
+#include "compiler/translator/hlsl/blocklayoutHLSL.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/Shader.h"
@@ -318,14 +318,32 @@ std::string DynamicHLSL::generateVertexShaderForInputLayout(
 std::string DynamicHLSL::generatePixelShaderForOutputSignature(
     const std::string &sourceShader,
     const std::vector<PixelShaderOutputVariable> &outputVariables,
-    bool usesFragDepth,
-    const std::vector<GLenum> &outputLayout,
+    FragDepthUsage fragDepthUsage,
+    bool usesSampleMask,
+    const std::pair<bool, const std::vector<GLenum>> &outputLayoutKey,
     const std::vector<ShaderStorageBlock> &shaderStorageBlocks,
     size_t baseUAVRegister) const
 {
     const int shaderModel      = mRenderer->getMajorShaderModel();
     std::string targetSemantic = (shaderModel >= 4) ? "SV_TARGET" : "COLOR";
-    std::string depthSemantic  = (shaderModel >= 4) ? "SV_Depth" : "DEPTH";
+    std::string depthSemantic  = [shaderModel, fragDepthUsage]() {
+        if (shaderModel < 4)
+        {
+            return "DEPTH";
+        }
+        switch (fragDepthUsage)
+        {
+            case FragDepthUsage::Less:
+                return "SV_DepthLessEqual";
+            case FragDepthUsage::Greater:
+                return "SV_DepthGreaterEqual";
+            default:
+                return "SV_Depth";
+        }
+    }();
+
+    const bool multisampling                = outputLayoutKey.first;
+    const std::vector<GLenum> &outputLayout = outputLayoutKey.second;
 
     std::ostringstream declarationStream;
     std::ostringstream copyStream;
@@ -374,10 +392,17 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
         }
     }
 
-    if (usesFragDepth)
+    if (fragDepthUsage != FragDepthUsage::Unused)
     {
         declarationStream << "    float gl_Depth : " << depthSemantic << ";\n";
         copyStream << "    output.gl_Depth = gl_Depth; \n";
+    }
+
+    // Do not write to SV_Coverage when rendering to single-sampled targets
+    if (multisampling && usesSampleMask)
+    {
+        declarationStream << "    uint sampleMask : SV_Coverage;\n";
+        copyStream << "    output.sampleMask = gl_SampleMask[0];\n";
     }
 
     declarationStream << "};\n"
@@ -390,6 +415,11 @@ std::string DynamicHLSL::generatePixelShaderForOutputSignature(
                          "}\n";
 
     std::string pixelHLSL(sourceShader);
+
+    if (multisampling)
+    {
+        pixelHLSL.insert(0, "#define ANGLE_MULTISAMPLING\n");
+    }
 
     bool success =
         angle::ReplaceSubstring(&pixelHLSL, PIXEL_OUTPUT_STUB_STRING, declarationStream.str());
@@ -433,6 +463,28 @@ void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
     if (builtins.glPosition.enabled)
     {
         hlslStream << "    float4 gl_Position : " << builtins.glPosition.str() << ";\n";
+    }
+
+    if (builtins.glClipDistance.enabled)
+    {
+        ASSERT(builtins.glClipDistance.indexOrSize > 0 && builtins.glClipDistance.indexOrSize < 9);
+        for (unsigned int i = 0; i < (builtins.glClipDistance.indexOrSize + 3) >> 2; i++)
+        {
+            unsigned int size = std::min(builtins.glClipDistance.indexOrSize - 4u * i, 4u);
+            hlslStream << "    float" << ((size == 1) ? "" : Str(size)) << " gl_ClipDistance" << i
+                       << " : " << builtins.glClipDistance.str() << i << ";\n";
+        }
+    }
+
+    if (builtins.glCullDistance.enabled)
+    {
+        ASSERT(builtins.glCullDistance.indexOrSize > 0 && builtins.glCullDistance.indexOrSize < 9);
+        for (unsigned int i = 0; i < (builtins.glCullDistance.indexOrSize + 3) >> 2; i++)
+        {
+            unsigned int size = std::min(builtins.glCullDistance.indexOrSize - 4u * i, 4u);
+            hlslStream << "    float" << ((size == 1) ? "" : Str(size)) << " gl_CullDistance" << i
+                       << " : " << builtins.glCullDistance.str() << i << ";\n";
+        }
     }
 
     if (builtins.glFragCoord.enabled)
@@ -481,11 +533,20 @@ void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
             case sh::INTERPOLATION_FLAT:
                 hlslStream << "    nointerpolation ";
                 break;
+            case sh::INTERPOLATION_NOPERSPECTIVE:
+                hlslStream << "    noperspective ";
+                break;
             case sh::INTERPOLATION_CENTROID:
                 hlslStream << "    centroid ";
                 break;
             case sh::INTERPOLATION_SAMPLE:
                 hlslStream << "    sample ";
+                break;
+            case sh::INTERPOLATION_NOPERSPECTIVE_CENTROID:
+                hlslStream << "    noperspective centroid ";
+                break;
+            case sh::INTERPOLATION_NOPERSPECTIVE_SAMPLE:
+                hlslStream << "    noperspective sample ";
                 break;
             default:
                 UNREACHABLE();
@@ -502,12 +563,6 @@ void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
     // in pixel shader inputs even when they are in vertex/geometry shader outputs, and the pixel
     // shader input struct must be a prefix of the vertex/geometry shader output struct.
 
-    if (builtins.glViewportIndex.enabled)
-    {
-        hlslStream << "    nointerpolation uint gl_ViewportIndex : "
-                   << builtins.glViewportIndex.str() << ";\n";
-    }
-
     if (builtins.glLayer.enabled)
     {
         hlslStream << "    nointerpolation uint gl_Layer : " << builtins.glLayer.str() << ";\n";
@@ -516,7 +571,8 @@ void DynamicHLSL::generateVaryingLinkHLSL(const VaryingPacking &varyingPacking,
     hlslStream << "};\n";
 }
 
-void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
+void DynamicHLSL::generateShaderLinkHLSL(const gl::Context *context,
+                                         const gl::Caps &caps,
                                          const gl::ProgramState &programData,
                                          const ProgramD3DMetadata &programMetadata,
                                          const VaryingPacking &varyingPacking,
@@ -573,20 +629,100 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         vertexGenerateOutput << "    output.gl_Position = gl_Position;\n";
     }
 
+    if (vertexBuiltins.glClipDistance.enabled)
+    {
+        ASSERT(vertexBuiltins.glClipDistance.indexOrSize > 0 &&
+               vertexBuiltins.glClipDistance.indexOrSize < 9);
+        vertexGenerateOutput << "    output.gl_ClipDistance0 = (clipDistancesEnabled & ";
+        switch (vertexBuiltins.glClipDistance.indexOrSize)
+        {
+            case 1:
+                vertexGenerateOutput << "1) ? (float)gl_ClipDistance : 0;\n";
+                break;
+            case 2:
+                vertexGenerateOutput << "int2(1, 2)) ? (float2)gl_ClipDistance : 0;\n";
+                break;
+            case 3:
+                vertexGenerateOutput << "int3(1, 2, 4)) ? (float3)gl_ClipDistance : 0;\n";
+                break;
+            default:
+                vertexGenerateOutput << "int4(1, 2, 4, 8)) ? (float4)gl_ClipDistance : 0;\n";
+                break;
+        }
+        if (vertexBuiltins.glClipDistance.indexOrSize > 4)
+        {
+            vertexGenerateOutput << "    output.gl_ClipDistance1 = (clipDistancesEnabled & ";
+            switch (vertexBuiltins.glClipDistance.indexOrSize)
+            {
+                case 5:
+                    vertexGenerateOutput << "16) ? gl_ClipDistance[4] : 0;\n";
+                    break;
+                case 6:
+                    vertexGenerateOutput << "int2(16, 32)) ? "
+                                            "((float2[3])gl_ClipDistance)[2] : 0;\n";
+                    break;
+                case 7:
+                    vertexGenerateOutput << "int3(16, 32, 64)) ? float3(gl_ClipDistance[4], "
+                                            "gl_ClipDistance[5], gl_ClipDistance[6]) : 0;\n";
+                    break;
+                case 8:
+                    vertexGenerateOutput << "int4(16, 32, 64, 128)) ? "
+                                            "((float4[2])gl_ClipDistance)[1] : 0;\n";
+                    break;
+            }
+        }
+    }
+
+    if (vertexBuiltins.glCullDistance.enabled)
+    {
+        ASSERT(vertexBuiltins.glCullDistance.indexOrSize > 0 &&
+               vertexBuiltins.glCullDistance.indexOrSize < 9);
+        vertexGenerateOutput << "    output.gl_CullDistance0 = ";
+        switch (vertexBuiltins.glCullDistance.indexOrSize)
+        {
+            case 1:
+                vertexGenerateOutput << "(float)gl_CullDistance;\n";
+                break;
+            case 2:
+                vertexGenerateOutput << "(float2)gl_CullDistance;\n";
+                break;
+            case 3:
+                vertexGenerateOutput << "(float3)gl_CullDistance;\n";
+                break;
+            default:
+                vertexGenerateOutput << "(float4)gl_CullDistance;\n";
+                break;
+        }
+        if (vertexBuiltins.glCullDistance.indexOrSize > 4)
+        {
+            vertexGenerateOutput << "    output.gl_CullDistance1 = ";
+            switch (vertexBuiltins.glCullDistance.indexOrSize)
+            {
+                case 5:
+                    vertexGenerateOutput << "gl_CullDistance[4];\n";
+                    break;
+                case 6:
+                    vertexGenerateOutput << "((float2[3])gl_CullDistance)[2];\n";
+                    break;
+                case 7:
+                    vertexGenerateOutput << "float3(gl_CullDistance[4], "
+                                            "gl_CullDistance[5], gl_CullDistance[6]);\n";
+                    break;
+                case 8:
+                    vertexGenerateOutput << "((float4[2])gl_CullDistance)[1];\n";
+                    break;
+            }
+        }
+    }
+
     if (vertexBuiltins.glViewIDOVR.enabled)
     {
         vertexGenerateOutput << "    output.gl_ViewID_OVR = ViewID_OVR;\n";
     }
-    if (programMetadata.hasANGLEMultiviewEnabled() && programMetadata.canSelectViewInVertexShader())
+    if (programMetadata.hasMultiviewEnabled() && programMetadata.canSelectViewInVertexShader())
     {
-        ASSERT(vertexBuiltins.glViewportIndex.enabled && vertexBuiltins.glLayer.enabled);
-        vertexGenerateOutput << "    if (multiviewSelectViewportIndex)\n"
-                             << "    {\n"
-                             << "         output.gl_ViewportIndex = ViewID_OVR;\n"
-                             << "    } else {\n"
-                             << "         output.gl_ViewportIndex = 0;\n"
-                             << "         output.gl_Layer = ViewID_OVR;\n"
-                             << "    }\n";
+        ASSERT(vertexBuiltins.glLayer.enabled);
+        vertexGenerateOutput << "    output.gl_Layer = ViewID_OVR;\n";
     }
 
     // On D3D9 or D3D11 Feature Level 9, we need to emulate large viewports using dx_ViewAdjust.
@@ -743,7 +879,7 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
 
     if (vertexShaderGL)
     {
-        std::string vertexSource = vertexShaderGL->getTranslatedSource();
+        std::string vertexSource = vertexShaderGL->getTranslatedSource(context);
         angle::ReplaceSubstring(&vertexSource, std::string(MAIN_PROLOGUE_STUB_STRING),
                                 "    initAttributes(input);\n");
         angle::ReplaceSubstring(&vertexSource, std::string(VERTEX_OUTPUT_STUB_STRING),
@@ -773,15 +909,20 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         // Certain Shader Models (4_0+ and 3_0) allow reading from dx_Position in the pixel shader.
         // Other Shader Models (4_0_level_9_3 and 2_x) don't support this, so we emulate it using
         // dx_ViewCoords.
+        // DComp usually gives us an offset at (0, 0), but this is not always the case. It is
+        // valid for DComp to give us an offset into the texture atlas. In that scenario, we
+        // need to offset gl_FragCoord using dx_FragCoordOffset to point to the correct location
+        // of the pixel.
         if (shaderModel >= 4 && mRenderer->getShaderModelSuffix() == "")
         {
-            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x;\n"
-                          << "    gl_FragCoord.y = input.dx_Position.y;\n";
+            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x - dx_FragCoordOffset.x;\n"
+                          << "    gl_FragCoord.y = input.dx_Position.y - dx_FragCoordOffset.y;\n";
         }
         else if (shaderModel == 3)
         {
-            pixelPrologue << "    gl_FragCoord.x = input.dx_Position.x + 0.5;\n"
-                          << "    gl_FragCoord.y = input.dx_Position.y + 0.5;\n";
+            pixelPrologue
+                << "    gl_FragCoord.x = input.dx_Position.x + 0.5 - dx_FragCoordOffset.x;\n"
+                << "    gl_FragCoord.y = input.dx_Position.y + 0.5 - dx_FragCoordOffset.y;\n";
         }
         else
         {
@@ -789,9 +930,9 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
             // Renderer::setViewport()
             pixelPrologue
                 << "    gl_FragCoord.x = (input.gl_FragCoord.x * rhw) * dx_ViewCoords.x + "
-                   "dx_ViewCoords.z;\n"
+                   "dx_ViewCoords.z - dx_FragCoordOffset.x;\n"
                 << "    gl_FragCoord.y = (input.gl_FragCoord.y * rhw) * dx_ViewCoords.y + "
-                   "dx_ViewCoords.w;\n";
+                   "dx_ViewCoords.w - dx_FragCoordOffset.y;\n";
         }
 
         if (programMetadata.usesViewScale())
@@ -860,6 +1001,96 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         }
     }
 
+    bool declareSampleID = false;
+    if (fragmentShader && fragmentShader->usesSampleID())
+    {
+        declareSampleID = true;
+        pixelPrologue << "    gl_SampleID = sampleID;\n";
+    }
+
+    if (fragmentShader && fragmentShader->usesSamplePosition())
+    {
+        declareSampleID = true;
+        pixelPrologue << "    gl_SamplePosition = GetRenderTargetSamplePosition(sampleID) + 0.5;\n";
+    }
+
+    if (fragmentShader && fragmentShader->getClipDistanceArraySize())
+    {
+        ASSERT(vertexBuiltins.glClipDistance.indexOrSize > 0 &&
+               vertexBuiltins.glClipDistance.indexOrSize < 9);
+        switch (pixelBuiltins.glClipDistance.indexOrSize)
+        {
+            case 1:
+                pixelPrologue << "    (float)gl_ClipDistance = input.gl_ClipDistance0;\n";
+                break;
+            case 2:
+                pixelPrologue << "    (float2)gl_ClipDistance = input.gl_ClipDistance0;\n";
+                break;
+            case 3:
+                pixelPrologue << "    (float3)gl_ClipDistance = input.gl_ClipDistance0;\n";
+                break;
+            default:
+                pixelPrologue << "    (float4)gl_ClipDistance = input.gl_ClipDistance0;\n";
+                break;
+        }
+        switch (pixelBuiltins.glClipDistance.indexOrSize)
+        {
+            case 5:
+                pixelPrologue << "    gl_ClipDistance[4] = input.gl_ClipDistance1;\n";
+                break;
+            case 6:
+                pixelPrologue << "    ((float2[3])gl_ClipDistance)[2] = input.gl_ClipDistance1;\n";
+                break;
+            case 7:
+                pixelPrologue << "    gl_ClipDistance[4] = input.gl_ClipDistance1.x;\n";
+                pixelPrologue << "    gl_ClipDistance[5] = input.gl_ClipDistance1.y;\n";
+                pixelPrologue << "    gl_ClipDistance[6] = input.gl_ClipDistance1.z;\n";
+                break;
+            case 8:
+                pixelPrologue << "    ((float4[2])gl_ClipDistance)[1] = input.gl_ClipDistance1;\n";
+                break;
+        }
+    }
+
+    if (fragmentShader && fragmentShader->getCullDistanceArraySize())
+    {
+        ASSERT(vertexBuiltins.glCullDistance.indexOrSize > 0 &&
+               vertexBuiltins.glCullDistance.indexOrSize < 9);
+        switch (pixelBuiltins.glCullDistance.indexOrSize)
+        {
+            case 1:
+                pixelPrologue << "    (float)gl_CullDistance = input.gl_CullDistance0;\n";
+                break;
+            case 2:
+                pixelPrologue << "    (float2)gl_CullDistance = input.gl_CullDistance0;\n";
+                break;
+            case 3:
+                pixelPrologue << "    (float3)gl_CullDistance = input.gl_CullDistance0;\n";
+                break;
+            default:
+                pixelPrologue << "    (float4)gl_CullDistance = input.gl_CullDistance0;\n";
+                break;
+        }
+        switch (pixelBuiltins.glCullDistance.indexOrSize)
+        {
+            case 5:
+                pixelPrologue << "    gl_CullDistance[4] = input.gl_CullDistance1;\n";
+                break;
+            case 6:
+                pixelPrologue << "    ((float2[3])gl_CullDistance)[2] = input.gl_CullDistance1;\n";
+                break;
+            case 7:
+                pixelPrologue << "    gl_CullDistance[4] = input.gl_CullDistance1.x;\n";
+                pixelPrologue << "    gl_CullDistance[5] = input.gl_CullDistance1.y;\n";
+                pixelPrologue << "    gl_CullDistance[6] = input.gl_CullDistance1.z;\n";
+                break;
+            case 8:
+                pixelPrologue << "    ((float4[2])gl_CullDistance)[1] = input.gl_CullDistance1;\n";
+                break;
+        }
+    }
+
+    bool usesSampleInterpolation = false;
     for (GLuint registerIndex = 0u; registerIndex < registerInfos.size(); ++registerIndex)
     {
         const PackedVaryingRegister &registerInfo = registerInfos[registerIndex];
@@ -879,6 +1110,13 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         if (!varying.active)
         {
             continue;
+        }
+
+        if (packedVarying.interpolation == sh::InterpolationType::INTERPOLATION_SAMPLE ||
+            packedVarying.interpolation ==
+                sh::InterpolationType::INTERPOLATION_NOPERSPECTIVE_SAMPLE)
+        {
+            usesSampleInterpolation = true;
         }
 
         pixelPrologue << "    ";
@@ -922,30 +1160,40 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
         pixelPrologue << ";\n";
     }
 
+    if (fragmentShader && fragmentShader->usesSampleMaskIn())
+    {
+        // When per-sample shading is active due to the use of a fragment input qualified
+        // by sample or due to the use of the gl_SampleID or gl_SamplePosition variables,
+        // only the bit for the current sample is set in gl_SampleMaskIn.
+        declareSampleID = declareSampleID || usesSampleInterpolation;
+        pixelPrologue << "    gl_SampleMaskIn[0] = "
+                      << (declareSampleID ? "1 << sampleID" : "sampleMaskIn") << ";\n";
+    }
+
     if (fragmentShaderGL)
     {
-        std::string pixelSource = fragmentShaderGL->getTranslatedSource();
+        std::string pixelSource = fragmentShaderGL->getTranslatedSource(context);
+
+        std::ostringstream pixelMainParametersStream;
+        pixelMainParametersStream << "PS_INPUT input";
 
         if (fragmentShader->usesFrontFacing())
         {
-            if (shaderModel >= 4)
-            {
-                angle::ReplaceSubstring(&pixelSource,
-                                        std::string(PIXEL_MAIN_PARAMETERS_STUB_STRING),
-                                        "PS_INPUT input, bool isFrontFace : SV_IsFrontFace");
-            }
-            else
-            {
-                angle::ReplaceSubstring(&pixelSource,
-                                        std::string(PIXEL_MAIN_PARAMETERS_STUB_STRING),
-                                        "PS_INPUT input, float vFace : VFACE");
-            }
+            pixelMainParametersStream << (shaderModel >= 4 ? ", bool isFrontFace : SV_IsFrontFace"
+                                                           : ", float vFace : VFACE");
         }
-        else
+
+        if (declareSampleID)
         {
-            angle::ReplaceSubstring(&pixelSource, std::string(PIXEL_MAIN_PARAMETERS_STUB_STRING),
-                                    "PS_INPUT input");
+            pixelMainParametersStream << ", uint sampleID : SV_SampleIndex";
         }
+        else if (fragmentShader->usesSampleMaskIn())
+        {
+            pixelMainParametersStream << ", uint sampleMaskIn : SV_Coverage";
+        }
+
+        angle::ReplaceSubstring(&pixelSource, std::string(PIXEL_MAIN_PARAMETERS_STUB_STRING),
+                                pixelMainParametersStream.str());
 
         angle::ReplaceSubstring(&pixelSource, std::string(MAIN_PROLOGUE_STUB_STRING),
                                 pixelPrologue.str());
@@ -958,7 +1206,7 @@ void DynamicHLSL::generateShaderLinkHLSL(const gl::Caps &caps,
 
 std::string DynamicHLSL::generateGeometryShaderPreamble(const VaryingPacking &varyingPacking,
                                                         const BuiltinVaryingsD3D &builtinsD3D,
-                                                        const bool hasANGLEMultiviewEnabled,
+                                                        const bool hasMultiviewEnabled,
                                                         const bool selectViewInVS) const
 {
     ASSERT(mRenderer->getMajorShaderModel() >= 4);
@@ -985,18 +1233,15 @@ std::string DynamicHLSL::generateGeometryShaderPreamble(const VaryingPacking &va
         preambleStream << "    output.gl_PointSize = input.gl_PointSize;\n";
     }
 
-    if (hasANGLEMultiviewEnabled)
+    if (hasMultiviewEnabled)
     {
         preambleStream << "    output.gl_ViewID_OVR = input.gl_ViewID_OVR;\n";
         if (selectViewInVS)
         {
-            ASSERT(builtinsD3D[gl::ShaderType::Geometry].glViewportIndex.enabled &&
-                   builtinsD3D[gl::ShaderType::Geometry].glLayer.enabled);
+            ASSERT(builtinsD3D[gl::ShaderType::Geometry].glLayer.enabled);
 
-            // If the view is already selected in the VS, then we just pass the gl_ViewportIndex and
-            // gl_Layer to the output.
-            preambleStream << "    output.gl_ViewportIndex = input.gl_ViewportIndex;\n"
-                           << "    output.gl_Layer = input.gl_Layer;\n";
+            // If the view is already selected in the VS, then we just pass gl_Layer to the output.
+            preambleStream << "    output.gl_Layer = input.gl_Layer;\n";
         }
     }
 
@@ -1023,26 +1268,14 @@ std::string DynamicHLSL::generateGeometryShaderPreamble(const VaryingPacking &va
                    << "#endif  // ANGLE_POINT_SPRITE_SHADER\n"
                    << "}\n";
 
-    if (hasANGLEMultiviewEnabled && !selectViewInVS)
+    if (hasMultiviewEnabled && !selectViewInVS)
     {
-        ASSERT(builtinsD3D[gl::ShaderType::Geometry].glViewportIndex.enabled &&
-               builtinsD3D[gl::ShaderType::Geometry].glLayer.enabled);
+        ASSERT(builtinsD3D[gl::ShaderType::Geometry].glLayer.enabled);
 
-        // According to the HLSL reference, using SV_RenderTargetArrayIndex is only valid if the
-        // render target is an array resource. Because of this we do not write to gl_Layer if we are
-        // taking the side-by-side code path. We still select the viewport index in the layered code
-        // path as that is always valid. See:
-        // https://msdn.microsoft.com/en-us/library/windows/desktop/bb509647(v=vs.85).aspx
         preambleStream << "\n"
                        << "void selectView(inout GS_OUTPUT output, GS_INPUT input)\n"
                        << "{\n"
-                       << "    if (multiviewSelectViewportIndex)\n"
-                       << "    {\n"
-                       << "        output.gl_ViewportIndex = input.gl_ViewID_OVR;\n"
-                       << "    } else {\n"
-                       << "        output.gl_ViewportIndex = 0;\n"
-                       << "        output.gl_Layer = input.gl_ViewID_OVR;\n"
-                       << "    }\n"
+                       << "    output.gl_Layer = input.gl_ViewID_OVR;\n"
                        << "}\n";
     }
 
@@ -1053,7 +1286,7 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
                                                     gl::PrimitiveMode primitiveType,
                                                     const gl::ProgramState &programData,
                                                     const bool useViewScale,
-                                                    const bool hasANGLEMultiviewEnabled,
+                                                    const bool hasMultiviewEnabled,
                                                     const bool selectViewInVS,
                                                     const bool pointSpriteEmulation,
                                                     const std::string &preambleString) const
@@ -1112,7 +1345,7 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
             break;
     }
 
-    if (pointSprites || hasANGLEMultiviewEnabled)
+    if (pointSprites || hasMultiviewEnabled)
     {
         shaderStream << "cbuffer DriverConstants : register(b0)\n"
                         "{\n";
@@ -1122,15 +1355,8 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
             shaderStream << "    float4 dx_ViewCoords : packoffset(c1);\n";
             if (useViewScale)
             {
-                shaderStream << "    float2 dx_ViewScale : packoffset(c3);\n";
+                shaderStream << "    float2 dx_ViewScale : packoffset(c3.z);\n";
             }
-        }
-
-        if (hasANGLEMultiviewEnabled)
-        {
-            // We have to add a value which we can use to keep track of which multi-view code path
-            // is to be selected in the GS.
-            shaderStream << "    float multiviewSelectViewportIndex : packoffset(c3.z);\n";
         }
 
         shaderStream << "};\n\n";
@@ -1190,7 +1416,7 @@ std::string DynamicHLSL::generateGeometryShaderHLSL(const gl::Caps &caps,
     {
         shaderStream << "    copyVertex(output, input[" << vertexIndex
                      << "], input[lastVertexIndex]);\n";
-        if (hasANGLEMultiviewEnabled && !selectViewInVS)
+        if (hasMultiviewEnabled && !selectViewInVS)
         {
             shaderStream << "   selectView(output, input[" << vertexIndex << "]);\n";
         }
@@ -1394,11 +1620,11 @@ void DynamicHLSL::getPixelShaderOutputKey(const gl::State &data,
 }
 
 // BuiltinVarying Implementation.
-BuiltinVarying::BuiltinVarying() : enabled(false), index(0), systemValue(false) {}
+BuiltinVarying::BuiltinVarying() : enabled(false), indexOrSize(0), systemValue(false) {}
 
 std::string BuiltinVarying::str() const
 {
-    return (systemValue ? semantic : (semantic + Str(index)));
+    return (systemValue ? semantic : (semantic + Str(indexOrSize)));
 }
 
 void BuiltinVarying::enableSystem(const std::string &systemValueSemantic)
@@ -1408,11 +1634,19 @@ void BuiltinVarying::enableSystem(const std::string &systemValueSemantic)
     systemValue = true;
 }
 
+void BuiltinVarying::enableSystem(const std::string &systemValueSemantic, unsigned int sizeVal)
+{
+    enabled     = true;
+    semantic    = systemValueSemantic;
+    systemValue = true;
+    indexOrSize = sizeVal;
+}
+
 void BuiltinVarying::enable(const std::string &semanticVal, unsigned int indexVal)
 {
-    enabled  = true;
-    semantic = semanticVal;
-    index    = indexVal;
+    enabled     = true;
+    semantic    = semanticVal;
+    indexOrSize = indexVal;
 }
 
 // BuiltinVaryingsD3D Implementation.
@@ -1475,6 +1709,18 @@ void BuiltinVaryingsD3D::updateBuiltins(gl::ShaderType shaderType,
         builtins->glPosition.enable(userSemantic, reservedSemanticIndex++);
     }
 
+    if (metadata.getClipDistanceArraySize())
+    {
+        builtins->glClipDistance.enableSystem("SV_ClipDistance",
+                                              metadata.getClipDistanceArraySize());
+    }
+
+    if (metadata.getCullDistanceArraySize())
+    {
+        builtins->glCullDistance.enableSystem("SV_CullDistance",
+                                              metadata.getCullDistanceArraySize());
+    }
+
     if (metadata.usesFragCoord())
     {
         builtins->glFragCoord.enable(userSemantic, reservedSemanticIndex++);
@@ -1495,27 +1741,15 @@ void BuiltinVaryingsD3D::updateBuiltins(gl::ShaderType shaderType,
         }
     }
 
-    if (metadata.hasANGLEMultiviewEnabled())
+    if (metadata.hasMultiviewEnabled())
     {
         // Although it is possible to compute gl_ViewID_OVR from the value of
-        // SV_ViewportArrayIndex or SV_RenderTargetArrayIndex and the multi-view state in the
-        // driver constant buffer, it is easier and cleaner to always pass it as a varying.
+        // SV_RenderTargetArrayIndex, it is easier and cleaner to always pass it as a varying.
         builtins->glViewIDOVR.enable(userSemantic, reservedSemanticIndex++);
 
-        if (shaderType == gl::ShaderType::Vertex)
+        if ((shaderType == gl::ShaderType::Vertex && metadata.canSelectViewInVertexShader()) ||
+            shaderType == gl::ShaderType::Geometry)
         {
-            if (metadata.canSelectViewInVertexShader())
-            {
-                builtins->glViewportIndex.enableSystem("SV_ViewportArrayIndex");
-                builtins->glLayer.enableSystem("SV_RenderTargetArrayIndex");
-            }
-        }
-
-        if (shaderType == gl::ShaderType::Geometry)
-        {
-            // gl_Layer and gl_ViewportIndex are necessary so that we can write to either based on
-            // the multiview state in the driver constant buffer.
-            builtins->glViewportIndex.enableSystem("SV_ViewportArrayIndex");
             builtins->glLayer.enableSystem("SV_RenderTargetArrayIndex");
         }
     }

@@ -18,8 +18,7 @@ class CaptureReplaySample : public SampleApplication
         : SampleApplication("CaptureReplaySample",
                             argc,
                             argv,
-                            3,
-                            0,
+                            ClientType::ES3_0,
                             traceInfo.drawSurfaceWidth,
                             traceInfo.drawSurfaceHeight),
           mTraceInfo(traceInfo)
@@ -30,11 +29,6 @@ class CaptureReplaySample : public SampleApplication
         mTraceLibrary.reset(new angle::TraceLibrary("capture_replay_sample_trace"));
         assert(mTraceLibrary->valid());
 
-        if (mTraceInfo.isBinaryDataCompressed)
-        {
-            mTraceLibrary->setBinaryDataDecompressCallback(angle::DecompressBinaryData);
-        }
-
         std::stringstream binaryPathStream;
         binaryPathStream << angle::GetExecutableDirectory() << angle::GetPathSeparator()
                          << ANGLE_CAPTURE_REPLAY_SAMPLE_DATA_DIR;
@@ -43,7 +37,7 @@ class CaptureReplaySample : public SampleApplication
         return true;
     }
 
-    void destroy() override {}
+    void destroy() override { mTraceLibrary->finishReplay(); }
 
     void draw() override
     {

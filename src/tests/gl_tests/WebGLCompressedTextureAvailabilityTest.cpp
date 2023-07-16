@@ -15,7 +15,7 @@ using namespace angle;
 namespace
 {
 
-class WebGLCompressedTextureAvailabilityTest : public ANGLETest
+class WebGLCompressedTextureAvailabilityTest : public ANGLETest<>
 {
   public:
     WebGLCompressedTextureAvailabilityTest() { setWebGLCompatibilityEnabled(true); }
@@ -28,8 +28,9 @@ const char kS3TCSRGB[] = "GL_EXT_texture_compression_s3tc_srgb";
 const char kRGTC[]     = "GL_EXT_texture_compression_rgtc";
 const char kBPTC[]     = "GL_EXT_texture_compression_bptc";
 
-const char kETC1[] = "GL_OES_compressed_ETC1_RGB8_texture";
-const char kETC2[] = "GL_ANGLE_compressed_texture_etc";
+const char kETC1[]    = "GL_OES_compressed_ETC1_RGB8_texture";
+const char kETC1Sub[] = "GL_EXT_compressed_ETC1_RGB8_sub_texture";  // Not exposed to WebGL apps
+const char kETC2[]    = "GL_ANGLE_compressed_texture_etc";
 
 const char kASTCLDR[] = "GL_KHR_texture_compression_astc_ldr";
 const char kASTCHDR[] = "GL_KHR_texture_compression_astc_hdr";
@@ -57,6 +58,7 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
         }
 
         EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1));
+        EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1Sub));
         EXPECT_FALSE(EnsureGLExtensionEnabled(kETC2));
         EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCLDR));
         EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCHDR));
@@ -64,7 +66,7 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
     }
     else if (IsMetal())
     {
-        if (IsOSX())
+        if (IsMac())
         {
             EXPECT_TRUE(EnsureGLExtensionEnabled(kDXT1));
             EXPECT_TRUE(EnsureGLExtensionEnabled(kDXT3));
@@ -73,10 +75,11 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
             EXPECT_TRUE(EnsureGLExtensionEnabled(kRGTC));
             EXPECT_TRUE(EnsureGLExtensionEnabled(kBPTC));
 
-            if (IsApple())
+            if (IsAppleGPU())
             {
                 // M1 or newer
                 EXPECT_TRUE(EnsureGLExtensionEnabled(kETC1));
+                EXPECT_TRUE(EnsureGLExtensionEnabled(kETC1Sub));
                 EXPECT_TRUE(EnsureGLExtensionEnabled(kETC2));
                 EXPECT_TRUE(EnsureGLExtensionEnabled(kASTCLDR));
                 EXPECT_TRUE(EnsureGLExtensionEnabled(kASTCHDR));
@@ -86,6 +89,7 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
             {
                 // macOS with non-Apple GPU
                 EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1));
+                EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1Sub));
                 EXPECT_FALSE(EnsureGLExtensionEnabled(kETC2));
                 EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCLDR));
                 EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCHDR));
@@ -99,7 +103,7 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
     }
     else if (IsDesktopOpenGL())
     {
-        if (IsOSX())
+        if (IsMac())
         {
             // OpenGL version is fixed to 4.1 on macOS, so the supported formats are the same on all
             // devices.
@@ -112,6 +116,7 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, Test)
             EXPECT_FALSE(EnsureGLExtensionEnabled(kBPTC));
 
             EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1));
+            EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1Sub));
             EXPECT_FALSE(EnsureGLExtensionEnabled(kETC2));
             EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCLDR));
             EXPECT_FALSE(EnsureGLExtensionEnabled(kASTCHDR));
@@ -135,10 +140,12 @@ TEST_P(WebGLCompressedTextureAvailabilityTest, EmulatedEtc1Test)
         if (EnsureGLExtensionEnabled(kETC2))
         {
             EXPECT_TRUE(EnsureGLExtensionEnabled(kETC1));
+            EXPECT_TRUE(EnsureGLExtensionEnabled(kETC1Sub));
         }
         else
         {
             EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1));
+            EXPECT_FALSE(EnsureGLExtensionEnabled(kETC1Sub));
         }
     }
 }

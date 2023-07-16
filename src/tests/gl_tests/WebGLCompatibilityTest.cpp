@@ -53,7 +53,7 @@ constexpr const char *FloatingPointTextureExtensions[] = {
 namespace angle
 {
 
-class WebGLCompatibilityTest : public ANGLETest
+class WebGLCompatibilityTest : public ANGLETest<>
 {
   protected:
     WebGLCompatibilityTest()
@@ -263,10 +263,16 @@ void main()
         }
         EXPECT_GL_NO_ERROR();
 
-        if (!IsOpenGLES())
+        // Ensure that the stored value reflect the actual platform behavior.
+        float storedColor[4];
+        glGetFloatv(GL_BLEND_COLOR, storedColor);
+        if (storedColor[0] == 10)
         {
-            // GLES test machines will need a workaround.
             EXPECT_PIXEL_COLOR32F_NEAR(0, 0, GLColor32F(5, 0, 0, 0), 0.001f);
+        }
+        else
+        {
+            EXPECT_PIXEL_COLOR32F_NEAR(0, 0, GLColor32F(0.5, 0, 0, 0), 0.001f);
         }
 
         // Check sure that non-float attachments clamp BLEND_COLOR.
@@ -605,7 +611,7 @@ TEST_P(WebGLCompatibilityTest, EnablePixelBufferObjectExtensions)
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() >= 3);
 
     // http://anglebug.com/5268
-    ANGLE_SKIP_TEST_IF(IsOSX() && IsIntelUHD630Mobile() && IsDesktopOpenGL());
+    ANGLE_SKIP_TEST_IF(IsMac() && IsIntelUHD630Mobile() && IsDesktopOpenGL());
 
     GLBuffer buffer;
     glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer);
@@ -1626,10 +1632,10 @@ void main()
 
     constexpr GLuint kMaxIntAsGLuint = static_cast<GLuint>(std::numeric_limits<GLint>::max());
     constexpr GLuint kIndexData[]    = {
-           kMaxIntAsGLuint,
-           kMaxIntAsGLuint + 1,
-           kMaxIntAsGLuint + 2,
-           kMaxIntAsGLuint + 3,
+        kMaxIntAsGLuint,
+        kMaxIntAsGLuint + 1,
+        kMaxIntAsGLuint + 2,
+        kMaxIntAsGLuint + 3,
     };
 
     GLBuffer indexBuffer;
@@ -2749,7 +2755,7 @@ void main() {
 TEST_P(WebGLCompatibilityTest, TextureCopyingFeedbackLoops)
 {
     // TODO(anglebug.com/5360): Failing on ARM-based Apple DTKs.
-    ANGLE_SKIP_TEST_IF(IsOSX() && IsARM64() && IsDesktopOpenGL());
+    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsDesktopOpenGL());
 
     GLTexture texture;
     glBindTexture(GL_TEXTURE_2D, texture.get());
@@ -2817,10 +2823,10 @@ TEST_P(WebGL2CompatibilityTest, CopyMip1ToMip0)
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     // http://anglebug.com/4805
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && (IsWindows() || IsOSX()));
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && (IsWindows() || IsMac()));
 
     // TODO(anglebug.com/5360): Failing on ARM64-based Apple DTKs.
-    ANGLE_SKIP_TEST_IF(IsOSX() && IsARM64() && IsDesktopOpenGL());
+    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsDesktopOpenGL());
 
     GLFramebuffer framebuffer;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -2858,7 +2864,7 @@ TEST_P(WebGL2CompatibilityTest, CopyMip1ToMip0)
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsNVIDIA());
 
     // http://anglebug.com/4803
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsAMD() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsAMD() && IsMac());
 
     // Bind framebuffer to mip 0 and make sure the copy was done.
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
@@ -3371,7 +3377,7 @@ TEST_P(WebGLCompatibilityTest, RGB32FTextures)
 TEST_P(WebGLCompatibilityTest, RGBA32FTextures)
 {
     // http://anglebug.com/5357
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     constexpr float data[] = {7000.0f, 100.0f, 33.0f, -1.0f};
 
@@ -3632,7 +3638,6 @@ TEST_P(WebGLCompatibilityTest, FloatBlend)
 {
     if (getClientMajorVersion() >= 3)
     {
-        TestBlendColor(false);
         ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_color_buffer_float"));
     }
     else
@@ -3642,18 +3647,12 @@ TEST_P(WebGLCompatibilityTest, FloatBlend)
         ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_CHROMIUM_color_buffer_float_rgba"));
     }
 
-    TestBlendColor(false);
-
     // -
 
     TestExtFloatBlend(GL_RGBA32F, GL_FLOAT, false);
 
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_float_blend"));
     ASSERT_GL_NO_ERROR();
-
-    // D3D9 supports float rendering explicitly, supports blending operations in practice,
-    // but cannot support float blend colors.
-    ANGLE_SKIP_TEST_IF(IsD3D9());
 
     TestExtFloatBlend(GL_RGBA32F, GL_FLOAT, true);
 }
@@ -3665,7 +3664,6 @@ TEST_P(WebGLCompatibilityTest, HalfFloatBlend)
     GLenum type           = GL_FLOAT;
     if (getClientMajorVersion() >= 3)
     {
-        TestBlendColor(false);
         ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_color_buffer_float"));
     }
     else
@@ -3677,13 +3675,7 @@ TEST_P(WebGLCompatibilityTest, HalfFloatBlend)
         type           = GL_HALF_FLOAT_OES;
     }
 
-    TestBlendColor(false);
-
     // -
-
-    // D3D9 supports float rendering explicitly, supports blending operations in practice,
-    // but cannot support float blend colors.
-    ANGLE_SKIP_TEST_IF(IsD3D9());
 
     TestExtFloatBlend(internalFormat, type, true);
 }
@@ -3691,12 +3683,12 @@ TEST_P(WebGLCompatibilityTest, HalfFloatBlend)
 TEST_P(WebGLCompatibilityTest, R16FTextures)
 {
     // http://anglebug.com/5357
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     constexpr float readPixelsData[] = {-5000.0f, 0.0f, 0.0f, 1.0f};
     const GLushort textureData[]     = {
-            gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
-            gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
+        gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
+        gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
 
     for (auto extension : FloatingPointTextureExtensions)
     {
@@ -3707,6 +3699,7 @@ TEST_P(WebGLCompatibilityTest, R16FTextures)
         }
 
         // Unsized R 16F (OES)
+        if (getClientMajorVersion() < 3)
         {
             bool texture = IsGLExtensionEnabled("GL_OES_texture_half_float") &&
                            IsGLExtensionEnabled("GL_EXT_texture_rg");
@@ -3751,12 +3744,12 @@ TEST_P(WebGLCompatibilityTest, R16FTextures)
 TEST_P(WebGLCompatibilityTest, RG16FTextures)
 {
     // http://anglebug.com/5357
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     constexpr float readPixelsData[] = {7108.0f, -10.0f, 0.0f, 1.0f};
     const GLushort textureData[]     = {
-            gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
-            gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
+        gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
+        gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
 
     for (auto extension : FloatingPointTextureExtensions)
     {
@@ -3767,6 +3760,7 @@ TEST_P(WebGLCompatibilityTest, RG16FTextures)
         }
 
         // Unsized RG 16F (OES)
+        if (getClientMajorVersion() < 3)
         {
             bool texture = IsGLExtensionEnabled("GL_OES_texture_half_float") &&
                            IsGLExtensionEnabled("GL_EXT_texture_rg");
@@ -3811,14 +3805,14 @@ TEST_P(WebGLCompatibilityTest, RG16FTextures)
 TEST_P(WebGLCompatibilityTest, RGB16FTextures)
 {
     // http://anglebug.com/5357
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     ANGLE_SKIP_TEST_IF(IsOzone() && IsIntel());
 
     constexpr float readPixelsData[] = {7000.0f, 100.0f, 33.0f, 1.0f};
     const GLushort textureData[]     = {
-            gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
-            gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
+        gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
+        gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
 
     for (auto extension : FloatingPointTextureExtensions)
     {
@@ -3829,6 +3823,7 @@ TEST_P(WebGLCompatibilityTest, RGB16FTextures)
         }
 
         // Unsized RGB 16F (OES)
+        if (getClientMajorVersion() < 3)
         {
             bool texture = IsGLExtensionEnabled("GL_OES_texture_half_float");
             bool filter  = IsGLExtensionEnabled("GL_OES_texture_half_float_linear");
@@ -3873,14 +3868,14 @@ TEST_P(WebGLCompatibilityTest, RGB16FTextures)
 TEST_P(WebGLCompatibilityTest, RGBA16FTextures)
 {
     // http://anglebug.com/5357
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     ANGLE_SKIP_TEST_IF(IsOzone() && IsIntel());
 
     constexpr float readPixelsData[] = {7000.0f, 100.0f, 33.0f, -1.0f};
     const GLushort textureData[]     = {
-            gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
-            gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
+        gl::float32ToFloat16(readPixelsData[0]), gl::float32ToFloat16(readPixelsData[1]),
+        gl::float32ToFloat16(readPixelsData[2]), gl::float32ToFloat16(readPixelsData[3])};
 
     for (auto extension : FloatingPointTextureExtensions)
     {
@@ -3891,6 +3886,7 @@ TEST_P(WebGLCompatibilityTest, RGBA16FTextures)
         }
 
         // Unsized RGBA 16F (OES)
+        if (getClientMajorVersion() < 3)
         {
             bool texture = IsGLExtensionEnabled("GL_OES_texture_half_float");
             bool filter  = IsGLExtensionEnabled("GL_OES_texture_half_float_linear");
@@ -4447,6 +4443,24 @@ TEST_P(WebGL2CompatibilityTest, ClearBufferDefaultFramebuffer)
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 }
 
+// Test that clearing a non-existent drawbuffer of the default
+// framebuffer does not cause an assertion in WebGL validation
+TEST_P(WebGL2CompatibilityTest, ClearBuffer1OnDefaultFramebufferNoAssert)
+{
+    constexpr float clearFloat[]   = {0.0f, 0.0f, 0.0f, 0.0f};
+    constexpr int32_t clearInt[]   = {0, 0, 0, 0};
+    constexpr uint32_t clearUint[] = {0, 0, 0, 0};
+
+    glClearBufferfv(GL_COLOR, 1, clearFloat);
+    EXPECT_GL_NO_ERROR();
+
+    glClearBufferiv(GL_COLOR, 1, clearInt);
+    EXPECT_GL_NO_ERROR();
+
+    glClearBufferuiv(GL_COLOR, 1, clearUint);
+    EXPECT_GL_NO_ERROR();
+}
+
 // Verify that errors are generate when trying to blit from an image to itself
 TEST_P(WebGL2CompatibilityTest, BlitFramebufferSameImage)
 {
@@ -4696,9 +4710,6 @@ TEST_P(WebGLCompatibilityTest, FramebufferAttachmentQuery)
 // Tests WebGL reports INVALID_OPERATION for mismatch of drawbuffers and fragment output
 TEST_P(WebGLCompatibilityTest, DrawBuffers)
 {
-    // Fails on Intel Ubuntu 19.04 Mesa 19.0.2 Vulkan. http://anglebug.com/3616
-    ANGLE_SKIP_TEST_IF(IsLinux() && IsIntel() && IsVulkan());
-
     // Make sure we can use at least 4 attachments for the tests.
     bool useEXT = false;
     if (getClientMajorVersion() < 3)
@@ -4863,10 +4874,6 @@ void main()
             EXPECT_GL_ERROR(GL_INVALID_OPERATION);
         }
     }
-
-    // TODO(syoussefi): Qualcomm driver crashes in the presence of VK_ATTACHMENT_UNUSED.
-    // http://anglebug.com/3423
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsAndroid());
 
     // Test that attachments written to get the correct color from shader output but that even when
     // the extension is used, disabled attachments are not written at all and stay red.
@@ -5282,11 +5289,12 @@ TEST_P(WebGLCompatibilityTest, ValidateArraySizes)
     // fairly small array.
     constexpr char kVSArrayOK[] =
         R"(varying vec4 color;
-const int array_size = 1000;
+const int array_size = 500;
 void main()
 {
     mat2 array[array_size];
-    if (array[0][0][0] == 2.0)
+    mat2 array2[array_size];
+    if (array[0][0][0] + array2[0][0][0] == 2.0)
         color = vec4(0.0, 1.0, 0.0, 1.0);
     else
         color = vec4(1.0, 0.0, 0.0, 1.0);
@@ -5294,8 +5302,8 @@ void main()
 
     constexpr char kVSArrayTooLarge[] =
         R"(varying vec4 color;
-// 2 GB / 32 aligned bytes per mat2 = 67108864
-const int array_size = 67108865;
+// 16 MB / 32 aligned bytes per mat2 = 524288
+const int array_size = 524289;
 void main()
 {
     mat2 array[array_size];
@@ -5307,7 +5315,7 @@ void main()
 
     constexpr char kVSArrayMuchTooLarge[] =
         R"(varying vec4 color;
-const int array_size = 556007917;
+const int array_size = 757000;
 void main()
 {
     mat2 array[array_size];
@@ -5361,6 +5369,103 @@ void main()
 })";
 
     GLuint program = CompileProgram(essl1_shaders::vs::Simple(), kFSStructTooLarge);
+    EXPECT_EQ(0u, program);
+}
+
+// Reject attempts to allocate too much private memory.
+// This is an implementation-defined limit - crbug.com/1431761.
+TEST_P(WebGLCompatibilityTest, ValidateTotalPrivateSize)
+{
+    constexpr char kTooLargeGlobalMemory1[] =
+        R"(precision mediump float;
+
+// 16 MB / 16 bytes per vec4 = 1048576
+vec4 array[524288];
+vec4 array2[524289];
+
+void main()
+{
+    if (array[0].x + array[1].x == 0.)
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    else
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    constexpr char kTooLargeGlobalMemory2[] =
+        R"(precision mediump float;
+
+// 16 MB / 16 bytes per vec4 = 1048576
+vec4 array[524287];
+vec4 array2[524287];
+vec4 x, y, z;
+
+void main()
+{
+    if (array[0].x + array[1].x == x.w + y.w + z.w)
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    else
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    constexpr char kTooLargeGlobalAndLocalMemory1[] =
+        R"(precision mediump float;
+
+// 16 MB / 16 bytes per vec4 = 1048576
+vec4 array[524288];
+
+void main()
+{
+    vec4 array2[524289];
+    if (array[0].x + array[1].x == 2.0)
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    else
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    // Note: The call stack is not taken into account for the purposes of total memory calculation.
+    constexpr char kTooLargeGlobalAndLocalMemory2[] =
+        R"(precision mediump float;
+
+// 16 MB / 16 bytes per vec4 = 1048576
+vec4 array[524288];
+
+float f()
+{
+    vec4 array2[524288];
+    return array2[0].x;
+}
+
+float g()
+{
+    vec4 array3[524287];
+    return array3[0].x;
+}
+
+float h()
+{
+    vec4 value;
+    float value2
+    return value.x + value2;
+}
+
+void main()
+{
+    if (array[0].x + f() + g() + h() == 2.0)
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    else
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    GLuint program = CompileProgram(essl1_shaders::vs::Simple(), kTooLargeGlobalMemory1);
+    EXPECT_EQ(0u, program);
+
+    program = CompileProgram(essl1_shaders::vs::Simple(), kTooLargeGlobalMemory2);
+    EXPECT_EQ(0u, program);
+
+    program = CompileProgram(essl1_shaders::vs::Simple(), kTooLargeGlobalAndLocalMemory1);
+    EXPECT_EQ(0u, program);
+
+    program = CompileProgram(essl1_shaders::vs::Simple(), kTooLargeGlobalAndLocalMemory2);
     EXPECT_EQ(0u, program);
 }
 
@@ -5722,6 +5827,209 @@ void main()
     glColorMaskiOES(1, false, false, false, false);
     drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
     EXPECT_GL_NO_ERROR();
+}
+
+// Test that ETC2/EAC formats are rejected by unextended WebGL 2.0 contexts.
+TEST_P(WebGL2CompatibilityTest, ETC2EACFormats)
+{
+    size_t byteLength          = 8;
+    constexpr uint8_t data[16] = {};
+    constexpr GLenum formats[] = {GL_COMPRESSED_R11_EAC,
+                                  GL_COMPRESSED_SIGNED_R11_EAC,
+                                  GL_COMPRESSED_RGB8_ETC2,
+                                  GL_COMPRESSED_SRGB8_ETC2,
+                                  GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+                                  GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+                                  GL_COMPRESSED_RG11_EAC,
+                                  GL_COMPRESSED_SIGNED_RG11_EAC,
+                                  GL_COMPRESSED_RGBA8_ETC2_EAC,
+                                  GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC};
+
+    for (const auto &fmt : formats)
+    {
+        if (fmt == GL_COMPRESSED_RG11_EAC)
+            byteLength = 16;
+
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, 4, 4, 0, byteLength, data);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+        }
+
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+            glCompressedTexImage3D(GL_TEXTURE_2D_ARRAY, 0, fmt, 4, 4, 1, 0, byteLength, data);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+        }
+
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glTexStorage2D(GL_TEXTURE_2D, 1, fmt, 4, 4);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+        }
+
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+            glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, fmt, 4, 4, 1);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+        }
+    }
+}
+
+// Test that GL_HALF_FLOAT_OES type is rejected by WebGL 2.0 contexts.
+TEST_P(WebGL2CompatibilityTest, HalfFloatOesType)
+{
+    const std::array<std::pair<GLenum, GLenum>, 6> formats = {{{GL_R16F, GL_RED},
+                                                               {GL_RG16F, GL_RG},
+                                                               {GL_RGB16F, GL_RGB},
+                                                               {GL_RGBA16F, GL_RGBA},
+                                                               {GL_R11F_G11F_B10F, GL_RGB},
+                                                               {GL_RGB9_E5, GL_RGB}}};
+    for (const auto &fmt : formats)
+    {
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_2D, tex);
+            EXPECT_GL_NO_ERROR();
+
+            glTexImage2D(GL_TEXTURE_2D, 0, fmt.first, 1, 1, 0, fmt.second, GL_HALF_FLOAT_OES,
+                         nullptr);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, fmt.first, 1, 1, 0, fmt.second, GL_HALF_FLOAT, nullptr);
+            EXPECT_GL_NO_ERROR();
+        }
+        {
+            GLTexture tex;
+            glBindTexture(GL_TEXTURE_3D, tex);
+            EXPECT_GL_NO_ERROR();
+
+            glTexImage3D(GL_TEXTURE_3D, 0, fmt.first, 1, 1, 1, 0, fmt.second, GL_HALF_FLOAT_OES,
+                         nullptr);
+            EXPECT_GL_ERROR(GL_INVALID_ENUM);
+
+            glTexImage3D(GL_TEXTURE_3D, 0, fmt.first, 1, 1, 1, 0, fmt.second, GL_HALF_FLOAT,
+                         nullptr);
+            EXPECT_GL_NO_ERROR();
+        }
+    }
+}
+
+// Test that unsigned integer samplers work with stencil textures.
+TEST_P(WebGL2CompatibilityTest, StencilTexturingStencil8)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_OES_texture_stencil8"));
+
+    const uint8_t stencilValue = 42;
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_STENCIL_INDEX8, 1, 1, 0, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE,
+                 &stencilValue);
+    ASSERT_GL_NO_ERROR();
+
+    constexpr char kFS[] = R"(#version 300 es
+out mediump vec4 color;
+uniform mediump usampler2D tex;
+void main() {
+    color = vec4(vec3(texture(tex, vec2(0.0, 0.0))) / 255.0, 1.0);
+})";
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(42, 0, 0, 255), 1);
+}
+
+// Test that unsigned integer samplers work with combined depth/stencil textures.
+TEST_P(WebGL2CompatibilityTest, StencilTexturingCombined)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_stencil_texturing"));
+
+    const uint32_t stencilValue = 42;
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE_ANGLE, GL_STENCIL_INDEX);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 1, 1, 0, GL_DEPTH_STENCIL,
+                 GL_UNSIGNED_INT_24_8, &stencilValue);
+    ASSERT_GL_NO_ERROR();
+
+    constexpr char kFS[] = R"(#version 300 es
+out mediump vec4 color;
+uniform mediump usampler2D tex;
+void main() {
+    color = vec4(vec3(texture(tex, vec2(0.0, 0.0))) / 255.0, 1.0);
+})";
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(42, 0, 0, 255), 1);
+}
+
+// Regression test for syncing internal state for TexImage calls while there is an incomplete
+// framebuffer bound
+TEST_P(WebGL2CompatibilityTest, TexImageSyncWithIncompleteFramebufferBug)
+{
+    glColorMask(false, true, false, false);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(100, 128, 65, 65537);
+
+    GLFramebuffer fb1;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb1);
+
+    GLRenderbuffer rb;
+    glBindRenderbuffer(GL_RENDERBUFFER, rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RG8UI, 1304, 2041);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rb);
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 8, 8, 0, GL_RED_EXT, GL_UNSIGNED_BYTE, nullptr);
+}
+
+// Test that "depth_unchanged" layout qualifier is rejected for WebGL contexts.
+TEST_P(WebGL2CompatibilityTest, FragDepthLayoutUnchanged)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_conservative_depth"));
+
+    constexpr char kFS[] = R"(#version 300 es
+#extension GL_EXT_conservative_depth: enable
+out highp vec4 color;
+layout (depth_unchanged) out highp float gl_FragDepth;
+void main() {
+    color = vec4(0.0, 0.0, 0.0, 1.0);
+    gl_FragDepth = 1.0;
+})";
+
+    GLProgram prg;
+    prg.makeRaster(essl3_shaders::vs::Simple(), kFS);
+    EXPECT_FALSE(prg.valid());
+}
+
+// Test for a mishandling of instanced vertex attributes with zero-sized buffers bound on Apple
+// OpenGL drivers.
+TEST_P(WebGL2CompatibilityTest, DrawWithZeroSizedBuffer)
+{
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
+    glUseProgram(program);
+
+    GLBuffer buffer;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+
+    GLint posLocation = glGetAttribLocation(program, essl3_shaders::PositionAttrib());
+    glEnableVertexAttribArray(posLocation);
+
+    glVertexAttribDivisor(posLocation, 1);
+    glVertexAttribPointer(posLocation, 1, GL_UNSIGNED_BYTE, GL_FALSE, 9,
+                          reinterpret_cast<void *>(0x41424344));
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(WebGLCompatibilityTest);

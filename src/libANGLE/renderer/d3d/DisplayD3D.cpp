@@ -280,10 +280,10 @@ bool DisplayD3D::testDeviceLost()
 egl::Error DisplayD3D::restoreLostDevice(const egl::Display *display)
 {
     // Release surface resources to make the Reset() succeed
-    for (egl::Surface *surface : mState.surfaceSet)
+    for (auto surface : mState.surfaceMap)
     {
-        ASSERT(!surface->getBoundTexture());
-        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface);
+        ASSERT(!surface.second->getBoundTexture());
+        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface.second);
         surfaceD3D->releaseSwapChain();
     }
 
@@ -293,9 +293,9 @@ egl::Error DisplayD3D::restoreLostDevice(const egl::Display *display)
     }
 
     // Restore any surfaces that may have been lost
-    for (const egl::Surface *surface : mState.surfaceSet)
+    for (auto surface : mState.surfaceMap)
     {
-        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface);
+        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface.second);
 
         ANGLE_TRY(surfaceD3D->resetSwapChain(display));
     }
@@ -390,9 +390,9 @@ void DisplayD3D::generateCaps(egl::Caps *outCaps) const
 
 egl::Error DisplayD3D::waitClient(const gl::Context *context)
 {
-    for (egl::Surface *surface : mState.surfaceSet)
+    for (auto surface : mState.surfaceMap)
     {
-        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface);
+        SurfaceD3D *surfaceD3D = GetImplAs<SurfaceD3D>(surface.second);
         ANGLE_TRY(surfaceD3D->checkForOutOfDateSwapChain(this));
     }
 
@@ -427,6 +427,11 @@ gl::Version DisplayD3D::getMaxSupportedESVersion() const
 gl::Version DisplayD3D::getMaxConformantESVersion() const
 {
     return mRenderer->getMaxConformantESVersion();
+}
+
+Optional<gl::Version> DisplayD3D::getMaxSupportedDesktopVersion() const
+{
+    return Optional<gl::Version>::Invalid();
 }
 
 void DisplayD3D::handleResult(HRESULT hr,

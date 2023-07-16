@@ -9,7 +9,7 @@
 #ifndef LIBANGLE_RENDERER_DRIVER_UTILS_H_
 #define LIBANGLE_RENDERER_DRIVER_UTILS_H_
 
-#include "common/platform.h"
+#include "common/platform_helpers.h"
 #include "libANGLE/angletypes.h"
 
 namespace rx
@@ -35,6 +35,7 @@ enum VendorID : uint32_t
     VENDOR_ID_SAMSUNG  = 0x144D,
     VENDOR_ID_VIVANTE  = 0x9999,
     VENDOR_ID_VMWARE   = 0x15AD,
+    VENDOR_ID_VIRTIO   = 0x1AF4,
 };
 
 enum AndroidDeviceID : uint32_t
@@ -44,6 +45,8 @@ enum AndroidDeviceID : uint32_t
     ANDROID_DEVICE_ID_PIXEL2      = 0x5040001,
     ANDROID_DEVICE_ID_PIXEL1XL    = 0x5030004,
     ANDROID_DEVICE_ID_PIXEL4      = 0x6040001,
+    ANDROID_DEVICE_ID_GALAXYA23   = 0x6010901,
+    ANDROID_DEVICE_ID_GALAXYS23   = 0x43050A01,
     ANDROID_DEVICE_ID_SWIFTSHADER = 0xC0DE,
 };
 
@@ -52,7 +55,7 @@ inline bool IsAMD(uint32_t vendorId)
     return vendorId == VENDOR_ID_AMD;
 }
 
-inline bool IsApple(uint32_t vendorId)
+inline bool IsAppleGPU(uint32_t vendorId)
 {
     return vendorId == VENDOR_ID_APPLE;
 }
@@ -112,6 +115,11 @@ inline bool IsVMWare(uint32_t vendorId)
     return vendorId == VENDOR_ID_VMWARE;
 }
 
+inline bool IsVirtIO(uint32_t vendorId)
+{
+    return vendorId == VENDOR_ID_VIRTIO;
+}
+
 inline bool IsNexus5X(uint32_t vendorId, uint32_t deviceId)
 {
     return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_NEXUS5X;
@@ -130,6 +138,16 @@ inline bool IsPixel2(uint32_t vendorId, uint32_t deviceId)
 inline bool IsPixel4(uint32_t vendorId, uint32_t deviceId)
 {
     return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_PIXEL4;
+}
+
+inline bool IsGalaxyA23(uint32_t vendorId, uint32_t deviceId)
+{
+    return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_GALAXYA23;
+}
+
+inline bool IsGalaxyS23(uint32_t vendorId, uint32_t deviceId)
+{
+    return IsQualcomm(vendorId) && deviceId == ANDROID_DEVICE_ID_GALAXYS23;
 }
 
 inline bool IsSwiftshader(uint32_t vendorId, uint32_t deviceId)
@@ -171,92 +189,31 @@ bool Is9thGenIntel(uint32_t DeviceId);
 bool Is11thGenIntel(uint32_t DeviceId);
 bool Is12thGenIntel(uint32_t DeviceId);
 
+using ARMDriverVersion = angle::VersionTriple;
+ARMDriverVersion ParseARMDriverVersion(uint32_t driverVersion);
+
 // Platform helpers
-inline bool IsWindows()
-{
-#if defined(ANGLE_PLATFORM_WINDOWS)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool IsLinux()
-{
-#if defined(ANGLE_PLATFORM_LINUX)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool IsApple()
-{
-#if defined(ANGLE_PLATFORM_APPLE)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool IsMac()
-{
-#if defined(ANGLE_PLATFORM_APPLE) && defined(ANGLE_PLATFORM_MACOS)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool IsFuchsia()
-{
-#if defined(ANGLE_PLATFORM_FUCHSIA)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool IsIOS()
-{
-#if defined(ANGLE_PLATFORM_IOS)
-    return true;
-#else
-    return false;
-#endif
-}
+using angle::IsAndroid;
+using angle::IsApple;
+using angle::IsChromeOS;
+using angle::IsFuchsia;
+using angle::IsIOS;
+using angle::IsLinux;
+using angle::IsMac;
+using angle::IsWindows;
+using angle::IsWindows10OrLater;
+using angle::IsWindows8OrLater;
+using angle::IsWindowsVistaOrLater;
 
 bool IsWayland();
-bool IsWin10OrGreater();
 
-struct OSVersion
-{
-    OSVersion();
-    OSVersion(int major, int minor, int patch);
-
-    int majorVersion = 0;
-    int minorVersion = 0;
-    int patchVersion = 0;
-};
-bool operator==(const OSVersion &a, const OSVersion &b);
-bool operator!=(const OSVersion &a, const OSVersion &b);
-bool operator<(const OSVersion &a, const OSVersion &b);
-bool operator>=(const OSVersion &a, const OSVersion &b);
+using OSVersion = angle::VersionTriple;
 
 OSVersion GetMacOSVersion();
 
 OSVersion GetiOSVersion();
 
 OSVersion GetLinuxOSVersion();
-
-inline bool IsAndroid()
-{
-#if defined(ANGLE_PLATFORM_ANDROID)
-    return true;
-#else
-    return false;
-#endif
-}
 
 int GetAndroidSDKVersion();
 

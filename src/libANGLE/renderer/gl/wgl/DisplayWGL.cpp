@@ -9,6 +9,7 @@
 #include "libANGLE/renderer/gl/wgl/DisplayWGL.h"
 
 #include "common/debug.h"
+#include "common/system_utils.h"
 #include "libANGLE/Config.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Display.h"
@@ -162,9 +163,9 @@ egl::Error DisplayWGL::initializeImpl(egl::Display *display)
     mWindowClass                        = RegisterClassW(&intermediateClassDesc);
     if (!mWindowClass)
     {
-        return egl::EglNotInitialized()
-               << "Failed to register intermediate OpenGL window class \"" << className.c_str()
-               << "\":" << gl::FmtErr(HRESULT_CODE(GetLastError()));
+        return egl::EglNotInitialized() << "Failed to register intermediate OpenGL window class \""
+                                        << gl::FmtHex<egl::Display *, char>(display)
+                                        << "\":" << gl::FmtErr(HRESULT_CODE(GetLastError()));
     }
 
     HWND placeholderWindow =
@@ -411,7 +412,10 @@ SurfaceImpl *DisplayWGL::createWindowSurface(const egl::SurfaceState &state,
                                              const egl::AttributeMap &attribs)
 {
     EGLint orientation = static_cast<EGLint>(attribs.get(EGL_SURFACE_ORIENTATION_ANGLE, 0));
-    if (mUseDXGISwapChains)
+    // TODO(crbug.com/540829, anglebug.com/8201) other orientations
+    // are still unsupported, so allow fallback instead of crashing
+    // later in eglCreateWindowSurface
+    if (mUseDXGISwapChains && orientation == EGL_SURFACE_ORIENTATION_INVERT_Y_ANGLE)
     {
         egl::Error error = initializeD3DDevice();
         if (error.isError())
@@ -678,7 +682,8 @@ egl::Error DisplayWGL::makeCurrent(egl::Display *display,
                                    egl::Surface *readSurface,
                                    gl::Context *context)
 {
-    CurrentNativeContext &currentContext = mCurrentNativeContexts[std::this_thread::get_id()];
+    CurrentNativeContext &currentContext =
+        mCurrentNativeContexts[angle::GetCurrentThreadUniqueId()];
 
     HDC newDC = mDeviceContext;
     if (drawSurface)
@@ -907,9 +912,10 @@ egl::Error DisplayWGL::createRenderer(std::shared_ptr<RendererWGL> *outRenderer)
     {
         return egl::EglNotInitialized() << "Failed to make the intermediate WGL context current.";
     }
-    CurrentNativeContext &currentContext = mCurrentNativeContexts[std::this_thread::get_id()];
-    currentContext.dc                    = mDeviceContext;
-    currentContext.glrc                  = context;
+    CurrentNativeContext &currentContext =
+        mCurrentNativeContexts[angle::GetCurrentThreadUniqueId()];
+    currentContext.dc   = mDeviceContext;
+    currentContext.glrc = context;
 
     std::unique_ptr<FunctionsGL> functionsGL(
         new FunctionsGLWindows(mOpenGLModule, mFunctionsWGL->getProcAddress));

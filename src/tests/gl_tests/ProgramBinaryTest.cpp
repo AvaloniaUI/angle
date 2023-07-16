@@ -17,7 +17,7 @@
 
 using namespace angle;
 
-class ProgramBinaryTest : public ANGLETest
+class ProgramBinaryTest : public ANGLETest<>
 {
   protected:
     ProgramBinaryTest()
@@ -274,7 +274,9 @@ TEST_P(ProgramBinaryTest, ZeroSizedUnlinkedBinary)
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these
 // tests should be run against.
-ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(ProgramBinaryTest);
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(
+    ProgramBinaryTest,
+    ES3_VULKAN().disable(Feature::EnablePipelineCacheDataCompression));
 
 class ProgramBinaryES3Test : public ProgramBinaryTest
 {
@@ -859,7 +861,7 @@ TEST_P(ProgramBinaryTest, SRGBDecodeWithSamplerAndTexelFetchTest)
     // http://anglebug.com/4991
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsAMD() && IsWindows());
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && (IsNVIDIA() || IsARM64()) && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && (IsNVIDIA() || IsARM64()) && IsMac());
     ANGLE_SKIP_TEST_IF(IsOpenGLES() && IsNexus5X());
 
     constexpr char kVS[] =
@@ -1005,10 +1007,9 @@ TEST_P(ProgramBinaryES3Test, ArrayOfStructContainingArrayOfSamplers)
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ProgramBinaryES3Test);
-ANGLE_INSTANTIATE_TEST_ES3_AND(ProgramBinaryES3Test,
-                               ES3_VULKAN().enable(Feature::CreatePipelineDuringLink));
+ANGLE_INSTANTIATE_TEST_ES3(ProgramBinaryES3Test);
 
-class ProgramBinaryES31Test : public ANGLETest
+class ProgramBinaryES31Test : public ANGLETest<>
 {
   protected:
     ProgramBinaryES31Test()
@@ -1237,10 +1238,9 @@ TEST_P(ProgramBinaryES31Test, ImageTextureBinding)
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ProgramBinaryES31Test);
-ANGLE_INSTANTIATE_TEST_ES31_AND(ProgramBinaryES31Test,
-                                ES31_VULKAN().enable(Feature::CreatePipelineDuringLink));
+ANGLE_INSTANTIATE_TEST_ES31(ProgramBinaryES31Test);
 
-class ProgramBinaryTransformFeedbackTest : public ANGLETest
+class ProgramBinaryTransformFeedbackTest : public ANGLETest<>
 {
   protected:
     ProgramBinaryTransformFeedbackTest()
@@ -1350,8 +1350,7 @@ TEST_P(ProgramBinaryTransformFeedbackTest, GetTransformFeedbackVarying)
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ProgramBinaryTransformFeedbackTest);
-ANGLE_INSTANTIATE_TEST_ES3_AND(ProgramBinaryTransformFeedbackTest,
-                               ES3_VULKAN().enable(Feature::CreatePipelineDuringLink));
+ANGLE_INSTANTIATE_TEST_ES3(ProgramBinaryTransformFeedbackTest);
 
 // For the ProgramBinariesAcrossPlatforms tests, we need two sets of params:
 // - a set to save the program binary
@@ -1406,7 +1405,8 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
 
     EGLWindow *createAndInitEGLWindow(angle::PlatformParameters &param)
     {
-        EGLWindow *eglWindow = EGLWindow::New(param.majorVersion, param.minorVersion);
+        EGLWindow *eglWindow = EGLWindow::New(param.clientType, param.majorVersion,
+                                              param.minorVersion, param.profileMask);
         ConfigParameters configParams;
         bool result = eglWindow->initializeGL(mOSWindow, mEntryPointsLib.get(), param.driver,
                                               param.eglParameters, configParams);
@@ -1415,7 +1415,7 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
             EGLWindow::Delete(&eglWindow);
         }
 
-        angle::LoadGLES(eglGetProcAddress);
+        LoadUtilGLES(eglGetProcAddress);
 
         return eglWindow;
     }
@@ -1593,7 +1593,5 @@ ANGLE_INSTANTIATE_TEST(ProgramBinariesAcrossPlatforms,
                        PlatformsWithLinkResult(ES3_VULKAN(),  ES3_VULKAN(),  true ), // Loading + reloading binary should work
                        PlatformsWithLinkResult(ES31_VULKAN(), ES31_VULKAN(), true ), // Loading + reloading binary should work
                        PlatformsWithLinkResult(ES3_VULKAN(),  ES31_VULKAN(), false), // Switching to newer client version shouldn't work with Vulkan
-                       PlatformsWithLinkResult(ES2_VULKAN().enable(Feature::CreatePipelineDuringLink), ES2_VULKAN().enable(Feature::CreatePipelineDuringLink),true), // Loading + reloading binary with compiling shaders at link time should work
-                       PlatformsWithLinkResult(ES3_VULKAN().enable(Feature::CreatePipelineDuringLink), ES3_VULKAN().enable(Feature::CreatePipelineDuringLink),true), // Loading + reloading binary with compiling shaders at link time should work
                       );
 // clang-format on

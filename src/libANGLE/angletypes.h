@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #include <bitset>
+#include <functional>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -33,7 +34,12 @@ class Texture;
 
 enum class Command
 {
+    // The Blit command carries the bitmask of which buffers are being blit.  The command passed to
+    // the backends is:
+    //
+    //     Blit + (Color?0x1) + (Depth?0x2) + (Stencil?0x4)
     Blit,
+    BlitAll = Blit + 0x7,
     Clear,
     CopyImage,
     Dispatch,
@@ -42,7 +48,14 @@ enum class Command
     Invalidate,
     ReadPixels,
     TexImage,
-    Other
+    Other,
+};
+
+enum CommandBlitBuffer
+{
+    CommandBlitBufferColor   = 0x1,
+    CommandBlitBufferDepth   = 0x2,
+    CommandBlitBufferStencil = 0x4,
 };
 
 enum class InitState
@@ -118,16 +131,10 @@ bool operator!=(const RectangleImpl<T> &a, const RectangleImpl<T> &b);
 
 using Rectangle = RectangleImpl<int>;
 
-enum class ClipSpaceOrigin
-{
-    LowerLeft = 0,
-    UpperLeft = 1
-};
-
 // Calculate the intersection of two rectangles.  Returns false if the intersection is empty.
-ANGLE_NO_DISCARD bool ClipRectangle(const Rectangle &source,
-                                    const Rectangle &clip,
-                                    Rectangle *intersection);
+[[nodiscard]] bool ClipRectangle(const Rectangle &source,
+                                 const Rectangle &clip,
+                                 Rectangle *intersection);
 // Calculate the smallest rectangle that covers both rectangles.  This rectangle may cover areas
 // not covered by the two rectangles, for example in this situation:
 //
@@ -196,12 +203,17 @@ struct Box
           height(size.height),
           depth(size.depth)
     {}
+    bool valid() const;
     bool operator==(const Box &other) const;
     bool operator!=(const Box &other) const;
     Rectangle toRect() const;
 
     // Whether the Box has offset 0 and the same extents as argument.
     bool coversSameExtent(const Extents &size) const;
+
+    bool contains(const Box &other) const;
+    size_t volume() const;
+    void extend(const Box &other);
 
     int x;
     int y;
@@ -216,14 +228,22 @@ struct RasterizerState final
     // This will zero-initialize the struct, including padding.
     RasterizerState();
     RasterizerState(const RasterizerState &other);
+    RasterizerState &operator=(const RasterizerState &other);
 
     bool cullFace;
     CullFaceMode cullMode;
     GLenum frontFace;
 
+    PolygonMode polygonMode;
+
+    bool polygonOffsetPoint;
+    bool polygonOffsetLine;
     bool polygonOffsetFill;
     GLfloat polygonOffsetFactor;
     GLfloat polygonOffsetUnits;
+    GLfloat polygonOffsetClamp;
+
+    bool depthClamp;
 
     // pointDrawMode/multiSample are only used in the D3D back-end right now.
     bool pointDrawMode;
@@ -232,6 +252,15 @@ struct RasterizerState final
     bool rasterizerDiscard;
 
     bool dither;
+
+    bool isPolygonOffsetEnabled() const
+    {
+        static_assert(static_cast<int>(PolygonMode::Point) == 0, "PolygonMode::Point");
+        static_assert(static_cast<int>(PolygonMode::Line) == 1, "PolygonMode::Line");
+        static_assert(static_cast<int>(PolygonMode::Fill) == 2, "PolygonMode::Fill");
+        return (1 << static_cast<int>(polygonMode)) &
+               ((polygonOffsetPoint << 0) | (polygonOffsetLine << 1) | (polygonOffsetFill << 2));
+    }
 };
 
 bool operator==(const RasterizerState &a, const RasterizerState &b);
@@ -265,6 +294,7 @@ struct DepthStencilState final
     // This will zero-initialize the struct, including padding.
     DepthStencilState();
     DepthStencilState(const DepthStencilState &other);
+    DepthStencilState &operator=(const DepthStencilState &other);
 
     bool isDepthMaskedOut() const;
     bool isStencilMaskedOut() const;
@@ -347,6 +377,12 @@ class SamplerState final
     GLenum getWrapR() const { return mWrapR; }
 
     bool setWrapR(GLenum wrapR);
+
+    bool usesBorderColor() const
+    {
+        return mWrapS == GL_CLAMP_TO_BORDER || mWrapT == GL_CLAMP_TO_BORDER ||
+               mWrapR == GL_CLAMP_TO_BORDER;
+    }
 
     float getMaxAnisotropy() const { return mMaxAnisotropy; }
 
@@ -470,6 +506,9 @@ struct PixelPackState : PixelStoreStateBase
 {
     bool reverseRowOrder = false;
 };
+
+// Used in VertexArray.
+using VertexArrayBufferBindingMask = angle::BitSet<MAX_VERTEX_ATTRIB_BINDINGS>;
 
 // Used in Program and VertexArray.
 using AttributesMask = angle::BitSet<MAX_VERTEX_ATTRIBS>;
@@ -782,7 +821,7 @@ class BlendStateExt final
 
     uint8_t mDrawBufferCount;
 
-    ANGLE_MAYBE_UNUSED uint32_t kUnused = 0;
+    ANGLE_MAYBE_UNUSED_PRIVATE_FIELD uint32_t kUnused = 0;
 };
 
 static_assert(sizeof(BlendStateExt) == sizeof(uint64_t) +
@@ -847,10 +886,10 @@ ANGLE_INLINE void SetComponentTypeMask(ComponentType type, size_t index, Compone
     *mask |= kComponentMasks[type] << index;
 }
 
-ANGLE_INLINE ComponentType GetComponentTypeMask(const ComponentTypeMask &mask, size_t index)
+ANGLE_INLINE ComponentType GetComponentTypeMask(ComponentTypeMask mask, size_t index)
 {
     ASSERT(index <= kMaxComponentTypeMaskIndex);
-    uint32_t mask_bits = static_cast<uint32_t>((mask.to_ulong() >> index) & 0x10001);
+    uint32_t mask_bits = mask.bits() >> index & 0x10001;
     switch (mask_bits)
     {
         case 0x10001:
@@ -862,6 +901,15 @@ ANGLE_INLINE ComponentType GetComponentTypeMask(const ComponentTypeMask &mask, s
         default:
             return ComponentType::InvalidEnum;
     }
+}
+
+ANGLE_INLINE ComponentTypeMask GetActiveComponentTypeMask(gl::AttributesMask activeAttribLocations)
+{
+    const uint32_t activeAttribs = static_cast<uint32_t>(activeAttribLocations.bits());
+
+    // Ever attrib index takes one bit from the lower 16-bits and another bit from the upper
+    // 16-bits at the same index.
+    return ComponentTypeMask(activeAttribs << kMaxComponentTypeMaskIndex | activeAttribs);
 }
 
 bool ValidateComponentTypeMasks(unsigned long outputTypes,
@@ -888,26 +936,6 @@ enum class RenderToTextureImageIndex
 
 template <typename T>
 using RenderToTextureImageMap = angle::PackedEnumMap<RenderToTextureImageIndex, T>;
-
-struct ContextID
-{
-    uint32_t value;
-};
-
-inline bool operator==(ContextID lhs, ContextID rhs)
-{
-    return lhs.value == rhs.value;
-}
-
-inline bool operator!=(ContextID lhs, ContextID rhs)
-{
-    return lhs.value != rhs.value;
-}
-
-inline bool operator<(ContextID lhs, ContextID rhs)
-{
-    return lhs.value < rhs.value;
-}
 
 constexpr size_t kCubeFaceCount = 6;
 
@@ -961,6 +989,8 @@ using SupportedSampleSet = std::set<GLuint>;
 template <typename T>
 using TransformFeedbackBuffersArray =
     std::array<T, gl::IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS>;
+
+using ClipDistanceEnableBits = angle::BitSet32<IMPLEMENTATION_MAX_CLIP_DISTANCES>;
 
 template <typename T>
 using QueryTypeMap = angle::PackedEnumMap<QueryType, T>;
@@ -1111,6 +1141,46 @@ inline DestT *SafeGetImplAs(SrcT *src)
 
 namespace angle
 {
+// Under certain circumstances, such as for increased parallelism, the backend may defer an
+// operation to be done at the end of a call after the locks have been unlocked.  The entry point
+// function passes an |UnlockedTailCall| through the frontend to the backend.  If it is set, the
+// entry point would execute it at the end of the call.
+//
+// Since the function is called without any locks, care must be taken to minimize the amount of work
+// in such calls and ensure thread safety (for example by using fine grained locks inside the call
+// itself).
+class UnlockedTailCall final : angle::NonCopyable
+{
+  public:
+    using CallType = std::function<void(void)>;
+
+    UnlockedTailCall();
+    ~UnlockedTailCall();
+
+    void add(CallType &&call);
+    ANGLE_INLINE void run()
+    {
+        if (!mCalls.empty())
+        {
+            runImpl();
+        }
+    }
+
+    bool any() const { return !mCalls.empty(); }
+
+  private:
+    void runImpl();
+
+    // Typically, there is only one tail call.  It is possible to end up with 2 tail calls currently
+    // with unMakeCurrent destroying both the read and draw surfaces, each adding a tail call in the
+    // Vulkan backend.
+    //
+    // The max count can be increased as necessary.  An assertion would fire inside FixedVector if
+    // the max count is surpassed.
+    static constexpr size_t kMaxCallCount = 2;
+    angle::FixedVector<CallType, kMaxCallCount> mCalls;
+};
+
 // Zero-based for better array indexing
 enum FramebufferBinding
 {

@@ -424,7 +424,8 @@ bool ValidateColorspaceAttribute(const ValidationContext *val,
         case EGL_GL_COLORSPACE_LINEAR:
             break;
         case EGL_GL_COLORSPACE_DISPLAY_P3_LINEAR_EXT:
-            if (!displayExtensions.glColorspaceDisplayP3Linear)
+            if (!displayExtensions.glColorspaceDisplayP3Linear &&
+                !displayExtensions.eglColorspaceAttributePassthroughANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE,
                               "EXT_gl_colorspace_display_p3_linear is not available.");
@@ -432,14 +433,16 @@ bool ValidateColorspaceAttribute(const ValidationContext *val,
             }
             break;
         case EGL_GL_COLORSPACE_DISPLAY_P3_EXT:
-            if (!displayExtensions.glColorspaceDisplayP3)
+            if (!displayExtensions.glColorspaceDisplayP3 &&
+                !displayExtensions.eglColorspaceAttributePassthroughANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE, "EXT_gl_colorspace_display_p3 is not available.");
                 return false;
             }
             break;
         case EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT:
-            if (!displayExtensions.glColorspaceDisplayP3Passthrough)
+            if (!displayExtensions.glColorspaceDisplayP3Passthrough &&
+                !displayExtensions.eglColorspaceAttributePassthroughANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE,
                               "EGL_EXT_gl_colorspace_display_p3_passthrough is not available.");
@@ -447,14 +450,16 @@ bool ValidateColorspaceAttribute(const ValidationContext *val,
             }
             break;
         case EGL_GL_COLORSPACE_SCRGB_EXT:
-            if (!displayExtensions.glColorspaceScrgb)
+            if (!displayExtensions.glColorspaceScrgb &&
+                !displayExtensions.eglColorspaceAttributePassthroughANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE, "EXT_gl_colorspace_scrgb is not available.");
                 return false;
             }
             break;
         case EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT:
-            if (!displayExtensions.glColorspaceScrgbLinear)
+            if (!displayExtensions.glColorspaceScrgbLinear &&
+                !displayExtensions.eglColorspaceAttributePassthroughANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE,
                               "EXT_gl_colorspace_scrgb_linear is not available.");
@@ -555,6 +560,13 @@ bool ValidateGetPlatformDisplayCommon(const ValidationContext *val,
             if (!clientExtensions.platformGbmKHR)
             {
                 val->setError(EGL_BAD_PARAMETER, "Platform GBM extension is not active");
+                return false;
+            }
+            break;
+        case EGL_PLATFORM_WAYLAND_EXT:
+            if (!clientExtensions.platformWaylandEXT)
+            {
+                val->setError(EGL_BAD_PARAMETER, "Platform Wayland extension is not active");
                 return false;
             }
             break;
@@ -770,6 +782,7 @@ bool ValidateGetPlatformDisplayCommon(const ValidationContext *val,
                     break;
                 case EGL_PLATFORM_ANGLE_DEVICE_ID_HIGH_ANGLE:
                 case EGL_PLATFORM_ANGLE_DEVICE_ID_LOW_ANGLE:
+                case EGL_PLATFORM_ANGLE_DISPLAY_KEY_ANGLE:
                     if (!clientExtensions.platformANGLEDeviceId)
                     {
                         val->setError(EGL_BAD_ATTRIBUTE,
@@ -1014,15 +1027,16 @@ bool ValidateLabeledObject(const ValidationContext *val,
                            const Display *display,
                            ObjectType objectType,
                            EGLObjectKHR object,
-                           LabeledObject **outLabeledObject)
+                           const LabeledObject **outLabeledObject)
 {
     switch (objectType)
     {
         case ObjectType::Context:
         {
-            gl::Context *context = static_cast<gl::Context *>(object);
-            ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
-            *outLabeledObject = context;
+            EGLContext context      = static_cast<EGLContext>(object);
+            gl::ContextID contextID = PackParam<gl::ContextID>(context);
+            ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
+            *outLabeledObject = display->getContext(contextID);
             break;
         }
 
@@ -1046,9 +1060,10 @@ bool ValidateLabeledObject(const ValidationContext *val,
 
         case ObjectType::Image:
         {
-            Image *image = static_cast<Image *>(object);
-            ANGLE_VALIDATION_TRY(ValidateImage(val, display, image));
-            *outLabeledObject = image;
+            EGLImage image  = static_cast<EGLImage>(object);
+            ImageID imageID = PackParam<ImageID>(image);
+            ANGLE_VALIDATION_TRY(ValidateImage(val, display, imageID));
+            *outLabeledObject = display->getImage(imageID);
             break;
         }
 
@@ -1062,16 +1077,18 @@ bool ValidateLabeledObject(const ValidationContext *val,
 
         case ObjectType::Surface:
         {
-            Surface *surface = static_cast<Surface *>(object);
-            ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
-            *outLabeledObject = surface;
+            EGLSurface surface  = static_cast<EGLSurface>(object);
+            SurfaceID surfaceID = PackParam<SurfaceID>(surface);
+            ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
+            *outLabeledObject = display->getSurface(surfaceID);
             break;
         }
 
         case ObjectType::Sync:
         {
-            Sync *sync = static_cast<Sync *>(object);
-            ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
+            Sync *sync    = static_cast<Sync *>(object);
+            SyncID syncID = PackParam<SyncID>(sync);
+            ANGLE_VALIDATION_TRY(ValidateSync(val, display, syncID));
             *outLabeledObject = sync;
             break;
         }
@@ -1092,6 +1109,16 @@ bool ValidateLabeledObject(const ValidationContext *val,
     }
 
     return true;
+}
+
+bool ValidateLabeledObject(const ValidationContext *val,
+                           Display *display,
+                           ObjectType objectType,
+                           EGLObjectKHR object,
+                           LabeledObject **outLabeledObject)
+{
+    return ValidateLabeledObject(val, const_cast<const Display *>(display), objectType, object,
+                                 const_cast<const LabeledObject **>(outLabeledObject));
 }
 
 // This is a common sub-check of Display status that's shared by multiple functions
@@ -1160,33 +1187,44 @@ bool ValidateCompatibleSurface(const ValidationContext *val,
     const Config *contextConfig = context->getConfig();
     const Config *surfaceConfig = surface->getConfig();
 
-    // Surface compatible with client API - only OPENGL_ES supported
-    switch (context->getClientMajorVersion())
+    if (context->getClientType() != EGL_OPENGL_API)
     {
-        case 1:
-            if (!(surfaceConfig->renderableType & EGL_OPENGL_ES_BIT))
-            {
-                val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 1.x.");
+        // Surface compatible with client API - only OPENGL_ES supported
+        switch (context->getClientMajorVersion())
+        {
+            case 1:
+                if (!(surfaceConfig->renderableType & EGL_OPENGL_ES_BIT))
+                {
+                    val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 1.x.");
+                    return false;
+                }
+                break;
+            case 2:
+                if (!(surfaceConfig->renderableType & EGL_OPENGL_ES2_BIT))
+                {
+                    val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 2.x.");
+                    return false;
+                }
+                break;
+            case 3:
+                if (!(surfaceConfig->renderableType & (EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT)))
+                {
+                    val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 3.x.");
+                    return false;
+                }
+                break;
+            default:
+                val->setError(EGL_BAD_MATCH, "Surface not compatible with Context API.");
                 return false;
-            }
-            break;
-        case 2:
-            if (!(surfaceConfig->renderableType & EGL_OPENGL_ES2_BIT))
-            {
-                val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 2.x.");
-                return false;
-            }
-            break;
-        case 3:
-            if (!(surfaceConfig->renderableType & (EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT)))
-            {
-                val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL ES 3.x.");
-                return false;
-            }
-            break;
-        default:
-            val->setError(EGL_BAD_MATCH, "Surface not compatible with Context API.");
+        }
+    }
+    else
+    {
+        if (!(surfaceConfig->renderableType & EGL_OPENGL_BIT))
+        {
+            val->setError(EGL_BAD_MATCH, "Surface not compatible with OpenGL Desktop.");
             return false;
+        }
     }
 
     // EGL KHR no config context
@@ -1282,7 +1320,7 @@ bool ValidateCreateSyncBase(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, currentDisplay, currentContext));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, currentDisplay, currentContext->id()));
 
             if (!currentContext->getExtensions().EGLSyncOES)
             {
@@ -1314,7 +1352,7 @@ bool ValidateCreateSyncBase(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, currentDisplay, currentContext));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, currentDisplay, currentContext->id()));
 
             if (!currentContext->getExtensions().EGLSyncOES)
             {
@@ -1354,6 +1392,68 @@ bool ValidateCreateSyncBase(const ValidationContext *val,
             }
             break;
 
+        case EGL_SYNC_METAL_SHARED_EVENT_ANGLE:
+            if (!display->getExtensions().fenceSync)
+            {
+                val->setError(EGL_BAD_MATCH, "EGL_KHR_fence_sync extension is not available");
+                return false;
+            }
+
+            if (!display->getExtensions().mtlSyncSharedEventANGLE)
+            {
+                val->setError(EGL_BAD_DISPLAY,
+                              "EGL_ANGLE_metal_shared_event_sync is not available");
+                return false;
+            }
+
+            if (display != currentDisplay)
+            {
+                val->setError(EGL_BAD_MATCH,
+                              "CreateSync can only be called on the current display");
+                return false;
+            }
+
+            ANGLE_VALIDATION_TRY(ValidateContext(val, currentDisplay, currentContext->id()));
+
+            // This should be implied by exposing EGL_KHR_fence_sync
+            ASSERT(currentContext->getExtensions().EGLSyncOES);
+
+            for (const auto &attributeIter : attribs)
+            {
+                EGLAttrib attribute = attributeIter.first;
+                EGLAttrib value     = attributeIter.second;
+
+                switch (attribute)
+                {
+                    case EGL_SYNC_CONDITION:
+                        if (type != EGL_SYNC_METAL_SHARED_EVENT_ANGLE ||
+                            (value != EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR &&
+                             value != EGL_SYNC_METAL_SHARED_EVENT_SIGNALED_ANGLE))
+                        {
+                            val->setError(EGL_BAD_ATTRIBUTE, "Invalid attribute");
+                        }
+                        break;
+
+                    case EGL_SYNC_METAL_SHARED_EVENT_OBJECT_ANGLE:
+                        if (!value)
+                        {
+                            val->setError(EGL_BAD_ATTRIBUTE,
+                                          "EGL_SYNC_METAL_SHARED_EVENT_ANGLE can't be NULL");
+                            return false;
+                        }
+                        break;
+
+                    case EGL_SYNC_METAL_SHARED_EVENT_SIGNAL_VALUE_LO_ANGLE:
+                    case EGL_SYNC_METAL_SHARED_EVENT_SIGNAL_VALUE_HI_ANGLE:
+                        break;
+
+                    default:
+                        val->setError(EGL_BAD_ATTRIBUTE, "Invalid attribute");
+                        return false;
+                }
+            }
+            break;
+
         default:
             if (isExt)
             {
@@ -1372,18 +1472,21 @@ bool ValidateCreateSyncBase(const ValidationContext *val,
 
 bool ValidateGetSyncAttribBase(const ValidationContext *val,
                                const Display *display,
-                               const Sync *sync,
+                               SyncID sync,
                                EGLint attribute)
 {
     ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
 
+    const Sync *syncObj = display->getSync(sync);
+
     switch (attribute)
     {
         case EGL_SYNC_CONDITION_KHR:
-            switch (sync->getType())
+            switch (syncObj->getType())
             {
                 case EGL_SYNC_FENCE_KHR:
                 case EGL_SYNC_NATIVE_FENCE_ANDROID:
+                case EGL_SYNC_METAL_SHARED_EVENT_ANGLE:
                     break;
 
                 default:
@@ -1449,12 +1552,17 @@ bool ValidateCreateContextAttribute(const ValidationContext *val,
         case EGL_CONTEXT_MINOR_VERSION:
         case EGL_CONTEXT_FLAGS_KHR:
         case EGL_CONTEXT_OPENGL_DEBUG:
+        case EGL_CONTEXT_OPENGL_ROBUST_ACCESS:
             break;
 
         case EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR:
-            // Only valid for OpenGL (non-ES) contexts
-            val->setError(EGL_BAD_ATTRIBUTE);
-            return false;
+            if (val->eglThread->getAPI() != EGL_OPENGL_API)
+            {
+                // Only valid for OpenGL (non-ES) contexts
+                val->setError(EGL_BAD_ATTRIBUTE, "OpenGL profile mask requires an OpenGL context.");
+                return false;
+            }
+            break;
 
         case EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT:
             if (!display->getExtensions().createContextRobustness)
@@ -1692,6 +1800,19 @@ bool ValidateCreateContextAttributeValue(const ValidationContext *val,
         case EGL_CONTEXT_VIRTUALIZATION_GROUP_ANGLE:
             break;
 
+        case EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR:
+        {
+            constexpr EGLint kValidProfileMaskFlags =
+                (EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT |
+                 EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT);
+            if ((value & ~kValidProfileMaskFlags) != 0)
+            {
+                val->setError(EGL_BAD_ATTRIBUTE, "Invalid OpenGL profile mask.");
+                return false;
+            }
+            break;
+        }
+
         case EGL_CONTEXT_FLAGS_KHR:
         {
             // Note: EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE_BIT_KHR does not apply to ES
@@ -1706,6 +1827,7 @@ bool ValidateCreateContextAttributeValue(const ValidationContext *val,
         }
 
         case EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT:
+        case EGL_CONTEXT_OPENGL_ROBUST_ACCESS:
             if (value != EGL_TRUE && value != EGL_FALSE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE);
@@ -2117,11 +2239,11 @@ bool ValidateDisplay(const ValidationContext *val, const Display *display)
     return true;
 }
 
-bool ValidateSurface(const ValidationContext *val, const Display *display, const Surface *surface)
+bool ValidateSurface(const ValidationContext *val, const Display *display, SurfaceID surfaceID)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
-    if (!display->isValidSurface(surface))
+    if (!display->isValidSurface(surfaceID))
     {
         if (val)
         {
@@ -2149,13 +2271,27 @@ bool ValidateConfig(const ValidationContext *val, const Display *display, const 
     return true;
 }
 
-bool ValidateContext(const ValidationContext *val,
-                     const Display *display,
-                     const gl::Context *context)
+bool ValidateThreadContext(const ValidationContext *val,
+                           const Display *display,
+                           EGLenum noContextError)
+{
+    ASSERT(val);
+    ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
+
+    if (!val->eglThread->getContext())
+    {
+        val->setError(noContextError, "No context is current.");
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateContext(const ValidationContext *val, const Display *display, gl::ContextID contextID)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
-    if (!display->isValidContext(context))
+    if (!display->isValidContext(contextID))
     {
         if (val)
         {
@@ -2167,11 +2303,11 @@ bool ValidateContext(const ValidationContext *val,
     return true;
 }
 
-bool ValidateImage(const ValidationContext *val, const Display *display, const Image *image)
+bool ValidateImage(const ValidationContext *val, const Display *display, ImageID imageID)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
-    if (!display->isValidImage(image))
+    if (!display->isValidImage(imageID))
     {
         if (val)
         {
@@ -2206,7 +2342,7 @@ bool ValidateDevice(const ValidationContext *val, const Device *device)
     return true;
 }
 
-bool ValidateSync(const ValidationContext *val, const Display *display, const Sync *sync)
+bool ValidateSync(const ValidationContext *val, const Display *display, SyncID sync)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
@@ -2233,14 +2369,16 @@ const Display *GetDisplayIfValid(const Display *display)
     return ValidateDisplay(nullptr, display) ? display : nullptr;
 }
 
-const Surface *GetSurfaceIfValid(const Display *display, const Surface *surface)
+const Surface *GetSurfaceIfValid(const Display *display, SurfaceID surfaceID)
 {
-    return ValidateSurface(nullptr, display, surface) ? surface : nullptr;
+    // display->getSurface() - validates surfaceID
+    return ValidateDisplay(nullptr, display) ? display->getSurface(surfaceID) : nullptr;
 }
 
-const Image *GetImageIfValid(const Display *display, const Image *image)
+const Image *GetImageIfValid(const Display *display, ImageID imageID)
 {
-    return ValidateImage(nullptr, display, image) ? image : nullptr;
+    // display->getImage() - validates imageID
+    return ValidateDisplay(nullptr, display) ? display->getImage(imageID) : nullptr;
 }
 
 const Stream *GetStreamIfValid(const Display *display, const Stream *stream)
@@ -2248,9 +2386,15 @@ const Stream *GetStreamIfValid(const Display *display, const Stream *stream)
     return ValidateStream(nullptr, display, stream) ? stream : nullptr;
 }
 
-const gl::Context *GetContextIfValid(const Display *display, const gl::Context *context)
+const gl::Context *GetContextIfValid(const Display *display, gl::ContextID contextID)
 {
-    return ValidateContext(nullptr, display, context) ? context : nullptr;
+    // display->getContext() - validates contextID
+    return ValidateDisplay(nullptr, display) ? display->getContext(contextID) : nullptr;
+}
+
+gl::Context *GetContextIfValid(Display *display, gl::ContextID contextID)
+{
+    return ValidateDisplay(nullptr, display) ? display->getContext(contextID) : nullptr;
 }
 
 const Device *GetDeviceIfValid(const Device *device)
@@ -2258,13 +2402,33 @@ const Device *GetDeviceIfValid(const Device *device)
     return ValidateDevice(nullptr, device) ? device : nullptr;
 }
 
-const Sync *GetSyncIfValid(const Display *display, const Sync *sync)
+const Sync *GetSyncIfValid(const Display *display, SyncID syncID)
 {
-    return ValidateSync(nullptr, display, sync) ? sync : nullptr;
+    // display->getSync() - validates syncID
+    return ValidateDisplay(nullptr, display) ? display->getSync(syncID) : nullptr;
+}
+
+const LabeledObject *GetLabeledObjectIfValid(Thread *thread,
+                                             const Display *display,
+                                             ObjectType objectType,
+                                             EGLObjectKHR object)
+{
+    if (objectType == ObjectType::Thread)
+    {
+        return thread;
+    }
+
+    const LabeledObject *labeledObject = nullptr;
+    if (ValidateLabeledObject(nullptr, display, objectType, object, &labeledObject))
+    {
+        return labeledObject;
+    }
+
+    return nullptr;
 }
 
 LabeledObject *GetLabeledObjectIfValid(Thread *thread,
-                                       const Display *display,
+                                       Display *display,
                                        ObjectType objectType,
                                        EGLObjectKHR object)
 {
@@ -2298,7 +2462,7 @@ bool ValidateTerminate(const ValidationContext *val, const Display *display)
 bool ValidateCreateContext(const ValidationContext *val,
                            const Display *display,
                            const Config *configuration,
-                           const gl::Context *shareContext,
+                           gl::ContextID shareContextID,
                            const AttributeMap &attributes)
 {
     if (configuration)
@@ -2316,6 +2480,18 @@ bool ValidateCreateContext(const ValidationContext *val,
         }
     }
 
+    if (shareContextID.value != 0)
+    {
+        // Shared context is invalid or is owned by another display
+        if (!display->isValidContext(shareContextID))
+        {
+            val->setError(EGL_BAD_MATCH);
+            return false;
+        }
+    }
+
+    const gl::Context *shareContext = display->getContext(shareContextID);
+
     ANGLE_VALIDATION_TRY(attributes.validate(val, display, ValidateCreateContextAttribute));
 
     for (const auto &attributePair : attributes)
@@ -2329,89 +2505,102 @@ bool ValidateCreateContext(const ValidationContext *val,
     // Get the requested client version (default is 1) and check it is 2 or 3.
     EGLAttrib clientMajorVersion = attributes.get(EGL_CONTEXT_CLIENT_VERSION, 1);
     EGLAttrib clientMinorVersion = attributes.get(EGL_CONTEXT_MINOR_VERSION, 0);
+    EGLenum api                  = val->eglThread->getAPI();
 
-    switch (clientMajorVersion)
+    switch (api)
     {
-        case 1:
-            if (clientMinorVersion != 0 && clientMinorVersion != 1)
+        case EGL_OPENGL_ES_API:
+            switch (clientMajorVersion)
             {
-                val->setError(EGL_BAD_ATTRIBUTE);
-                return false;
-            }
-            if (configuration == EGL_NO_CONFIG_KHR)
-            {
-                val->setError(EGL_BAD_MATCH);
-                return false;
-            }
-            if ((configuration != EGL_NO_CONFIG_KHR) &&
-                !(configuration->renderableType & EGL_OPENGL_ES_BIT))
-            {
-                val->setError(EGL_BAD_MATCH);
-                return false;
+                case 1:
+                    if (clientMinorVersion != 0 && clientMinorVersion != 1)
+                    {
+                        val->setError(EGL_BAD_ATTRIBUTE);
+                        return false;
+                    }
+                    if (configuration == EGL_NO_CONFIG_KHR)
+                    {
+                        val->setError(EGL_BAD_MATCH);
+                        return false;
+                    }
+                    if ((configuration != EGL_NO_CONFIG_KHR) &&
+                        !(configuration->renderableType & EGL_OPENGL_ES_BIT))
+                    {
+                        val->setError(EGL_BAD_MATCH);
+                        return false;
+                    }
+                    break;
+
+                case 2:
+                    if (clientMinorVersion != 0)
+                    {
+                        val->setError(EGL_BAD_ATTRIBUTE);
+                        return false;
+                    }
+                    if ((configuration != EGL_NO_CONFIG_KHR) &&
+                        !(configuration->renderableType & EGL_OPENGL_ES2_BIT))
+                    {
+                        val->setError(EGL_BAD_MATCH);
+                        return false;
+                    }
+                    break;
+                case 3:
+                    if (clientMinorVersion < 0 || clientMinorVersion > 2)
+                    {
+                        val->setError(EGL_BAD_ATTRIBUTE);
+                        return false;
+                    }
+                    if ((configuration != EGL_NO_CONFIG_KHR) &&
+                        !(configuration->renderableType & EGL_OPENGL_ES3_BIT))
+                    {
+                        val->setError(EGL_BAD_MATCH);
+                        return false;
+                    }
+                    if (display->getMaxSupportedESVersion() <
+                        gl::Version(static_cast<GLuint>(clientMajorVersion),
+                                    static_cast<GLuint>(clientMinorVersion)))
+                    {
+                        gl::Version max = display->getMaxSupportedESVersion();
+                        val->setError(EGL_BAD_ATTRIBUTE,
+                                      "Requested GLES version (%" PRIxPTR ".%" PRIxPTR
+                                      ") is greater than "
+                                      "max supported (%d, %d).",
+                                      clientMajorVersion, clientMinorVersion, max.major, max.minor);
+                        return false;
+                    }
+                    if ((attributes.get(EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE, EGL_FALSE) ==
+                         EGL_TRUE) &&
+                        (clientMinorVersion > 1))
+                    {
+                        val->setError(EGL_BAD_ATTRIBUTE,
+                                      "Requested GLES version (%" PRIxPTR ".%" PRIxPTR
+                                      ") is greater than "
+                                      "max supported 3.1 for WebGL.",
+                                      clientMajorVersion, clientMinorVersion);
+                        return false;
+                    }
+                    break;
+                default:
+                    val->setError(EGL_BAD_ATTRIBUTE);
+                    return false;
             }
             break;
 
-        case 2:
-            if (clientMinorVersion != 0)
-            {
-                val->setError(EGL_BAD_ATTRIBUTE);
-                return false;
-            }
+        case EGL_OPENGL_API:
+            // The requested configuration must use EGL_OPENGL_BIT if EGL_OPENGL_BIT is the
+            // currently bound API.
             if ((configuration != EGL_NO_CONFIG_KHR) &&
-                !(configuration->renderableType & EGL_OPENGL_ES2_BIT))
+                !(configuration->renderableType & EGL_OPENGL_BIT))
             {
-                val->setError(EGL_BAD_MATCH);
+                val->setError(EGL_BAD_CONFIG);
                 return false;
             }
+            // TODO(http://anglebug.com/7533): validate desktop OpenGL versions and profile mask
             break;
-        case 3:
-            if (clientMinorVersion < 0 || clientMinorVersion > 2)
-            {
-                val->setError(EGL_BAD_ATTRIBUTE);
-                return false;
-            }
-            if ((configuration != EGL_NO_CONFIG_KHR) &&
-                !(configuration->renderableType & EGL_OPENGL_ES3_BIT))
-            {
-                val->setError(EGL_BAD_MATCH);
-                return false;
-            }
-            if (display->getMaxSupportedESVersion() <
-                gl::Version(static_cast<GLuint>(clientMajorVersion),
-                            static_cast<GLuint>(clientMinorVersion)))
-            {
-                gl::Version max = display->getMaxSupportedESVersion();
-                val->setError(EGL_BAD_ATTRIBUTE,
-                              "Requested GLES version (%" PRIxPTR ".%" PRIxPTR
-                              ") is greater than "
-                              "max supported (%d, %d).",
-                              clientMajorVersion, clientMinorVersion, max.major, max.minor);
-                return false;
-            }
-            if ((attributes.get(EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE, EGL_FALSE) == EGL_TRUE) &&
-                (clientMinorVersion > 1))
-            {
-                val->setError(EGL_BAD_ATTRIBUTE,
-                              "Requested GLES version (%" PRIxPTR ".%" PRIxPTR
-                              ") is greater than "
-                              "max supported 3.1 for WebGL.",
-                              clientMajorVersion, clientMinorVersion);
-                return false;
-            }
-            break;
+
         default:
-            val->setError(EGL_BAD_ATTRIBUTE);
+            val->setError(EGL_BAD_MATCH, "Unsupported API.");
             return false;
-    }
-
-    if (shareContext)
-    {
-        // Shared context is invalid or is owned by another display
-        if (!display->isValidContext(shareContext))
-        {
-            val->setError(EGL_BAD_MATCH);
-            return false;
-        }
     }
 
     return true;
@@ -2837,11 +3026,6 @@ bool ValidateCreatePbufferFromClientBuffer(const ValidationContext *val,
                                   "<buftype> doesn't support setting texture offset");
                     return false;
                 }
-                if (value < 0)
-                {
-                    val->setError(EGL_BAD_ATTRIBUTE, "Texture offset cannot be negative");
-                    return false;
-                }
                 break;
 
             case EGL_PROTECTED_CONTENT_EXT:
@@ -3065,11 +3249,15 @@ bool ValidateCreatePixmapSurface(const ValidationContext *val,
 
 bool ValidateMakeCurrent(const ValidationContext *val,
                          const Display *display,
-                         const Surface *draw,
-                         const Surface *read,
-                         const gl::Context *context)
+                         SurfaceID drawSurfaceID,
+                         SurfaceID readSurfaceID,
+                         gl::ContextID contextID)
 {
-    if (context == EGL_NO_CONTEXT && (draw != EGL_NO_SURFACE || read != EGL_NO_SURFACE))
+    bool noDraw    = drawSurfaceID.value == 0;
+    bool noRead    = readSurfaceID.value == 0;
+    bool noContext = contextID.value == 0;
+
+    if (noContext && (!noDraw || !noRead))
     {
         val->setError(EGL_BAD_MATCH, "If ctx is EGL_NO_CONTEXT, surfaces must be EGL_NO_SURFACE");
         return false;
@@ -3077,11 +3265,11 @@ bool ValidateMakeCurrent(const ValidationContext *val,
 
     // If ctx is EGL_NO_CONTEXT and either draw or read are not EGL_NO_SURFACE, an EGL_BAD_MATCH
     // error is generated. EGL_KHR_surfaceless_context allows both surfaces to be EGL_NO_SURFACE.
-    if (context != EGL_NO_CONTEXT && (draw == EGL_NO_SURFACE || read == EGL_NO_SURFACE))
+    if (!noContext && (noDraw || noRead))
     {
         if (display->getExtensions().surfacelessContext)
         {
-            if ((draw == EGL_NO_SURFACE) != (read == EGL_NO_SURFACE))
+            if (noDraw != noRead)
             {
                 val->setError(EGL_BAD_MATCH,
                               "If ctx is not EGL_NOT_CONTEXT, draw or read must "
@@ -3099,7 +3287,7 @@ bool ValidateMakeCurrent(const ValidationContext *val,
 
     // If either of draw or read is a valid surface and the other is EGL_NO_SURFACE, an
     // EGL_BAD_MATCH error is generated.
-    if ((read == EGL_NO_SURFACE) != (draw == EGL_NO_SURFACE))
+    if (noRead != noDraw)
     {
         val->setError(EGL_BAD_MATCH,
                       "read and draw must both be valid surfaces, or both be EGL_NO_SURFACE");
@@ -3113,16 +3301,15 @@ bool ValidateMakeCurrent(const ValidationContext *val,
     }
 
     // EGL 1.5 spec: dpy can be uninitialized if all other parameters are null
-    if (!display->isInitialized() &&
-        (context != EGL_NO_CONTEXT || draw != EGL_NO_SURFACE || read != EGL_NO_SURFACE))
+    if (!display->isInitialized() && (!noContext || !noDraw || !noRead))
     {
         val->setError(EGL_NOT_INITIALIZED, "'dpy' not initialized");
         return false;
     }
 
-    if (context != EGL_NO_CONTEXT)
+    if (!noContext)
     {
-        ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+        ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
     }
 
     if (display->isInitialized() && display->isDeviceLost())
@@ -3131,26 +3318,30 @@ bool ValidateMakeCurrent(const ValidationContext *val,
         return false;
     }
 
-    if (draw != EGL_NO_SURFACE)
+    if (!noDraw)
     {
-        ANGLE_VALIDATION_TRY(ValidateSurface(val, display, draw));
+        ANGLE_VALIDATION_TRY(ValidateSurface(val, display, drawSurfaceID));
     }
 
-    if (read != EGL_NO_SURFACE)
+    const Surface *drawSurface = GetSurfaceIfValid(display, drawSurfaceID);
+    const Surface *readSurface = GetSurfaceIfValid(display, readSurfaceID);
+    const gl::Context *context = GetContextIfValid(display, contextID);
+
+    if (!noRead)
     {
-        ANGLE_VALIDATION_TRY(ValidateSurface(val, display, read));
-        ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, read));
+        ANGLE_VALIDATION_TRY(ValidateSurface(val, display, readSurfaceID));
+        ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, readSurface));
     }
 
-    if (draw != read)
+    if (drawSurface != readSurface)
     {
-        if (draw)
+        if (drawSurface)
         {
-            ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, draw));
+            ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, drawSurface));
         }
-        if (read)
+        if (readSurface)
         {
-            ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, read));
+            ANGLE_VALIDATION_TRY(ValidateCompatibleSurface(val, display, context, readSurface));
         }
     }
     return true;
@@ -3158,11 +3349,12 @@ bool ValidateMakeCurrent(const ValidationContext *val,
 
 bool ValidateCreateImage(const ValidationContext *val,
                          const Display *display,
-                         const gl::Context *context,
+                         gl::ContextID contextID,
                          EGLenum target,
                          EGLClientBuffer buffer,
                          const AttributeMap &attributes)
 {
+    const gl::Context *context = GetContextIfValid(display, contextID);
 
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
@@ -3444,7 +3636,7 @@ bool ValidateCreateImage(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
             const gl::Texture *texture =
                 context->getTexture({egl_gl::EGLClientBufferToGLObjectHandle(buffer)});
             if (texture == nullptr || texture->getType() != gl::TextureType::_2D)
@@ -3502,7 +3694,7 @@ bool ValidateCreateImage(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
             const gl::Texture *texture =
                 context->getTexture({egl_gl::EGLClientBufferToGLObjectHandle(buffer)});
             if (texture == nullptr || texture->getType() != gl::TextureType::CubeMap)
@@ -3567,7 +3759,7 @@ bool ValidateCreateImage(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
             const gl::Texture *texture =
                 context->getTexture({egl_gl::EGLClientBufferToGLObjectHandle(buffer)});
             if (texture == nullptr || texture->getType() != gl::TextureType::_3D)
@@ -3640,7 +3832,7 @@ bool ValidateCreateImage(const ValidationContext *val,
                 return false;
             }
 
-            ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+            ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
             const gl::Renderbuffer *renderbuffer =
                 context->getRenderbuffer({egl_gl::EGLClientBufferToGLObjectHandle(buffer)});
             if (renderbuffer == nullptr)
@@ -3845,16 +4037,15 @@ bool ValidateCreateImage(const ValidationContext *val,
     return true;
 }
 
-bool ValidateDestroyImage(const ValidationContext *val, const Display *display, const Image *image)
+bool ValidateDestroyImage(const ValidationContext *val, const Display *display, ImageID imageID)
 {
-    ANGLE_VALIDATION_TRY(ValidateImage(val, display, image));
-
+    ANGLE_VALIDATION_TRY(ValidateImage(val, display, imageID));
     return true;
 }
 
 bool ValidateCreateImageKHR(const ValidationContext *val,
                             const Display *display,
-                            const gl::Context *context,
+                            gl::ContextID contextID,
                             EGLenum target,
                             EGLClientBuffer buffer,
                             const AttributeMap &attributes)
@@ -3870,14 +4061,12 @@ bool ValidateCreateImageKHR(const ValidationContext *val,
         return false;
     }
 
-    return ValidateCreateImage(val, display, context, target, buffer, attributes);
+    return ValidateCreateImage(val, display, contextID, target, buffer, attributes);
 }
 
-bool ValidateDestroyImageKHR(const ValidationContext *val,
-                             const Display *display,
-                             const Image *image)
+bool ValidateDestroyImageKHR(const ValidationContext *val, const Display *display, ImageID imageID)
 {
-    ANGLE_VALIDATION_TRY(ValidateImage(val, display, image));
+    ANGLE_VALIDATION_TRY(ValidateImage(val, display, imageID));
 
     if (!display->getExtensions().imageBase && !display->getExtensions().image)
     {
@@ -3967,7 +4156,7 @@ bool ValidateCreateSyncKHR(const ValidationContext *val,
     return ValidateCreateSyncBase(val, display, type, attribs, true);
 }
 
-bool ValidateDestroySync(const ValidationContext *val, const Display *display, const Sync *sync)
+bool ValidateDestroySync(const ValidationContext *val, const Display *display, SyncID sync)
 {
     ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
     return true;
@@ -3975,14 +4164,14 @@ bool ValidateDestroySync(const ValidationContext *val, const Display *display, c
 
 bool ValidateDestroySyncKHR(const ValidationContext *val,
                             const Display *dpyPacked,
-                            const Sync *syncPacked)
+                            SyncID syncPacked)
 {
     return ValidateDestroySync(val, dpyPacked, syncPacked);
 }
 
 bool ValidateClientWaitSync(const ValidationContext *val,
                             const Display *display,
-                            const Sync *sync,
+                            SyncID sync,
                             EGLint flags,
                             EGLTime timeout)
 {
@@ -3992,7 +4181,7 @@ bool ValidateClientWaitSync(const ValidationContext *val,
 
 bool ValidateClientWaitSyncKHR(const ValidationContext *val,
                                const Display *dpyPacked,
-                               const Sync *syncPacked,
+                               SyncID syncPacked,
                                EGLint flags,
                                EGLTimeKHR timeout)
 {
@@ -4001,7 +4190,7 @@ bool ValidateClientWaitSyncKHR(const ValidationContext *val,
 
 bool ValidateWaitSync(const ValidationContext *val,
                       const Display *display,
-                      const Sync *sync,
+                      SyncID sync,
                       EGLint flags)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -4014,14 +4203,9 @@ bool ValidateWaitSync(const ValidationContext *val,
     }
 
     ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_MATCH));
 
     gl::Context *context = val->eglThread->getContext();
-    if (context == nullptr)
-    {
-        val->setError(EGL_BAD_MATCH, "No context is current.");
-        return false;
-    }
-
     if (!context->getExtensions().EGLSyncOES)
     {
         val->setError(EGL_BAD_MATCH,
@@ -4041,7 +4225,7 @@ bool ValidateWaitSync(const ValidationContext *val,
 
 bool ValidateWaitSyncKHR(const ValidationContext *val,
                          const Display *dpyPacked,
-                         const Sync *syncPacked,
+                         SyncID syncPacked,
                          EGLint flags)
 {
     return ValidateWaitSync(val, dpyPacked, syncPacked, flags);
@@ -4049,7 +4233,7 @@ bool ValidateWaitSyncKHR(const ValidationContext *val,
 
 bool ValidateGetSyncAttrib(const ValidationContext *val,
                            const Display *display,
-                           const Sync *sync,
+                           SyncID sync,
                            EGLint attribute,
                            const EGLAttrib *value)
 {
@@ -4063,7 +4247,7 @@ bool ValidateGetSyncAttrib(const ValidationContext *val,
 
 bool ValidateGetSyncAttribKHR(const ValidationContext *val,
                               const Display *display,
-                              const Sync *sync,
+                              SyncID sync,
                               EGLint attribute,
                               const EGLint *value)
 {
@@ -4179,8 +4363,7 @@ bool ValidateStreamConsumerGLTextureExternalKHR(const ValidationContext *val,
                                                 const Display *display,
                                                 const Stream *stream)
 {
-    gl::Context *context = val->eglThread->getContext();
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_CONTEXT));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.streamConsumerGLTexture)
@@ -4189,6 +4372,7 @@ bool ValidateStreamConsumerGLTextureExternalKHR(const ValidationContext *val,
         return false;
     }
 
+    gl::Context *context = val->eglThread->getContext();
     if (!context->getExtensions().EGLStreamConsumerExternalNV)
     {
         val->setError(EGL_BAD_ACCESS, "EGL stream consumer external GL extension not enabled");
@@ -4237,15 +4421,9 @@ bool ValidateStreamConsumerAcquireKHR(const ValidationContext *val,
         return false;
     }
 
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_CONTEXT));
+
     gl::Context *context = val->eglThread->getContext();
-    if (!context)
-    {
-        val->setError(EGL_BAD_ACCESS, "No GL context current to calling thread.");
-        return false;
-    }
-
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
-
     if (!stream->isConsumerBoundToContext(context))
     {
         val->setError(EGL_BAD_ACCESS, "Current GL context not associated with stream consumer");
@@ -4291,15 +4469,9 @@ bool ValidateStreamConsumerReleaseKHR(const ValidationContext *val,
         return false;
     }
 
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_CONTEXT));
+
     gl::Context *context = val->eglThread->getContext();
-    if (!context)
-    {
-        val->setError(EGL_BAD_ACCESS, "No GL context current to calling thread.");
-        return false;
-    }
-
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
-
     if (!stream->isConsumerBoundToContext(context))
     {
         val->setError(EGL_BAD_ACCESS, "Current GL context not associated with stream consumer");
@@ -4337,12 +4509,12 @@ bool ValidateStreamConsumerGLTextureExternalAttribsNV(const ValidationContext *v
         return false;
     }
 
-    gl::Context *context = val->eglThread->getContext();
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_CONTEXT));
 
     // Although technically not a requirement in spec, the context needs to be checked for support
-    // for external textures or future logic will cause assertations. This extension is also
+    // for external textures or future logic will cause assertions. This extension is also
     // effectively useless without external textures.
+    gl::Context *context = val->eglThread->getContext();
     if (!context->getExtensions().EGLStreamConsumerExternalNV)
     {
         val->setError(EGL_BAD_ACCESS, "EGL stream consumer external GL extension not enabled");
@@ -4627,10 +4799,9 @@ bool ValidateStreamPostD3DTextureANGLE(const ValidationContext *val,
 
 bool ValidateSyncControlCHROMIUM(const ValidationContext *val,
                                  const Display *display,
-                                 const Surface *eglSurface)
+                                 SurfaceID surfaceID)
 {
-    ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.syncControlCHROMIUM)
@@ -4644,10 +4815,9 @@ bool ValidateSyncControlCHROMIUM(const ValidationContext *val,
 
 bool ValidateSyncControlRateANGLE(const ValidationContext *val,
                                   const Display *display,
-                                  const Surface *eglSurface)
+                                  SurfaceID surfaceID)
 {
-    ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     const DisplayExtensions &displayExtensions = display->getExtensions();
     if (!displayExtensions.syncControlRateANGLE)
@@ -4661,11 +4831,11 @@ bool ValidateSyncControlRateANGLE(const ValidationContext *val,
 
 bool ValidateGetMscRateANGLE(const ValidationContext *val,
                              const Display *display,
-                             const Surface *eglSurface,
+                             SurfaceID surfaceID,
                              const EGLint *numerator,
                              const EGLint *denominator)
 {
-    ANGLE_VALIDATION_TRY(ValidateSyncControlRateANGLE(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSyncControlRateANGLE(val, display, surfaceID));
 
     if (numerator == nullptr)
     {
@@ -4683,12 +4853,12 @@ bool ValidateGetMscRateANGLE(const ValidationContext *val,
 
 bool ValidateGetSyncValuesCHROMIUM(const ValidationContext *val,
                                    const Display *display,
-                                   const Surface *eglSurface,
+                                   SurfaceID surfaceID,
                                    const EGLuint64KHR *ust,
                                    const EGLuint64KHR *msc,
                                    const EGLuint64KHR *sbc)
 {
-    ANGLE_VALIDATION_TRY(ValidateSyncControlCHROMIUM(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSyncControlCHROMIUM(val, display, surfaceID));
 
     if (ust == nullptr)
     {
@@ -4711,25 +4881,23 @@ bool ValidateGetSyncValuesCHROMIUM(const ValidationContext *val,
 
 bool ValidateDestroySurface(const ValidationContext *val,
                             const Display *display,
-                            const Surface *surface)
+                            SurfaceID surfaceID)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
     return true;
 }
 
 bool ValidateDestroyContext(const ValidationContext *val,
                             const Display *display,
-                            const gl::Context *glCtx)
+                            gl::ContextID contextID)
 {
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, glCtx));
+    ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
     return true;
 }
 
-bool ValidateSwapBuffers(const ValidationContext *val,
-                         const Display *display,
-                         const Surface *eglSurface)
+bool ValidateSwapBuffers(const ValidationContext *val, const Display *display, SurfaceID surfaceID)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (display->isDeviceLost())
     {
@@ -4737,6 +4905,7 @@ bool ValidateSwapBuffers(const ValidationContext *val,
         return false;
     }
 
+    const Surface *eglSurface = display->getSurface(surfaceID);
     if (eglSurface->isLocked())
     {
         val->setError(EGL_BAD_ACCESS);
@@ -4755,11 +4924,11 @@ bool ValidateSwapBuffers(const ValidationContext *val,
 
 bool ValidateSwapBuffersWithDamageKHR(const ValidationContext *val,
                                       const Display *display,
-                                      const Surface *surface,
+                                      SurfaceID surfaceID,
                                       const EGLint *rects,
                                       EGLint n_rects)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (!display->getExtensions().swapBuffersWithDamage)
     {
@@ -4769,7 +4938,8 @@ bool ValidateSwapBuffersWithDamageKHR(const ValidationContext *val,
         return false;
     }
 
-    if (surface == EGL_NO_SURFACE)
+    const Surface *surface = display->getSurface(surfaceID);
+    if (surface == nullptr)
     {
         val->setError(EGL_BAD_SURFACE, "Swap surface cannot be EGL_NO_SURFACE.");
         return false;
@@ -4820,10 +4990,10 @@ bool ValidateWaitNative(const ValidationContext *val, const EGLint engine)
 
 bool ValidateCopyBuffers(const ValidationContext *val,
                          const Display *display,
-                         const Surface *surface,
+                         SurfaceID surfaceID,
                          EGLNativePixmapType target)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (display->isDeviceLost())
     {
@@ -4836,10 +5006,10 @@ bool ValidateCopyBuffers(const ValidationContext *val,
 
 bool ValidateBindTexImage(const ValidationContext *val,
                           const Display *display,
-                          const Surface *surface,
+                          SurfaceID surfaceID,
                           const EGLint buffer)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (buffer != EGL_BACK_BUFFER)
     {
@@ -4847,6 +5017,7 @@ bool ValidateBindTexImage(const ValidationContext *val,
         return false;
     }
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (surface->getType() == EGL_WINDOW_BIT)
     {
         val->setError(EGL_BAD_SURFACE);
@@ -4890,10 +5061,10 @@ bool ValidateBindTexImage(const ValidationContext *val,
 
 bool ValidateReleaseTexImage(const ValidationContext *val,
                              const Display *display,
-                             const Surface *surface,
+                             SurfaceID surfaceID,
                              const EGLint buffer)
 {
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (buffer != EGL_BACK_BUFFER)
     {
@@ -4901,6 +5072,7 @@ bool ValidateReleaseTexImage(const ValidationContext *val,
         return false;
     }
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (surface->getType() == EGL_WINDOW_BIT)
     {
         val->setError(EGL_BAD_SURFACE);
@@ -4918,8 +5090,7 @@ bool ValidateReleaseTexImage(const ValidationContext *val,
 
 bool ValidateSwapInterval(const ValidationContext *val, const Display *display, EGLint interval)
 {
-    const gl::Context *context = val->eglThread->getContext();
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateThreadContext(val, display, EGL_BAD_CONTEXT));
 
     Surface *drawSurface = val->eglThread->getCurrentDrawSurface();
     if (drawSurface == nullptr)
@@ -4935,12 +5106,12 @@ bool ValidateBindAPI(const ValidationContext *val, const EGLenum api)
 {
     switch (api)
     {
+        case EGL_OPENGL_ES_API:
         case EGL_OPENGL_API:
+            break;
         case EGL_OPENVG_API:
             val->setError(EGL_BAD_PARAMETER);
             return false;  // Not supported by this implementation
-        case EGL_OPENGL_ES_API:
-            break;
         default:
             val->setError(EGL_BAD_PARAMETER);
             return false;
@@ -4951,7 +5122,7 @@ bool ValidateBindAPI(const ValidationContext *val, const EGLenum api)
 
 bool ValidatePresentationTimeANDROID(const ValidationContext *val,
                                      const Display *display,
-                                     const Surface *surface,
+                                     SurfaceID surfaceID,
                                      EGLnsecsANDROID time)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -4964,7 +5135,7 @@ bool ValidatePresentationTimeANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     return true;
 }
@@ -5234,13 +5405,14 @@ bool ValidateProgramCacheResizeANGLE(const ValidationContext *val,
 
 bool ValidateSurfaceAttrib(const ValidationContext *val,
                            const Display *display,
-                           const Surface *surface,
+                           SurfaceID surfaceID,
                            EGLint attribute,
                            EGLint value)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (surface == EGL_NO_SURFACE)
     {
         val->setError(EGL_BAD_SURFACE, "Surface cannot be EGL_NO_SURFACE.");
@@ -5313,7 +5485,8 @@ bool ValidateSurfaceAttrib(const ValidationContext *val,
             break;
 
         case EGL_TIMESTAMPS_ANDROID:
-            if (!display->getExtensions().getFrameTimestamps)
+            if (!display->getExtensions().getFrameTimestamps &&
+                !display->getExtensions().timestampSurfaceAttributeANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE,
                               "EGL_TIMESTAMPS_ANDROID cannot be used without "
@@ -5330,6 +5503,10 @@ bool ValidateSurfaceAttrib(const ValidationContext *val,
                     val->setError(EGL_BAD_ATTRIBUTE, "Invalid value.");
                     return false;
             }
+            break;
+
+        case EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID:
+            ASSERT(value == EGL_TRUE || value == EGL_FALSE);
             break;
 
         case EGL_RENDER_BUFFER:
@@ -5370,13 +5547,14 @@ bool ValidateSurfaceAttrib(const ValidationContext *val,
 
 bool ValidateQuerySurface(const ValidationContext *val,
                           const Display *display,
-                          const Surface *surface,
+                          SurfaceID surfaceID,
                           EGLint attribute,
                           const EGLint *value)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (surface == EGL_NO_SURFACE)
     {
         val->setError(EGL_BAD_SURFACE, "Surface cannot be EGL_NO_SURFACE.");
@@ -5458,7 +5636,8 @@ bool ValidateQuerySurface(const ValidationContext *val,
             break;
 
         case EGL_TIMESTAMPS_ANDROID:
-            if (!display->getExtensions().getFrameTimestamps)
+            if (!display->getExtensions().getFrameTimestamps &&
+                !display->getExtensions().timestampSurfaceAttributeANGLE)
             {
                 val->setError(EGL_BAD_ATTRIBUTE,
                               "EGL_TIMESTAMPS_ANDROID cannot be used without "
@@ -5521,11 +5700,11 @@ bool ValidateQuerySurface(const ValidationContext *val,
 
 bool ValidateQueryContext(const ValidationContext *val,
                           const Display *display,
-                          const gl::Context *context,
+                          gl::ContextID contextID,
                           EGLint attribute,
                           const EGLint *value)
 {
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
 
     switch (attribute)
     {
@@ -5645,7 +5824,7 @@ bool ValidateLabelObjectKHR(const ValidationContext *val,
         return false;
     }
 
-    LabeledObject *labeledObject = nullptr;
+    const LabeledObject *labeledObject = nullptr;
     ANGLE_VALIDATION_TRY(ValidateLabeledObject(val, display, objectType, object, &labeledObject));
 
     return true;
@@ -5653,7 +5832,7 @@ bool ValidateLabelObjectKHR(const ValidationContext *val,
 
 bool ValidateGetCompositorTimingSupportedANDROID(const ValidationContext *val,
                                                  const Display *display,
-                                                 const Surface *surface,
+                                                 SurfaceID surfaceID,
                                                  CompositorTiming name)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -5665,7 +5844,7 @@ bool ValidateGetCompositorTimingSupportedANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (!ValidCompositorTimingName(name))
     {
@@ -5678,7 +5857,7 @@ bool ValidateGetCompositorTimingSupportedANDROID(const ValidationContext *val,
 
 bool ValidateGetCompositorTimingANDROID(const ValidationContext *val,
                                         const Display *display,
-                                        const Surface *surface,
+                                        SurfaceID surfaceID,
                                         EGLint numTimestamps,
                                         const EGLint *names,
                                         const EGLnsecsANDROID *values)
@@ -5692,7 +5871,7 @@ bool ValidateGetCompositorTimingANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (names == nullptr && numTimestamps > 0)
     {
@@ -5722,6 +5901,7 @@ bool ValidateGetCompositorTimingANDROID(const ValidationContext *val,
             return false;
         }
 
+        const Surface *surface = display->getSurface(surfaceID);
         if (!surface->getSupportedCompositorTimings().test(name))
         {
             val->setError(EGL_BAD_PARAMETER, "compositor timing not supported by surface.");
@@ -5734,7 +5914,7 @@ bool ValidateGetCompositorTimingANDROID(const ValidationContext *val,
 
 bool ValidateGetNextFrameIdANDROID(const ValidationContext *val,
                                    const Display *display,
-                                   const Surface *surface,
+                                   SurfaceID surfaceID,
                                    const EGLuint64KHR *frameId)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -5746,7 +5926,7 @@ bool ValidateGetNextFrameIdANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (frameId == nullptr)
     {
@@ -5759,7 +5939,7 @@ bool ValidateGetNextFrameIdANDROID(const ValidationContext *val,
 
 bool ValidateGetFrameTimestampSupportedANDROID(const ValidationContext *val,
                                                const Display *display,
-                                               const Surface *surface,
+                                               SurfaceID surfaceID,
                                                Timestamp timestamp)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -5771,7 +5951,7 @@ bool ValidateGetFrameTimestampSupportedANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (!ValidTimestampType(timestamp))
     {
@@ -5784,7 +5964,7 @@ bool ValidateGetFrameTimestampSupportedANDROID(const ValidationContext *val,
 
 bool ValidateGetFrameTimestampsANDROID(const ValidationContext *val,
                                        const Display *display,
-                                       const Surface *surface,
+                                       SurfaceID surfaceID,
                                        EGLuint64KHR frameId,
                                        EGLint numTimestamps,
                                        const EGLint *timestamps,
@@ -5799,8 +5979,9 @@ bool ValidateGetFrameTimestampsANDROID(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (!surface->isTimestampsEnabled())
     {
         val->setError(EGL_BAD_SURFACE, "timestamp collection is not enabled for this surface.");
@@ -5992,9 +6173,26 @@ bool ValidateCreateNativeClientBufferANDROID(const ValidationContext *val,
     return true;
 }
 
+bool ValidateCopyMetalSharedEventANGLE(const ValidationContext *val,
+                                       const Display *display,
+                                       SyncID sync)
+{
+    ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
+
+    if (!display->getExtensions().mtlSyncSharedEventANGLE)
+    {
+        val->setError(EGL_BAD_DISPLAY, "EGL_ANGLE_metal_shared_event_sync is not available.");
+        return false;
+    }
+
+    ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
+
+    return true;
+}
+
 bool ValidateDupNativeFenceFDANDROID(const ValidationContext *val,
                                      const Display *display,
-                                     const Sync *sync)
+                                     SyncID sync)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
@@ -6011,7 +6209,7 @@ bool ValidateDupNativeFenceFDANDROID(const ValidationContext *val,
 
 bool ValidateSwapBuffersWithFrameTokenANGLE(const ValidationContext *val,
                                             const Display *display,
-                                            const Surface *surface,
+                                            SurfaceID surfaceID,
                                             EGLFrameTokenANGLE frametoken)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
@@ -6022,28 +6220,30 @@ bool ValidateSwapBuffersWithFrameTokenANGLE(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     return true;
 }
 
 bool ValidatePrepareSwapBuffersANGLE(const ValidationContext *val,
                                      const Display *display,
-                                     const Surface *surface)
+                                     SurfaceID surfaceID)
 {
-    return ValidateSwapBuffers(val, display, surface);
+    return ValidateSwapBuffers(val, display, surfaceID);
 }
 
 bool ValidateSignalSyncKHR(const ValidationContext *val,
                            const Display *display,
-                           const Sync *sync,
+                           SyncID sync,
                            EGLenum mode)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
 
     ANGLE_VALIDATION_TRY(ValidateSync(val, display, sync));
 
-    if (sync->getType() == EGL_SYNC_REUSABLE_KHR)
+    const Sync *syncObj = display->getSync(sync);
+
+    if (syncObj->getType() == EGL_SYNC_REUSABLE_KHR)
     {
         if (!display->getExtensions().reusableSyncKHR)
         {
@@ -6066,7 +6266,7 @@ bool ValidateSignalSyncKHR(const ValidationContext *val,
 
 bool ValidateQuerySurfacePointerANGLE(const ValidationContext *val,
                                       const Display *display,
-                                      const Surface *eglSurface,
+                                      SurfaceID surfaceID,
                                       EGLint attribute,
                                       void *const *value)
 {
@@ -6078,7 +6278,7 @@ bool ValidateQuerySurfacePointerANGLE(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     // validate the attribute parameter
     switch (attribute)
@@ -6107,7 +6307,7 @@ bool ValidateQuerySurfacePointerANGLE(const ValidationContext *val,
 
 bool ValidatePostSubBufferNV(const ValidationContext *val,
                              const Display *display,
-                             const Surface *eglSurface,
+                             SurfaceID surfaceID,
                              EGLint x,
                              EGLint y,
                              EGLint width,
@@ -6127,7 +6327,7 @@ bool ValidatePostSubBufferNV(const ValidationContext *val,
         return false;
     }
 
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, eglSurface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
     if (display->isDeviceLost())
     {
@@ -6215,17 +6415,17 @@ bool ValidateQueryDeviceStringEXT(const ValidationContext *val, const Device *de
 
 bool ValidateReleaseHighPowerGPUANGLE(const ValidationContext *val,
                                       const Display *display,
-                                      const gl::Context *context)
+                                      gl::ContextID contextID)
 {
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
     return true;
 }
 
 bool ValidateReacquireHighPowerGPUANGLE(const ValidationContext *val,
                                         const Display *display,
-                                        const gl::Context *context)
+                                        gl::ContextID contextID)
 {
-    ANGLE_VALIDATION_TRY(ValidateContext(val, display, context));
+    ANGLE_VALIDATION_TRY(ValidateContext(val, display, contextID));
     return true;
 }
 
@@ -6244,6 +6444,12 @@ bool ValidateForceGPUSwitchANGLE(const ValidationContext *val,
     return true;
 }
 
+bool ValidateWaitUntilWorkScheduledANGLE(const ValidationContext *val, const Display *display)
+{
+    ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
+    return true;
+}
+
 bool ValidateGetCurrentDisplay(const ValidationContext *val)
 {
     return true;
@@ -6251,7 +6457,16 @@ bool ValidateGetCurrentDisplay(const ValidationContext *val)
 
 bool ValidateGetCurrentSurface(const ValidationContext *val, EGLint readdraw)
 {
-    return true;
+    switch (readdraw)
+    {
+        case EGL_READ:
+        case EGL_DRAW:
+            return true;
+
+        default:
+            val->setError(EGL_BAD_PARAMETER, "Invalid surface type");
+            return false;
+    }
 }
 
 bool ValidateGetDisplay(const ValidationContext *val, EGLNativeDisplayType display_id)
@@ -6362,11 +6577,11 @@ bool ValidateCreatePlatformWindowSurface(const ValidationContext *val,
 
 bool ValidateLockSurfaceKHR(const ValidationContext *val,
                             const egl::Display *dpy,
-                            const Surface *surface,
+                            SurfaceID surfaceID,
                             const AttributeMap &attributes)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, dpy));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surfaceID));
 
     if (!dpy->getExtensions().lockSurface3KHR)
     {
@@ -6374,6 +6589,7 @@ bool ValidateLockSurfaceKHR(const ValidationContext *val,
         return false;
     }
 
+    const Surface *surface = dpy->getSurface(surfaceID);
     if (surface->isLocked())
     {
         val->setError(EGL_BAD_ACCESS);
@@ -6433,12 +6649,12 @@ bool ValidateLockSurfaceKHR(const ValidationContext *val,
 
 bool ValidateQuerySurface64KHR(const ValidationContext *val,
                                const egl::Display *dpy,
-                               const Surface *surface,
+                               SurfaceID surfaceID,
                                EGLint attribute,
                                const EGLAttribKHR *value)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, dpy));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surfaceID));
 
     if (!dpy->getExtensions().lockSurface3KHR)
     {
@@ -6469,6 +6685,7 @@ bool ValidateQuerySurface64KHR(const ValidationContext *val,
         return false;
     }
 
+    const Surface *surface = dpy->getSurface(surfaceID);
     if (!surface->isLocked())
     {
         val->setError(EGL_BAD_ACCESS, "Surface is not locked");
@@ -6480,10 +6697,10 @@ bool ValidateQuerySurface64KHR(const ValidationContext *val,
 
 bool ValidateUnlockSurfaceKHR(const ValidationContext *val,
                               const egl::Display *dpy,
-                              const Surface *surface)
+                              SurfaceID surfaceID)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, dpy));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, dpy, surfaceID));
 
     if (!dpy->getExtensions().lockSurface3KHR)
     {
@@ -6491,6 +6708,7 @@ bool ValidateUnlockSurfaceKHR(const ValidationContext *val,
         return false;
     }
 
+    const Surface *surface = dpy->getSurface(surfaceID);
     if (!surface->isLocked())
     {
         val->setError(EGL_BAD_PARAMETER, "Surface is not locked.");
@@ -6502,12 +6720,11 @@ bool ValidateUnlockSurfaceKHR(const ValidationContext *val,
 
 bool ValidateExportVkImageANGLE(const ValidationContext *val,
                                 const Display *dpy,
-                                const Image *image,
+                                ImageID imageID,
                                 const void *vkImage,
                                 const void *vkImageCreateInfo)
 {
-    ANGLE_VALIDATION_TRY(ValidateDisplay(val, dpy));
-    ANGLE_VALIDATION_TRY(ValidateImage(val, dpy, image));
+    ANGLE_VALIDATION_TRY(ValidateImage(val, dpy, imageID));
 
     if (!dpy->getExtensions().vulkanImageANGLE)
     {
@@ -6532,13 +6749,14 @@ bool ValidateExportVkImageANGLE(const ValidationContext *val,
 
 bool ValidateSetDamageRegionKHR(const ValidationContext *val,
                                 const Display *display,
-                                const Surface *surface,
+                                SurfaceID surfaceID,
                                 const EGLint *rects,
                                 EGLint n_rects)
 {
     ANGLE_VALIDATION_TRY(ValidateDisplay(val, display));
-    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surface));
+    ANGLE_VALIDATION_TRY(ValidateSurface(val, display, surfaceID));
 
+    const Surface *surface = display->getSurface(surfaceID);
     if (!(surface->getType() & EGL_WINDOW_BIT))
     {
         val->setError(EGL_BAD_MATCH, "surface is not a postable surface");

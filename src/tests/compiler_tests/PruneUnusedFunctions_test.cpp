@@ -20,13 +20,14 @@ namespace
 class PruneUnusedFunctionsTest : public MatchOutputCodeTest
 {
   public:
-    PruneUnusedFunctionsTest() : MatchOutputCodeTest(GL_FRAGMENT_SHADER, 0, SH_ESSL_OUTPUT) {}
+    PruneUnusedFunctionsTest() : MatchOutputCodeTest(GL_FRAGMENT_SHADER, SH_ESSL_OUTPUT) {}
 
   protected:
     void compile(const std::string &shaderString)
     {
-        int compilationFlags = SH_VARIABLES;
-        MatchOutputCodeTest::compile(shaderString, compilationFlags);
+        ShCompileOptions compileOptions = {};
+
+        MatchOutputCodeTest::compile(shaderString, compileOptions);
     }
 };
 

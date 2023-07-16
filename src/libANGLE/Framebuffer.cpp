@@ -17,6 +17,7 @@
 #include "libANGLE/Display.h"
 #include "libANGLE/ErrorStrings.h"
 #include "libANGLE/FramebufferAttachment.h"
+#include "libANGLE/PixelLocalStorage.h"
 #include "libANGLE/Renderbuffer.h"
 #include "libANGLE/Surface.h"
 #include "libANGLE/Texture.h"
@@ -349,7 +350,7 @@ FramebufferStatus FramebufferStatus::Incomplete(GLenum status, const char *reaso
 }
 
 // This constructor is only used for default framebuffers.
-FramebufferState::FramebufferState(rx::Serial serial)
+FramebufferState::FramebufferState(rx::UniqueSerial serial)
     : mId(Framebuffer::kDefaultDrawFramebufferHandle),
       mFramebufferSerial(serial),
       mLabel(),
@@ -372,7 +373,7 @@ FramebufferState::FramebufferState(rx::Serial serial)
     mEnabledDrawBuffers.set(0);
 }
 
-FramebufferState::FramebufferState(const Caps &caps, FramebufferID id, rx::Serial serial)
+FramebufferState::FramebufferState(const Caps &caps, FramebufferID id, rx::UniqueSerial serial)
     : mId(id),
       mFramebufferSerial(serial),
       mLabel(),
@@ -486,6 +487,8 @@ const FramebufferAttachment *FramebufferState::getReadPixelsAttachment(GLenum re
             return getDepthAttachment();
         case GL_STENCIL_INDEX_OES:
             return getStencilOrDepthStencilAttachment();
+        case GL_DEPTH_STENCIL_OES:
+            return getDepthStencilAttachment();
         default:
             return getReadAttachment();
     }
@@ -787,73 +790,7 @@ bool FramebufferState::isBoundAsDrawFramebuffer(const Context *context) const
 
 const FramebufferID Framebuffer::kDefaultDrawFramebufferHandle = {0};
 
-Framebuffer::Framebuffer(const Caps &caps,
-                         rx::GLImplFactory *factory,
-                         FramebufferID id,
-                         egl::ShareGroup *shareGroup)
-    : mState(caps, id, shareGroup->generateFramebufferSerial()),
-      mImpl(factory->createFramebuffer(mState)),
-      mCachedStatus(),
-      mDirtyDepthAttachmentBinding(this, DIRTY_BIT_DEPTH_ATTACHMENT),
-      mDirtyStencilAttachmentBinding(this, DIRTY_BIT_STENCIL_ATTACHMENT)
-{
-    ASSERT(mImpl != nullptr);
-    ASSERT(mState.mColorAttachments.size() == static_cast<size_t>(caps.maxColorAttachments));
-
-    for (uint32_t colorIndex = 0;
-         colorIndex < static_cast<uint32_t>(mState.mColorAttachments.size()); ++colorIndex)
-    {
-        mDirtyColorAttachmentBindings.emplace_back(this, DIRTY_BIT_COLOR_ATTACHMENT_0 + colorIndex);
-    }
-    if (caps.maxDrawBuffers > 1)
-    {
-        mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
-    }
-}
-
-Framebuffer::Framebuffer(const Context *context, egl::Surface *surface, egl::Surface *readSurface)
-    : mState(context->getShareGroup()->generateFramebufferSerial()),
-      mImpl(surface->getImplementation()->createDefaultFramebuffer(context, mState)),
-      mCachedStatus(FramebufferStatus::Complete()),
-      mDirtyDepthAttachmentBinding(this, DIRTY_BIT_DEPTH_ATTACHMENT),
-      mDirtyStencilAttachmentBinding(this, DIRTY_BIT_STENCIL_ATTACHMENT)
-{
-    ASSERT(mImpl != nullptr);
-
-    mDirtyColorAttachmentBindings.emplace_back(this, DIRTY_BIT_COLOR_ATTACHMENT_0);
-    setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_BACK, ImageIndex(), surface,
-                      FramebufferAttachment::kDefaultNumViews,
-                      FramebufferAttachment::kDefaultBaseViewIndex, false,
-                      FramebufferAttachment::kDefaultRenderToTextureSamples);
-
-    setReadSurface(context, readSurface);
-
-    if (surface->getConfig()->depthSize > 0)
-    {
-        setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_DEPTH, ImageIndex(), surface,
-                          FramebufferAttachment::kDefaultNumViews,
-                          FramebufferAttachment::kDefaultBaseViewIndex, false,
-                          FramebufferAttachment::kDefaultRenderToTextureSamples);
-    }
-
-    if (surface->getConfig()->stencilSize > 0)
-    {
-        setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_STENCIL, ImageIndex(), surface,
-                          FramebufferAttachment::kDefaultNumViews,
-                          FramebufferAttachment::kDefaultBaseViewIndex, false,
-                          FramebufferAttachment::kDefaultRenderToTextureSamples);
-    }
-    SetComponentTypeMask(getDrawbufferWriteType(0), 0, &mState.mDrawBufferTypeMask);
-
-    mState.mSurfaceTextureOffset = surface->getTextureOffset();
-
-    // Ensure the backend has a chance to synchronize its content for a new backbuffer.
-    mDirtyBits.set(DIRTY_BIT_COLOR_BUFFER_CONTENTS_0);
-}
-
-Framebuffer::Framebuffer(const Context *context,
-                         rx::GLImplFactory *factory,
-                         egl::Surface *readSurface)
+Framebuffer::Framebuffer(const Context *context, rx::GLImplFactory *factory)
     : mState(context->getShareGroup()->generateFramebufferSerial()),
       mImpl(factory->createFramebuffer(mState)),
       mCachedStatus(FramebufferStatus::Incomplete(GL_FRAMEBUFFER_UNDEFINED_OES,
@@ -863,8 +800,28 @@ Framebuffer::Framebuffer(const Context *context,
 {
     mDirtyColorAttachmentBindings.emplace_back(this, DIRTY_BIT_COLOR_ATTACHMENT_0);
     SetComponentTypeMask(getDrawbufferWriteType(0), 0, &mState.mDrawBufferTypeMask);
+}
 
-    setReadSurface(context, readSurface);
+Framebuffer::Framebuffer(const Context *context, rx::GLImplFactory *factory, FramebufferID id)
+    : mState(context->getCaps(), id, context->getShareGroup()->generateFramebufferSerial()),
+      mImpl(factory->createFramebuffer(mState)),
+      mCachedStatus(),
+      mDirtyDepthAttachmentBinding(this, DIRTY_BIT_DEPTH_ATTACHMENT),
+      mDirtyStencilAttachmentBinding(this, DIRTY_BIT_STENCIL_ATTACHMENT)
+{
+    ASSERT(mImpl != nullptr);
+    ASSERT(mState.mColorAttachments.size() ==
+           static_cast<size_t>(context->getCaps().maxColorAttachments));
+
+    for (uint32_t colorIndex = 0;
+         colorIndex < static_cast<uint32_t>(mState.mColorAttachments.size()); ++colorIndex)
+    {
+        mDirtyColorAttachmentBindings.emplace_back(this, DIRTY_BIT_COLOR_ATTACHMENT_0 + colorIndex);
+    }
+    if (context->getClientVersion() >= ES_3_0)
+    {
+        mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
+    }
 }
 
 Framebuffer::~Framebuffer()
@@ -876,8 +833,7 @@ void Framebuffer::onDestroy(const Context *context)
 {
     if (isDefault())
     {
-        mState.mDefaultFramebufferReadAttachment.detach(context, mState.mFramebufferSerial);
-        mState.mDefaultFramebufferReadAttachmentInitialized = false;
+        std::ignore = unsetSurfaces(context);
     }
 
     for (auto &attachment : mState.mColorAttachments)
@@ -890,22 +846,149 @@ void Framebuffer::onDestroy(const Context *context)
     mState.mWebGLStencilAttachment.detach(context, mState.mFramebufferSerial);
     mState.mWebGLDepthStencilAttachment.detach(context, mState.mFramebufferSerial);
 
+    if (mPixelLocalStorage)
+    {
+        mPixelLocalStorage->onFramebufferDestroyed(context);
+    }
+
     mImpl->destroy(context);
+}
+
+egl::Error Framebuffer::setSurfaces(const Context *context,
+                                    egl::Surface *surface,
+                                    egl::Surface *readSurface)
+{
+    // This has to be a default framebuffer.
+    ASSERT(isDefault());
+    ASSERT(mDirtyColorAttachmentBindings.size() == 1);
+    ASSERT(mDirtyColorAttachmentBindings[0].getSubjectIndex() == DIRTY_BIT_COLOR_ATTACHMENT_0);
+
+    ASSERT(!mState.mColorAttachments[0].isAttached());
+    ASSERT(!mState.mDepthAttachment.isAttached());
+    ASSERT(!mState.mStencilAttachment.isAttached());
+
+    if (surface)
+    {
+        setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_BACK, ImageIndex(), surface,
+                          FramebufferAttachment::kDefaultNumViews,
+                          FramebufferAttachment::kDefaultBaseViewIndex, false,
+                          FramebufferAttachment::kDefaultRenderToTextureSamples);
+        mDirtyBits.set(DIRTY_BIT_COLOR_ATTACHMENT_0);
+
+        if (surface->getConfig()->depthSize > 0)
+        {
+            setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_DEPTH, ImageIndex(), surface,
+                              FramebufferAttachment::kDefaultNumViews,
+                              FramebufferAttachment::kDefaultBaseViewIndex, false,
+                              FramebufferAttachment::kDefaultRenderToTextureSamples);
+            mDirtyBits.set(DIRTY_BIT_DEPTH_ATTACHMENT);
+        }
+
+        if (surface->getConfig()->stencilSize > 0)
+        {
+            setAttachmentImpl(context, GL_FRAMEBUFFER_DEFAULT, GL_STENCIL, ImageIndex(), surface,
+                              FramebufferAttachment::kDefaultNumViews,
+                              FramebufferAttachment::kDefaultBaseViewIndex, false,
+                              FramebufferAttachment::kDefaultRenderToTextureSamples);
+            mDirtyBits.set(DIRTY_BIT_STENCIL_ATTACHMENT);
+        }
+
+        mState.mSurfaceTextureOffset = surface->getTextureOffset();
+
+        // Ensure the backend has a chance to synchronize its content for a new backbuffer.
+        mDirtyBits.set(DIRTY_BIT_COLOR_BUFFER_CONTENTS_0);
+    }
+
+    setReadSurface(context, readSurface);
+
+    SetComponentTypeMask(getDrawbufferWriteType(0), 0, &mState.mDrawBufferTypeMask);
+
+    ASSERT(mCachedStatus.value().status == GL_FRAMEBUFFER_UNDEFINED_OES);
+    ASSERT(mCachedStatus.value().reason == err::kFramebufferIncompleteSurfaceless);
+    if (surface)
+    {
+        mCachedStatus = FramebufferStatus::Complete();
+        ANGLE_TRY(surface->getImplementation()->attachToFramebuffer(context, this));
+    }
+
+    return egl::NoError();
 }
 
 void Framebuffer::setReadSurface(const Context *context, egl::Surface *readSurface)
 {
+    // This has to be a default framebuffer.
+    ASSERT(isDefault());
+    ASSERT(mDirtyColorAttachmentBindings.size() == 1);
+    ASSERT(mDirtyColorAttachmentBindings[0].getSubjectIndex() == DIRTY_BIT_COLOR_ATTACHMENT_0);
+
+    // Read surface is not attached.
+    ASSERT(!mState.mDefaultFramebufferReadAttachment.isAttached());
+
     // updateAttachment() without mState.mResourceNeedsInit.set()
     mState.mDefaultFramebufferReadAttachment.attach(
         context, GL_FRAMEBUFFER_DEFAULT, GL_BACK, ImageIndex(), readSurface,
         FramebufferAttachment::kDefaultNumViews, FramebufferAttachment::kDefaultBaseViewIndex,
         false, FramebufferAttachment::kDefaultRenderToTextureSamples, mState.mFramebufferSerial);
-    mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
+
+    if (context->getClientVersion() >= ES_3_0)
+    {
+        mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
+    }
 }
 
-void Framebuffer::setLabel(const Context *context, const std::string &label)
+egl::Error Framebuffer::unsetSurfaces(const Context *context)
+{
+    // This has to be a default framebuffer.
+    ASSERT(isDefault());
+    ASSERT(mDirtyColorAttachmentBindings.size() == 1);
+    ASSERT(mDirtyColorAttachmentBindings[0].getSubjectIndex() == DIRTY_BIT_COLOR_ATTACHMENT_0);
+
+    if (mState.mColorAttachments[0].isAttached())
+    {
+        const egl::Surface *surface = mState.mColorAttachments[0].getSurface();
+        mState.mColorAttachments[0].detach(context, mState.mFramebufferSerial);
+        mDirtyBits.set(DIRTY_BIT_COLOR_ATTACHMENT_0);
+
+        if (mState.mDepthAttachment.isAttached())
+        {
+            mState.mDepthAttachment.detach(context, mState.mFramebufferSerial);
+            mDirtyBits.set(DIRTY_BIT_DEPTH_ATTACHMENT);
+        }
+
+        if (mState.mStencilAttachment.isAttached())
+        {
+            mState.mStencilAttachment.detach(context, mState.mFramebufferSerial);
+            mDirtyBits.set(DIRTY_BIT_STENCIL_ATTACHMENT);
+        }
+
+        ANGLE_TRY(surface->getImplementation()->detachFromFramebuffer(context, this));
+
+        ASSERT(mCachedStatus.value().status == GL_FRAMEBUFFER_COMPLETE);
+        mCachedStatus = FramebufferStatus::Incomplete(GL_FRAMEBUFFER_UNDEFINED_OES,
+                                                      err::kFramebufferIncompleteSurfaceless);
+    }
+    else
+    {
+        ASSERT(!mState.mDepthAttachment.isAttached());
+        ASSERT(!mState.mStencilAttachment.isAttached());
+        ASSERT(mCachedStatus.value().status == GL_FRAMEBUFFER_UNDEFINED_OES);
+        ASSERT(mCachedStatus.value().reason == err::kFramebufferIncompleteSurfaceless);
+    }
+
+    mState.mDefaultFramebufferReadAttachment.detach(context, mState.mFramebufferSerial);
+    mState.mDefaultFramebufferReadAttachmentInitialized = false;
+    return egl::NoError();
+}
+
+angle::Result Framebuffer::setLabel(const Context *context, const std::string &label)
 {
     mState.mLabel = label;
+
+    if (mImpl)
+    {
+        return mImpl->onLabelUpdate(context);
+    }
+    return angle::Result::Continue;
 }
 
 const std::string &Framebuffer::getLabel() const
@@ -913,17 +996,17 @@ const std::string &Framebuffer::getLabel() const
     return mState.mLabel;
 }
 
-bool Framebuffer::detachTexture(const Context *context, TextureID textureId)
+bool Framebuffer::detachTexture(Context *context, TextureID textureId)
 {
     return detachResourceById(context, GL_TEXTURE, textureId.value);
 }
 
-bool Framebuffer::detachRenderbuffer(const Context *context, RenderbufferID renderbufferId)
+bool Framebuffer::detachRenderbuffer(Context *context, RenderbufferID renderbufferId)
 {
     return detachResourceById(context, GL_RENDERBUFFER, renderbufferId.value);
 }
 
-bool Framebuffer::detachResourceById(const Context *context, GLenum resourceType, GLuint resourceId)
+bool Framebuffer::detachResourceById(Context *context, GLenum resourceType, GLuint resourceId)
 {
     bool found = false;
 
@@ -964,13 +1047,23 @@ bool Framebuffer::detachResourceById(const Context *context, GLenum resourceType
     return found;
 }
 
-bool Framebuffer::detachMatchingAttachment(const Context *context,
+bool Framebuffer::detachMatchingAttachment(Context *context,
                                            FramebufferAttachment *attachment,
                                            GLenum matchType,
                                            GLuint matchId)
 {
     if (attachment->isAttached() && attachment->type() == matchType && attachment->id() == matchId)
     {
+        const State &contextState = context->getState();
+        if (contextState.getPixelLocalStorageActivePlanes() != 0 &&
+            this == contextState.getDrawFramebuffer())
+        {
+            // If a (renderbuffer, texture) object is deleted while its image is attached to the
+            // currently bound draw framebuffer object, and pixel local storage is active, then it
+            // is as if EndPixelLocalStorageANGLE() had been called with
+            // <n>=PIXEL_LOCAL_STORAGE_ACTIVE_PLANES_ANGLE and <storeops> of STORE_OP_STORE_ANGLE.
+            context->endPixelLocalStorageWithStoreOpsStore();
+        }
         // We go through resetAttachment to make sure that all the required bookkeeping will be done
         // such as updating enabled draw buffer state.
         resetAttachment(context, attachment->getBinding());
@@ -1048,7 +1141,7 @@ GLenum Framebuffer::getDrawBufferState(size_t drawBuffer) const
     return mState.mDrawBufferStates[drawBuffer];
 }
 
-const std::vector<GLenum> &Framebuffer::getDrawBufferStates() const
+const DrawBuffersVector<GLenum> &Framebuffer::getDrawBufferStates() const
 {
     return mState.getDrawBufferStates();
 }
@@ -1135,8 +1228,11 @@ void Framebuffer::setReadBuffer(GLenum buffer)
     ASSERT(buffer == GL_BACK || buffer == GL_NONE ||
            (buffer >= GL_COLOR_ATTACHMENT0 &&
             (buffer - GL_COLOR_ATTACHMENT0) < mState.mColorAttachments.size()));
-    mState.mReadBufferState = buffer;
-    mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
+    if (mState.mReadBufferState != buffer)
+    {
+        mState.mReadBufferState = buffer;
+        mDirtyBits.set(DIRTY_BIT_READ_BUFFER);
+    }
 }
 
 size_t Framebuffer::getNumColorAttachments() const
@@ -1198,14 +1294,27 @@ const FramebufferStatus &Framebuffer::checkStatusImpl(const Context *context) co
         // We can skip syncState on several back-ends.
         if (mImpl->shouldSyncStateBeforeCheckStatus())
         {
-            // This binding is not totally correct. It is ok because the parameter isn't used in
-            // the GL back-end and the GL back-end is the only user of syncStateBeforeCheckStatus.
-            angle::Result err = syncState(context, GL_FRAMEBUFFER, Command::Other);
-            if (err != angle::Result::Continue)
             {
-                mCachedStatus =
-                    FramebufferStatus::Incomplete(0, err::kFramebufferIncompleteInternalError);
-                return mCachedStatus.value();
+                angle::Result err = syncAllDrawAttachmentState(context, Command::Other);
+                if (err != angle::Result::Continue)
+                {
+                    mCachedStatus =
+                        FramebufferStatus::Incomplete(0, err::kFramebufferIncompleteInternalError);
+                    return mCachedStatus.value();
+                }
+            }
+
+            {
+                // This binding is not totally correct. It is ok because the parameter isn't used in
+                // the GL back-end and the GL back-end is the only user of
+                // syncStateBeforeCheckStatus.
+                angle::Result err = syncState(context, GL_FRAMEBUFFER, Command::Other);
+                if (err != angle::Result::Continue)
+                {
+                    mCachedStatus =
+                        FramebufferStatus::Incomplete(0, err::kFramebufferIncompleteInternalError);
+                    return mCachedStatus.value();
+                }
             }
         }
 
@@ -2002,11 +2111,12 @@ void Framebuffer::setAttachmentImpl(const Context *context,
             if (!resource)
             {
                 mFloat32ColorAttachmentBits.reset(colorIndex);
+                mSharedExponentColorAttachmentBits.reset(colorIndex);
                 mState.mColorAttachmentsMask.reset(colorIndex);
             }
             else
             {
-                updateFloat32ColorAttachmentBits(
+                updateFloat32AndSharedExponentColorAttachmentBits(
                     colorIndex, resource->getAttachmentFormat(binding, textureIndex).info);
                 mState.mColorAttachmentsMask.set(colorIndex);
             }
@@ -2082,6 +2192,17 @@ void Framebuffer::onSubjectStateChange(angle::SubjectIndex index, angle::Subject
             return;
         }
 
+        // Swapchain changes should only result in color buffer changes.
+        if (message == angle::SubjectMessage::SwapchainImageChanged)
+        {
+            if (index < DIRTY_BIT_COLOR_ATTACHMENT_MAX)
+            {
+                mDirtyBits.set(DIRTY_BIT_COLOR_BUFFER_CONTENTS_0 + index);
+                onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+            }
+            return;
+        }
+
         ASSERT(message != angle::SubjectMessage::BindingChanged);
 
         // This can be triggered by external changes to the default framebuffer.
@@ -2100,7 +2221,8 @@ void Framebuffer::onSubjectStateChange(angle::SubjectIndex index, angle::Subject
         }
 
         // This can be triggered by the GL back-end TextureGL class.
-        ASSERT(message == angle::SubjectMessage::DirtyBitsFlagged);
+        ASSERT(message == angle::SubjectMessage::DirtyBitsFlagged ||
+               message == angle::SubjectMessage::TextureIDDeleted);
         return;
     }
 
@@ -2114,13 +2236,13 @@ void Framebuffer::onSubjectStateChange(angle::SubjectIndex index, angle::Subject
     // Mark the appropriate init flag.
     mState.mResourceNeedsInit.set(index, attachment->initState() == InitState::MayNeedInit);
 
-    // Update mFloat32ColorAttachmentBits Cache
+    // Update mFloat32ColorAttachmentBits and mSharedExponentColorAttachmentBits cache
     if (index < DIRTY_BIT_COLOR_ATTACHMENT_MAX)
     {
         ASSERT(index != DIRTY_BIT_DEPTH_ATTACHMENT);
         ASSERT(index != DIRTY_BIT_STENCIL_ATTACHMENT);
-        updateFloat32ColorAttachmentBits(index - DIRTY_BIT_COLOR_ATTACHMENT_0,
-                                         attachment->getFormat().info);
+        updateFloat32AndSharedExponentColorAttachmentBits(index - DIRTY_BIT_COLOR_ATTACHMENT_0,
+                                                          attachment->getFormat().info);
     }
 }
 
@@ -2142,7 +2264,7 @@ FramebufferAttachment *Framebuffer::getAttachmentFromSubjectIndex(angle::Subject
 bool Framebuffer::formsRenderingFeedbackLoopWith(const Context *context) const
 {
     const State &glState                = context->getState();
-    const ProgramExecutable *executable = glState.getProgramExecutable();
+    const ProgramExecutable *executable = glState.getLinkedProgramExecutable(context);
 
     // In some error cases there may be no bound program or executable.
     if (!executable)
@@ -2612,5 +2734,56 @@ bool Framebuffer::partialBufferClearNeedsInit(const Context *context, GLenum buf
             UNREACHABLE();
             return false;
     }
+}
+
+PixelLocalStorage &Framebuffer::getPixelLocalStorage(const Context *context)
+{
+    ASSERT(id().value != 0);
+    if (!mPixelLocalStorage)
+    {
+        mPixelLocalStorage = PixelLocalStorage::Make(context);
+    }
+    return *mPixelLocalStorage.get();
+}
+
+std::unique_ptr<PixelLocalStorage> Framebuffer::detachPixelLocalStorage()
+{
+    return std::move(mPixelLocalStorage);
+}
+
+angle::Result Framebuffer::syncAllDrawAttachmentState(const Context *context, Command command) const
+{
+    for (size_t drawbufferIdx = 0; drawbufferIdx < mState.getDrawBufferCount(); ++drawbufferIdx)
+    {
+        ANGLE_TRY(syncAttachmentState(context, command, mState.getDrawBuffer(drawbufferIdx)));
+    }
+
+    ANGLE_TRY(syncAttachmentState(context, command, mState.getDepthAttachment()));
+    ANGLE_TRY(syncAttachmentState(context, command, mState.getStencilAttachment()));
+
+    return angle::Result::Continue;
+}
+
+angle::Result Framebuffer::syncAttachmentState(const Context *context,
+                                               Command command,
+                                               const FramebufferAttachment *attachment) const
+{
+    if (!attachment)
+    {
+        return angle::Result::Continue;
+    }
+
+    // Only texture attachments can sync state. Renderbuffer and Surface attachments are always
+    // synchronized.
+    if (attachment->type() == GL_TEXTURE)
+    {
+        Texture *texture = attachment->getTexture();
+        if (texture->hasAnyDirtyBitExcludingBoundAsAttachmentBit())
+        {
+            ANGLE_TRY(texture->syncState(context, command));
+        }
+    }
+
+    return angle::Result::Continue;
 }
 }  // namespace gl

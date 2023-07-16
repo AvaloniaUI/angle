@@ -44,6 +44,7 @@ ShaderVariable::ShaderVariable(GLenum typeIn)
       binding(-1),
       imageUnitFormat(GL_NONE),
       offset(-1),
+      rasterOrdered(false),
       readonly(false),
       writeonly(false),
       isFragmentInOut(false),
@@ -54,6 +55,7 @@ ShaderVariable::ShaderVariable(GLenum typeIn)
       isShaderIOBlock(false),
       isPatch(false),
       texelFetchStaticUse(false),
+      id(0),
       flattenedOffsetInParentArrays(-1)
 {}
 
@@ -82,6 +84,7 @@ ShaderVariable::ShaderVariable(const ShaderVariable &other)
       binding(other.binding),
       imageUnitFormat(other.imageUnitFormat),
       offset(other.offset),
+      rasterOrdered(other.rasterOrdered),
       readonly(other.readonly),
       writeonly(other.writeonly),
       isFragmentInOut(other.isFragmentInOut),
@@ -92,6 +95,7 @@ ShaderVariable::ShaderVariable(const ShaderVariable &other)
       isShaderIOBlock(other.isShaderIOBlock),
       isPatch(other.isPatch),
       texelFetchStaticUse(other.texelFetchStaticUse),
+      id(other.id),
       flattenedOffsetInParentArrays(other.flattenedOffsetInParentArrays)
 {}
 
@@ -114,6 +118,7 @@ ShaderVariable &ShaderVariable::operator=(const ShaderVariable &other)
     binding                       = other.binding;
     imageUnitFormat               = other.imageUnitFormat;
     offset                        = other.offset;
+    rasterOrdered                 = other.rasterOrdered;
     readonly                      = other.readonly;
     writeonly                     = other.writeonly;
     isFragmentInOut               = other.isFragmentInOut;
@@ -124,6 +129,7 @@ ShaderVariable &ShaderVariable::operator=(const ShaderVariable &other)
     isShaderIOBlock               = other.isShaderIOBlock;
     isPatch                       = other.isPatch;
     texelFetchStaticUse           = other.texelFetchStaticUse;
+    id                            = other.id;
     return *this;
 }
 
@@ -137,10 +143,11 @@ bool ShaderVariable::operator==(const ShaderVariable &other) const
         isRowMajorLayout != other.isRowMajorLayout || location != other.location ||
         hasImplicitLocation != other.hasImplicitLocation || binding != other.binding ||
         imageUnitFormat != other.imageUnitFormat || offset != other.offset ||
-        readonly != other.readonly || writeonly != other.writeonly || index != other.index ||
-        yuv != other.yuv || interpolation != other.interpolation ||
-        isInvariant != other.isInvariant || isShaderIOBlock != other.isShaderIOBlock ||
-        isPatch != other.isPatch || texelFetchStaticUse != other.texelFetchStaticUse ||
+        rasterOrdered != other.rasterOrdered || readonly != other.readonly ||
+        writeonly != other.writeonly || index != other.index || yuv != other.yuv ||
+        interpolation != other.interpolation || isInvariant != other.isInvariant ||
+        isShaderIOBlock != other.isShaderIOBlock || isPatch != other.isPatch ||
+        texelFetchStaticUse != other.texelFetchStaticUse ||
         isFragmentInOut != other.isFragmentInOut)
     {
         return false;
@@ -426,6 +433,10 @@ bool ShaderVariable::isSameUniformAtLinkTime(const ShaderVariable &other) const
     {
         return false;
     }
+    if (rasterOrdered != other.rasterOrdered)
+    {
+        return false;
+    }
     if (readonly != other.readonly || writeonly != other.writeonly)
     {
         return false;
@@ -476,7 +487,9 @@ InterfaceBlock::InterfaceBlock()
       binding(-1),
       staticUse(false),
       active(false),
-      blockType(BlockType::BLOCK_UNIFORM)
+      isReadOnly(false),
+      blockType(BlockType::BLOCK_UNIFORM),
+      id(0)
 {}
 
 InterfaceBlock::~InterfaceBlock() {}
@@ -491,8 +504,10 @@ InterfaceBlock::InterfaceBlock(const InterfaceBlock &other)
       binding(other.binding),
       staticUse(other.staticUse),
       active(other.active),
+      isReadOnly(other.isReadOnly),
       blockType(other.blockType),
-      fields(other.fields)
+      fields(other.fields),
+      id(other.id)
 {}
 
 InterfaceBlock &InterfaceBlock::operator=(const InterfaceBlock &other)
@@ -506,7 +521,9 @@ InterfaceBlock &InterfaceBlock::operator=(const InterfaceBlock &other)
     binding          = other.binding;
     staticUse        = other.staticUse;
     active           = other.active;
+    isReadOnly       = other.isReadOnly;
     blockType        = other.blockType;
+    id               = other.id;
     fields           = other.fields;
     return *this;
 }

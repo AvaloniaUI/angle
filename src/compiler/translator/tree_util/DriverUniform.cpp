@@ -23,6 +23,8 @@ namespace sh
 namespace
 {
 constexpr ImmutableString kEmulatedDepthRangeParams = ImmutableString("ANGLEDepthRangeParams");
+constexpr ImmutableString kDriverUniformsBlockName  = ImmutableString("ANGLEUniformBlock");
+constexpr ImmutableString kDriverUniformsVarName    = ImmutableString("ANGLEUniforms");
 
 constexpr const char kAcbBufferOffsets[] = "acbBufferOffsets";
 constexpr const char kDepthRange[]       = "depthRange";
@@ -32,7 +34,6 @@ constexpr const char kDither[]           = "dither";
 constexpr const char kMisc[]             = "misc";
 
 // Extended uniforms
-constexpr const char kViewport[]               = "viewport";
 constexpr const char kXfbBufferOffsets[]       = "xfbBufferOffsets";
 constexpr const char kXfbVerticesPerInstance[] = "xfbVerticesPerInstance";
 constexpr const char kUnused[]                 = "unused";
@@ -66,11 +67,11 @@ bool DriverUniform::addComputeDriverUniformsToShader(TIntermBlock *root, TSymbol
     // Define a driver uniform block "ANGLEUniformBlock" with instance name "ANGLEUniforms".
     TLayoutQualifier layoutQualifier = TLayoutQualifier::Create();
     layoutQualifier.blockStorage     = EbsStd140;
+    layoutQualifier.pushConstant     = true;
 
     mDriverUniforms = DeclareInterfaceBlock(root, symbolTable, driverFieldList, EvqUniform,
                                             layoutQualifier, TMemoryQualifier::Create(), 0,
-                                            ImmutableString(vk::kDriverUniformsBlockName),
-                                            ImmutableString(vk::kDriverUniformsVarName));
+                                            kDriverUniformsBlockName, kDriverUniformsVarName);
     return mDriverUniforms != nullptr;
 }
 
@@ -167,11 +168,11 @@ bool DriverUniform::addGraphicsDriverUniformsToShader(TIntermBlock *root, TSymbo
         // Define a driver uniform block "ANGLEUniformBlock" with instance name "ANGLEUniforms".
         TLayoutQualifier layoutQualifier = TLayoutQualifier::Create();
         layoutQualifier.blockStorage     = EbsStd140;
+        layoutQualifier.pushConstant     = true;
 
         mDriverUniforms = DeclareInterfaceBlock(root, symbolTable, driverFieldList, EvqUniform,
                                                 layoutQualifier, TMemoryQualifier::Create(), 0,
-                                                ImmutableString(vk::kDriverUniformsBlockName),
-                                                ImmutableString(vk::kDriverUniformsVarName));
+                                                kDriverUniformsBlockName, kDriverUniformsVarName);
     }
     else
     {
@@ -179,10 +180,10 @@ bool DriverUniform::addGraphicsDriverUniformsToShader(TIntermBlock *root, TSymbo
         // This code path is taken only by the direct-to-Metal backend, and the assumptions
         // about the naming conventions of ANGLE-internal variables run too deeply to rename
         // this one.
-        auto varName    = ImmutableString("ANGLE_angleUniforms");
-        auto result     = DeclareStructure(root, symbolTable, driverFieldList, EvqUniform,
-                                           TMemoryQualifier::Create(), 0,
-                                           ImmutableString(vk::kDriverUniformsBlockName), &varName);
+        auto varName = ImmutableString("ANGLE_angleUniforms");
+        auto result =
+            DeclareStructure(root, symbolTable, driverFieldList, EvqUniform,
+                             TMemoryQualifier::Create(), 0, kDriverUniformsBlockName, &varName);
         mDriverUniforms = result.second;
     }
 
@@ -283,8 +284,9 @@ TIntermTyped *DriverUniform::getHalfRenderArea() const
 TIntermTyped *DriverUniform::getFlipXY(TSymbolTable *symbolTable, DriverUniformFlip stage) const
 {
     TIntermTyped *flipXY = createDriverUniformRef(kFlipXY);
-    TIntermTyped *values =
-        CreateBuiltInUnaryFunctionCallNode("unpackSnorm4x8", flipXY, *symbolTable, 310);
+    TIntermTyped *values = CreateBuiltInUnaryFunctionCallNode(
+        "unpackSnorm4x8", flipXY, *symbolTable,
+        GetESSLOrGLSLVersion(symbolTable->getShaderSpec(), 310, 400));
 
     if (stage == DriverUniformFlip::Fragment)
     {
@@ -369,6 +371,21 @@ TIntermTyped *DriverUniform::getTransformDepth() const
                                                &args);
 }
 
+TIntermTyped *DriverUniform::getAlphaToCoverage() const
+{
+    TIntermTyped *miscRef         = createDriverUniformRef(kMisc);
+    TIntermTyped *alphaToCoverage = new TIntermBinary(
+        EOpBitShiftRight, miscRef, CreateUIntNode(vk::kDriverUniformsMiscAlphaToCoverageOffset));
+    alphaToCoverage = new TIntermBinary(EOpBitwiseAnd, alphaToCoverage,
+                                        CreateUIntNode(vk::kDriverUniformsMiscAlphaToCoverageMask));
+
+    TIntermSequence args = {
+        alphaToCoverage,
+    };
+    return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
+                                               &args);
+}
+
 //
 // Class DriverUniformExtended
 //
@@ -376,14 +393,12 @@ TFieldList *DriverUniformExtended::createUniformFields(TSymbolTable *symbolTable
 {
     TFieldList *driverFieldList = DriverUniform::createUniformFields(symbolTable);
 
-    constexpr size_t kNumGraphicsDriverUniformsExt = 5;
+    constexpr size_t kNumGraphicsDriverUniformsExt = 4;
     constexpr std::array<const char *, kNumGraphicsDriverUniformsExt>
         kGraphicsDriverUniformNamesExt = {
-            {kViewport, kXfbBufferOffsets, kXfbVerticesPerInstance, kUnused, kUnused2}};
+            {kXfbBufferOffsets, kXfbVerticesPerInstance, kUnused, kUnused2}};
 
     const std::array<TType *, kNumGraphicsDriverUniformsExt> kDriverUniformTypesExt = {{
-        // viewport: vec4
-        new TType(EbtFloat, EbpHigh, EvqGlobal, 4),
         // xfbBufferOffsets: uvec4
         new TType(EbtInt, EbpHigh, EvqGlobal, 4),
         // xfbVerticesPerInstance: uint
@@ -403,11 +418,6 @@ TFieldList *DriverUniformExtended::createUniformFields(TSymbolTable *symbolTable
     }
 
     return driverFieldList;
-}
-
-TIntermTyped *DriverUniformExtended::getViewport() const
-{
-    return createDriverUniformRef(kViewport);
 }
 
 TIntermTyped *DriverUniformExtended::getXfbBufferOffsets() const

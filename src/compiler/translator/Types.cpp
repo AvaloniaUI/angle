@@ -142,6 +142,12 @@ const char *getBasicString(TBasicType t)
             return "atomic_uint";
         case EbtSamplerVideoWEBGL:
             return "samplerVideoWEBGL";
+        case EbtPixelLocalANGLE:
+            return "pixelLocalANGLE";
+        case EbtIPixelLocalANGLE:
+            return "ipixelLocalANGLE";
+        case EbtUPixelLocalANGLE:
+            return "upixelLocalANGLE";
         case EbtSubpassInput:
             return "subpassInput";
         case EbtISubpassInput:
@@ -175,6 +181,7 @@ TType::TType(const TPublicType &p)
       qualifier(p.qualifier),
       invariant(p.invariant),
       precise(p.precise),
+      interpolant(false),
       memoryQualifier(p.memoryQualifier),
       layoutQualifier(p.layoutQualifier),
       primarySize(p.getPrimarySize()),
@@ -227,6 +234,7 @@ TType &TType::operator=(const TType &t)
     qualifier                 = t.qualifier;
     invariant                 = t.invariant;
     precise                   = t.precise;
+    interpolant               = t.interpolant;
     memoryQualifier           = t.memoryQualifier;
     layoutQualifier           = t.layoutQualifier;
     primarySize               = t.primarySize;

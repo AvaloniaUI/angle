@@ -9,8 +9,7 @@
 
 #include "libANGLE/renderer/metal/SurfaceMtl.h"
 
-#include <TargetConditionals.h>
-
+#include "common/platform.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/Surface.h"
 #include "libANGLE/renderer/metal/ContextMtl.h"
@@ -18,6 +17,7 @@
 #include "libANGLE/renderer/metal/FrameBufferMtl.h"
 #include "libANGLE/renderer/metal/mtl_format_utils.h"
 #include "libANGLE/renderer/metal/mtl_utils.h"
+#include "mtl_command_buffer.h"
 
 // Compiler can turn on programmatical frame capture in release build by defining
 // ANGLE_METAL_FRAME_CAPTURE flag.
@@ -141,15 +141,6 @@ egl::Error SurfaceMtl::initialize(const egl::Display *display)
     return egl::NoError();
 }
 
-FramebufferImpl *SurfaceMtl::createDefaultFramebuffer(const gl::Context *context,
-                                                      const gl::FramebufferState &state)
-{
-    ContextMtl *contextMtl = mtl::GetImpl(context);
-    auto fbo = new FramebufferMtl(state, contextMtl, /* flipY */ false, /* backbuffer */ nullptr);
-
-    return fbo;
-}
-
 egl::Error SurfaceMtl::makeCurrent(const gl::Context *context)
 {
     ContextMtl *contextMtl = mtl::GetImpl(context);
@@ -249,7 +240,12 @@ EGLint SurfaceMtl::isPostSubBufferSupported() const
 
 EGLint SurfaceMtl::getSwapBehavior() const
 {
-    return EGL_BUFFER_PRESERVED;
+    // dEQP-EGL.functional.query_surface.* requires that for a surface with swap
+    // behavior=EGL_BUFFER_PRESERVED, config.surfaceType must contain
+    // EGL_SWAP_BEHAVIOR_PRESERVED_BIT.
+    // Since we don't support EGL_SWAP_BEHAVIOR_PRESERVED_BIT in egl::Config for now, let's just use
+    // EGL_BUFFER_DESTROYED as default swap behavior.
+    return EGL_BUFFER_DESTROYED;
 }
 
 angle::Result SurfaceMtl::initializeContents(const gl::Context *context,
@@ -333,6 +329,17 @@ angle::Result SurfaceMtl::getAttachmentRenderTarget(const gl::Context *context,
     }
 
     return angle::Result::Continue;
+}
+
+egl::Error SurfaceMtl::attachToFramebuffer(const gl::Context *context, gl::Framebuffer *framebuffer)
+{
+    return egl::NoError();
+}
+
+egl::Error SurfaceMtl::detachFromFramebuffer(const gl::Context *context,
+                                             gl::Framebuffer *framebuffer)
+{
+    return egl::NoError();
 }
 
 angle::Result SurfaceMtl::ensureCompanionTexturesSizeCorrect(const gl::Context *context,
@@ -464,7 +471,7 @@ egl::Error WindowSurfaceMtl::initialize(const egl::Display *display)
         mMetalLayer.get().pixelFormat     = mColorFormat.metalFormat;
         mMetalLayer.get().framebufferOnly = NO;  // Support blitting and glReadPixels
 
-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+#if ANGLE_PLATFORM_MACOS || ANGLE_PLATFORM_MACCATALYST
         // Autoresize with parent layer.
         mMetalLayer.get().autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
 #endif
@@ -482,15 +489,6 @@ egl::Error WindowSurfaceMtl::initialize(const egl::Display *display)
     return egl::NoError();
 }
 
-FramebufferImpl *WindowSurfaceMtl::createDefaultFramebuffer(const gl::Context *context,
-                                                            const gl::FramebufferState &state)
-{
-    ContextMtl *contextMtl = mtl::GetImpl(context);
-    auto fbo = new FramebufferMtl(state, contextMtl, /* flipY */ true, /* backbuffer */ this);
-
-    return fbo;
-}
-
 egl::Error WindowSurfaceMtl::swap(const gl::Context *context)
 {
     ANGLE_TO_EGL_TRY(swapImpl(context));
@@ -500,7 +498,7 @@ egl::Error WindowSurfaceMtl::swap(const gl::Context *context)
 
 void WindowSurfaceMtl::setSwapInterval(EGLint interval)
 {
-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
+#if ANGLE_PLATFORM_MACOS || ANGLE_PLATFORM_MACCATALYST
     mMetalLayer.get().displaySyncEnabled = interval != 0;
 #endif
 }
@@ -539,6 +537,26 @@ angle::Result WindowSurfaceMtl::getAttachmentRenderTarget(const gl::Context *con
     ANGLE_TRY(ensureCompanionTexturesSizeCorrect(context));
 
     return SurfaceMtl::getAttachmentRenderTarget(context, binding, imageIndex, samples, rtOut);
+}
+
+egl::Error WindowSurfaceMtl::attachToFramebuffer(const gl::Context *context,
+                                                 gl::Framebuffer *framebuffer)
+{
+    FramebufferMtl *framebufferMtl = GetImplAs<FramebufferMtl>(framebuffer);
+    ASSERT(!framebufferMtl->getBackbuffer());
+    framebufferMtl->setBackbuffer(this);
+    framebufferMtl->setFlipY(true);
+    return egl::NoError();
+}
+
+egl::Error WindowSurfaceMtl::detachFromFramebuffer(const gl::Context *context,
+                                                   gl::Framebuffer *framebuffer)
+{
+    FramebufferMtl *framebufferMtl = GetImplAs<FramebufferMtl>(framebuffer);
+    ASSERT(framebufferMtl->getBackbuffer() == this);
+    framebufferMtl->setBackbuffer(nullptr);
+    framebufferMtl->setFlipY(false);
+    return egl::NoError();
 }
 
 angle::Result WindowSurfaceMtl::ensureCurrentDrawableObtained(const gl::Context *context)
@@ -591,10 +609,22 @@ CGSize WindowSurfaceMtl::calcExpectedDrawableSize() const
 
 bool WindowSurfaceMtl::checkIfLayerResized(const gl::Context *context)
 {
-    if (mMetalLayer.get() != mLayer && mMetalLayer.get().contentsScale != mLayer.contentsScale)
+    if (mMetalLayer.get() != mLayer)
     {
-        // Parent layer's content scale has changed, update Metal layer's scale factor.
-        mMetalLayer.get().contentsScale = mLayer.contentsScale;
+        if (mMetalLayer.get().contentsScale != mLayer.contentsScale)
+        {
+            // Parent layer's content scale has changed, update Metal layer's scale factor.
+            mMetalLayer.get().contentsScale = mLayer.contentsScale;
+        }
+#if !ANGLE_PLATFORM_MACOS && !ANGLE_PLATFORM_MACCATALYST
+        // Only macOS supports autoresizing mask. Thus, the metal layer has to be manually
+        // updated.
+        if (!CGRectEqualToRect(mMetalLayer.get().bounds, mLayer.bounds))
+        {
+            // Parent layer's bounds has changed, update the Metal layer's bounds as well.
+            mMetalLayer.get().bounds = mLayer.bounds;
+        }
+#endif
     }
 
     CGSize currentLayerDrawableSize = mMetalLayer.get().drawableSize;
@@ -708,6 +738,16 @@ void OffscreenSurfaceMtl::destroy(const egl::Display *display)
     SurfaceMtl::destroy(display);
 }
 
+EGLint OffscreenSurfaceMtl::getWidth() const
+{
+    return mSize.width;
+}
+
+EGLint OffscreenSurfaceMtl::getHeight() const
+{
+    return mSize.height;
+}
+
 egl::Error OffscreenSurfaceMtl::swap(const gl::Context *context)
 {
     // Check for surface resize.
@@ -739,7 +779,7 @@ egl::Error OffscreenSurfaceMtl::releaseTexImage(const gl::Context *context, EGLi
     }
 
     // NOTE(hqle): Should we finishCommandBuffer or flush is enough?
-    contextMtl->flushCommandBuffer(mtl::WaitUntilScheduled);
+    contextMtl->flushCommandBuffer(mtl::NoWait);
     return egl::NoError();
 }
 

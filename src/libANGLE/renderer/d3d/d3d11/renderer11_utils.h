@@ -79,7 +79,8 @@ void GenerateCaps(ID3D11Device *device,
                   gl::Caps *caps,
                   gl::TextureCapsMap *textureCapsMap,
                   gl::Extensions *extensions,
-                  gl::Limitations *limitations);
+                  gl::Limitations *limitations,
+                  ShPixelLocalStorageOptions *);
 
 D3D_FEATURE_LEVEL GetMinimumFeatureLevelForES31();
 
@@ -185,21 +186,6 @@ outType *DynamicCastComObject(IUnknown *object)
     else
     {
         SafeRelease(outObject);
-        return nullptr;
-    }
-}
-
-template <typename outType>
-angle::ComPtr<outType> DynamicCastComObjectToComPtr(IUnknown *object)
-{
-    angle::ComPtr<outType> outObject;
-    const HRESULT hr = object->QueryInterface(IID_PPV_ARGS(&outObject));
-    if (SUCCEEDED(hr))
-    {
-        return outObject;
-    }
-    else
-    {
         return nullptr;
     }
 }
@@ -338,7 +324,7 @@ void InitConstantBufferDesc(D3D11_BUFFER_DESC *constantBufferDescription, size_t
 
 // Helper class for RAII patterning.
 template <typename T>
-class ANGLE_NO_DISCARD ScopedUnmapper final : angle::NonCopyable
+class [[nodiscard]] ScopedUnmapper final : angle::NonCopyable
 {
   public:
     ScopedUnmapper(T *object) : mObject(object) {}

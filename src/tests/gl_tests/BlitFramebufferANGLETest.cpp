@@ -11,7 +11,7 @@ using namespace angle;
 
 namespace
 {
-class BlitFramebufferANGLETest : public ANGLETest
+class BlitFramebufferANGLETest : public ANGLETest<>
 {
   protected:
     BlitFramebufferANGLETest()
@@ -1479,7 +1479,7 @@ TEST_P(BlitFramebufferANGLETest, Errors)
 // TODO(geofflang): Fix the dependence on glBlitFramebufferANGLE without checks and assuming the
 // default framebuffer is BGRA to enable the GL and GLES backends. (http://anglebug.com/1289)
 
-class BlitFramebufferTest : public ANGLETest
+class BlitFramebufferTest : public ANGLETest<>
 {
   protected:
     BlitFramebufferTest()
@@ -1652,6 +1652,57 @@ class BlitFramebufferTest : public ANGLETest
             }
         }
     }
+
+    void initFBOWithProgramAndDepth(GLFramebuffer *fbo,
+                                    GLRenderbuffer *colorRenderBuffer,
+                                    GLenum colorFormat,
+                                    GLRenderbuffer *depthRenderBuffer,
+                                    GLenum depthFormat,
+                                    GLsizei width,
+                                    GLsizei height,
+                                    GLuint program,
+                                    float depthValue)
+    {
+        if (fbo != nullptr)
+        {
+            // Create renderbuffer
+            glBindRenderbuffer(GL_RENDERBUFFER, *colorRenderBuffer);
+            glRenderbufferStorage(GL_RENDERBUFFER, colorFormat, width, height);
+            glBindRenderbuffer(GL_RENDERBUFFER, *depthRenderBuffer);
+            glRenderbufferStorage(GL_RENDERBUFFER, depthFormat, width, height);
+
+            // Create fbo
+            glBindFramebuffer(GL_FRAMEBUFFER, *fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      *colorRenderBuffer);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+                                      *depthRenderBuffer);
+        }
+        else
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+
+        // draw with program
+        glUseProgram(program);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClearDepthf(1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(true);
+        drawQuad(program, essl1_shaders::PositionAttrib(), depthValue);
+    }
+
+    void drawWithDepthValue(std::array<Vector3, 6> &quadVertices, float depth)
+    {
+        for (Vector3 &vertice : quadVertices)
+        {
+            vertice[2] = depth;
+        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(quadVertices[0]) * quadVertices.size(),
+                        quadVertices.data());
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
 };
 
 class BlitFramebufferTestES31 : public BlitFramebufferTest
@@ -1661,7 +1712,7 @@ class BlitFramebufferTestES31 : public BlitFramebufferTest
 TEST_P(BlitFramebufferTest, MultisampleDepth)
 {
     // TODO(oetuaho@nvidia.com): http://crbug.com/837717
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
 
     GLRenderbuffer renderbuf;
     glBindRenderbuffer(GL_RENDERBUFFER, renderbuf.get());
@@ -1733,7 +1784,7 @@ TEST_P(BlitFramebufferTest, MultisampleDepth)
 TEST_P(BlitFramebufferTest, BlitMultisampleStencilToDefault)
 {
     // http://anglebug.com/3496
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -1800,9 +1851,6 @@ TEST_P(BlitFramebufferTest, BlitMultisampleStencilToDefault)
 // Tests clearing a multisampled depth buffer.
 TEST_P(BlitFramebufferTest, MultisampleDepthClear)
 {
-    // clearDepth && !maskDepth fails on Intel Ubuntu 19.04 Mesa 19.0.2 GL. http://anglebug.com/3614
-    ANGLE_SKIP_TEST_IF(IsLinux() && IsIntel() && IsDesktopOpenGL());
-
     // http://anglebug.com/4092
     ANGLE_SKIP_TEST_IF(IsAndroid() && IsOpenGLES());
 
@@ -1855,6 +1903,69 @@ TEST_P(BlitFramebufferTest, MultisampleDepthClear)
     EXPECT_PIXEL_COLOR_EQ(255, 255, GLColor::red);
     EXPECT_PIXEL_COLOR_EQ(127, 127, GLColor::red);
 
+    ASSERT_GL_NO_ERROR();
+}
+
+// Tests clearing a multisampled depth buffer with a glFenceSync in between.
+TEST_P(BlitFramebufferTest, MultisampleDepthClearWithFenceSync)
+{
+    // http://anglebug.com/4092
+    ANGLE_SKIP_TEST_IF(IsAndroid() && IsOpenGLES());
+
+    GLRenderbuffer depthMS;
+    glBindRenderbuffer(GL_RENDERBUFFER, depthMS.get());
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, 2, GL_DEPTH_COMPONENT24, 256, 256);
+
+    GLRenderbuffer colorMS;
+    glBindRenderbuffer(GL_RENDERBUFFER, colorMS.get());
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, 2, GL_RGBA8, 256, 256);
+
+    GLRenderbuffer colorResolved;
+    glBindRenderbuffer(GL_RENDERBUFFER, colorResolved.get());
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 256, 256);
+
+    GLFramebuffer framebufferMS;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebufferMS.get());
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthMS.get());
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorMS.get());
+
+    // Clear depth buffer to 0.5 and color to green.
+    glClearDepthf(0.5f);
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+    glFlush();
+
+    // Draw red into the multisampled color buffer.
+    ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_EQUAL);
+    drawQuad(drawRed.get(), essl3_shaders::PositionAttrib(), 0.0f);
+
+    // This should trigger a deferred renderPass end
+    GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    EXPECT_GL_NO_ERROR();
+
+    // Resolve the color buffer to make sure the above draw worked correctly, which in turn implies
+    // that the multisampled depth clear worked.
+    GLFramebuffer framebufferResolved;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebufferResolved.get());
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                              colorResolved.get());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebufferMS.get());
+    glBlitFramebuffer(0, 0, 256, 256, 0, 0, 256, 256, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebufferResolved.get());
+
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+    EXPECT_PIXEL_COLOR_EQ(255, 0, GLColor::red);
+    EXPECT_PIXEL_COLOR_EQ(0, 255, GLColor::red);
+    EXPECT_PIXEL_COLOR_EQ(255, 255, GLColor::red);
+    EXPECT_PIXEL_COLOR_EQ(127, 127, GLColor::red);
+
+    glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
     ASSERT_GL_NO_ERROR();
 }
 
@@ -2017,7 +2128,7 @@ TEST_P(BlitFramebufferTest, ScissoredMultisampleStencil)
 TEST_P(BlitFramebufferTest, NonZeroBaseSource)
 {
     // http://anglebug.com/5001
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 
@@ -2109,7 +2220,7 @@ TEST_P(BlitFramebufferTest, NonZeroBaseDestination)
 TEST_P(BlitFramebufferTest, NonZeroBaseSourceStencil)
 {
     // http://anglebug.com/5001
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 
@@ -2173,7 +2284,7 @@ TEST_P(BlitFramebufferTest, NonZeroBaseSourceStencil)
 TEST_P(BlitFramebufferTest, NonZeroBaseDestinationStencil)
 {
     // http://anglebug.com/5001
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     // http://anglebug.com/5003
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
@@ -2244,7 +2355,7 @@ TEST_P(BlitFramebufferTest, NonZeroBaseDestinationStencilStretch)
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
 
     // http://anglebug.com/5001
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsOSX());
+    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 
@@ -2774,6 +2885,152 @@ TEST_P(BlitFramebufferTest, BlitSRGBToRGBOversizedDestArea)
     EXPECT_PIXEL_COLOR_EQ(kWidth - 1, 3 * kHeight / 4 + 1, GLColor::yellow);
     EXPECT_PIXEL_COLOR_EQ(kWidth - 1, kHeight - 1, GLColor::yellow);
     EXPECT_PIXEL_COLOR_EQ(7 * kWidth / 8, 7 * kHeight / 8, GLColor::yellow);
+}
+
+// This test is to demonstrate a bug that when a program is created and used and then destroyed, we
+// should not have a dangling PipelineHelper pointer in the context point to the already destroyed
+// object.
+TEST_P(BlitFramebufferTest, useAndDestroyProgramThenBlit)
+{
+    constexpr const GLsizei kWidth  = 256;
+    constexpr const GLsizei kHeight = 256;
+
+    GLRenderbuffer sourceRBO, targetRBO;
+    GLFramebuffer sourceFBO, targetFBO;
+
+    {
+        initColorFBO(&sourceFBO, &sourceRBO, GL_SRGB8_ALPHA8, kWidth, kHeight);
+        // checkerProgram will be created and destroyed in this code block
+        ANGLE_GL_PROGRAM(checkerProgram, essl1_shaders::vs::Passthrough(),
+                         essl1_shaders::fs::Checkered());
+        glViewport(0, 0, kWidth, kHeight);
+        glBindFramebuffer(GL_FRAMEBUFFER, sourceFBO);
+        drawQuad(checkerProgram.get(), essl1_shaders::PositionAttrib(), 0.5f);
+        EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::red);
+    }
+    initColorFBO(&targetFBO, &targetRBO, GL_RGBA8, kWidth, kHeight);
+    EXPECT_GL_NO_ERROR();
+
+    glViewport(0, 0, kWidth, kHeight);
+    glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Blit call should not crash or assert
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFBO);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, targetFBO);
+    glBlitFramebuffer(0, 0, kWidth, kHeight, -kWidth / 2, -kHeight / 2, 3 * kWidth / 2,
+                      3 * kHeight / 2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    EXPECT_GL_NO_ERROR();
+}
+
+// This test is to ensure the draw after blit without any state change works properly
+TEST_P(BlitFramebufferTest, drawBlitAndDrawAgain)
+{
+    constexpr const GLsizei kWidth  = 256;
+    constexpr const GLsizei kHeight = 256;
+
+    GLRenderbuffer srcColorRB, srcDepthRB;
+    GLFramebuffer srcFBO;
+
+    ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(drawGreen, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Green());
+    ANGLE_GL_PROGRAM(drawBlue, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Blue());
+
+    // Initialize source FBO with red color and depth==0.8f
+    initFBOWithProgramAndDepth(&srcFBO, &srcColorRB, GL_RGBA8, &srcDepthRB, GL_DEPTH24_STENCIL8_OES,
+                               kWidth, kHeight, drawRed, 0.8f);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::red);
+
+    // Initialize destination FBO and initialize to green and depth==0.7
+    initFBOWithProgramAndDepth(nullptr, nullptr, 0, nullptr, 0, kWidth, kHeight, drawGreen, 0.7f);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::green);
+
+    // Setup for draw-blit-draw use pattern
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFBO);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    std::array<Vector3, 6> quadVertices = GetQuadVertices();
+    constexpr size_t kBufferSize        = sizeof(quadVertices[0]) * quadVertices.size();
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, kBufferSize, nullptr, GL_STATIC_DRAW);
+    glUseProgram(drawBlue);
+    const GLint positionLocation = glGetAttribLocation(drawBlue, essl1_shaders::PositionAttrib());
+    ASSERT_NE(-1, positionLocation);
+    glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(positionLocation);
+
+    // Draw with depth=0.75, should fail depth test
+    drawWithDepthValue(quadVertices, 0.75f);
+    // Now blit  depth buffer from source FBO to the right half of destination FBO, so left half has
+    // depth 0.7f and right half has 0.8f
+    glBlitFramebuffer(kWidth / 2, 0, kWidth, kHeight, kWidth / 2, 0, kWidth, kHeight,
+                      GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    // Continue draw without state change and depth==0.75f, now it should pass depth test on right
+    // half
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // Now verify dstFBO
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(kWidth / 2 + 1, 1, GLColor::blue);
+    EXPECT_GL_NO_ERROR();
+}
+
+// This test is to ensure the scissored draw after blit without any state change works properly
+TEST_P(BlitFramebufferTest, scissorDrawBlitAndDrawAgain)
+{
+    constexpr const GLsizei kWidth  = 256;
+    constexpr const GLsizei kHeight = 256;
+
+    GLRenderbuffer srcColorRB, srcDepthRB;
+    GLFramebuffer srcFBO;
+
+    ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(drawGreen, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Green());
+    ANGLE_GL_PROGRAM(drawBlue, essl1_shaders::vs::Passthrough(), essl1_shaders::fs::Blue());
+
+    // Initialize source FBO with red color and depth==0.8f
+    initFBOWithProgramAndDepth(&srcFBO, &srcColorRB, GL_RGBA8, &srcDepthRB, GL_DEPTH24_STENCIL8_OES,
+                               kWidth, kHeight, drawRed, 0.8f);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::red);
+
+    // Initialize destination FBO and initialize to green and depth==0.7
+    initFBOWithProgramAndDepth(nullptr, nullptr, 0, nullptr, 0, kWidth, kHeight, drawGreen, 0.7f);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::green);
+
+    // Setup for draw-blit-draw use pattern
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFBO);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    std::array<Vector3, 6> quadVertices = GetQuadVertices();
+    constexpr size_t kBufferSize        = sizeof(quadVertices[0]) * quadVertices.size();
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, kBufferSize, nullptr, GL_STATIC_DRAW);
+    glUseProgram(drawBlue);
+    const GLint positionLocation = glGetAttribLocation(drawBlue, essl1_shaders::PositionAttrib());
+    ASSERT_NE(-1, positionLocation);
+    glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(positionLocation);
+
+    // Scissored draw with depth=0.75, should fail depth test
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, kWidth, kHeight / 2);
+    drawWithDepthValue(quadVertices, 0.75f);
+    // Now blit  depth buffer from source FBO to the right half of destination FBO, so left half has
+    // depth 0.7f and right half has 0.8f
+    glBlitFramebuffer(kWidth / 2, 0, kWidth, kHeight, kWidth / 2, 0, kWidth, kHeight,
+                      GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    // Continue draw without state change and depth==0.75f, now it should pass depth test on right
+    // half
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // Now verify dstFBO
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(kWidth / 2 + 1, 1, GLColor::blue);
+    EXPECT_PIXEL_COLOR_EQ(1, kHeight - 1, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(kWidth / 2 + 1, kHeight - 1, GLColor::green);
+    EXPECT_GL_NO_ERROR();
 }
 
 // Test blitFramebuffer size overflow checks. WebGL 2.0 spec section 5.41. We do validation for
@@ -3585,6 +3842,7 @@ ANGLE_INSTANTIATE_TEST_ES3_AND(BlitFramebufferTest,
                                    .disable(Feature::SupportsExtendedDynamicState)
                                    .disable(Feature::SupportsExtendedDynamicState2),
                                ES3_VULKAN().disable(Feature::SupportsExtendedDynamicState2),
+                               ES3_VULKAN().enable(Feature::DisableFlippingBlitWithCommand),
                                ES3_METAL().disable(Feature::HasShaderStencilOutput));
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BlitFramebufferTestES31);

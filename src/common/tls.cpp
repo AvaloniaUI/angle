@@ -34,7 +34,8 @@ static vector<DWORD> freeTlsIndices;
 
 #endif
 
-bool gUseAndroidOpenGLTlsSlot = false;
+namespace angle
+{
 
 TLSIndex CreateTLSIndex(PthreadKeyDestructor destructor)
 {
@@ -156,3 +157,5 @@ void *GetTLSValue(TLSIndex index)
     return pthread_getspecific(index);
 #endif
 }
+
+}  // namespace angle

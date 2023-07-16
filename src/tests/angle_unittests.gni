@@ -2,14 +2,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("../../gni/angle.gni")
+
 angle_unittests_sources = [
   "../../util/test_utils_unittest.cpp",
   "../../util/test_utils_unittest_helper.h",
+  "../common/BinaryStream_unittest.cpp",
   "../common/CircularBuffer_unittest.cpp",
   "../common/FastVector_unittest.cpp",
+  "../common/FixedQueue_unittest.cpp",
   "../common/FixedVector_unittest.cpp",
   "../common/Optional_unittest.cpp",
   "../common/PoolAlloc_unittest.cpp",
+  "../common/WorkerThread_unittest.cpp",
   "../common/aligned_memory_unittest.cpp",
   "../common/angleutils_unittest.cpp",
   "../common/bitset_utils_unittest.cpp",
@@ -23,10 +28,13 @@ angle_unittests_sources = [
   "../compiler/translator/span_unittest.cpp",
   "../feature_support_util/feature_support_util_unittest.cpp",
   "../gpu_info_util/SystemInfo_unittest.cpp",
-  "../libANGLE/BinaryStream_unittest.cpp",
+  "../image_util/AstcDecompressorTestUtils.h",
+  "../image_util/AstcDecompressor_unittest.cpp",
+  "../libANGLE/BlendStateExt_unittest.cpp",
   "../libANGLE/BlobCache_unittest.cpp",
   "../libANGLE/Config_unittest.cpp",
   "../libANGLE/Fence_unittest.cpp",
+  "../libANGLE/GlobalMutex_unittest.cpp",
   "../libANGLE/HandleAllocator_unittest.cpp",
   "../libANGLE/ImageIndexIterator_unittest.cpp",
   "../libANGLE/Image_unittest.cpp",
@@ -37,10 +45,9 @@ angle_unittests_sources = [
   "../libANGLE/SizedMRUCache_unittest.cpp",
   "../libANGLE/Surface_unittest.cpp",
   "../libANGLE/TransformFeedback_unittest.cpp",
+  "../libANGLE/UnlockedTailCall_unittest.cpp",
   "../libANGLE/VaryingPacking_unittest.cpp",
   "../libANGLE/VertexArray_unittest.cpp",
-  "../libANGLE/WorkerThread_unittest.cpp",
-  "../libANGLE/angletypes_unittest.cpp",
   "../libANGLE/renderer/BufferImpl_mock.h",
   "../libANGLE/renderer/FramebufferImpl_mock.h",
   "../libANGLE/renderer/ImageImpl_mock.h",
@@ -127,7 +134,6 @@ angle_unittests_compiler_tests_sources = [
   "compiler_tests/RemoveUnreferencedVariables_test.cpp",
   "compiler_tests/SamplerMultisample_test.cpp",
   "compiler_tests/SamplerVideoWEBGL_test.cpp",
-  "compiler_tests/ScalarizeVecAndMatConstructorArgs_test.cpp",
   "compiler_tests/ShCompile_test.cpp",
   "compiler_tests/ShaderImage_test.cpp",
   "compiler_tests/ShaderValidation_test.cpp",
@@ -159,7 +165,7 @@ angle_unittests_gl_sources =
 
 angle_unittests_msl_sources = [ "../tests/compiler_tests/MSLOutput_test.cpp" ]
 
-if (is_android) {
+if (!angle_enable_desktop_glsl) {
   angle_unittests_sources +=
       [ "compiler_tests/ImmutableString_test_ESSL_autogen.cpp" ]
 } else {
@@ -167,6 +173,6 @@ if (is_android) {
       [ "compiler_tests/ImmutableString_test_autogen.cpp" ]
 }
 
-if (!is_android && !is_fuchsia) {
+if (!is_android && !is_fuchsia && !is_ios) {
   angle_unittests_sources += [ "test_utils/runner/TestSuite_unittest.cpp" ]
 }

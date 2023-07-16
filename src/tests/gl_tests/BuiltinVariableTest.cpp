@@ -12,7 +12,7 @@
 
 using namespace angle;
 
-class BuiltinVariableVertexIdTest : public ANGLETest
+class BuiltinVariableVertexIdTest : public ANGLETest<>
 {
   protected:
     BuiltinVariableVertexIdTest()
@@ -198,7 +198,7 @@ TEST_P(BuiltinVariableVertexIdTest, Triangles)
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BuiltinVariableVertexIdTest);
 ANGLE_INSTANTIATE_TEST_ES3(BuiltinVariableVertexIdTest);
 
-class BuiltinVariableFragDepthClampingFloatRBOTest : public ANGLETest
+class BuiltinVariableFragDepthClampingFloatRBOTest : public ANGLETest<>
 {
   protected:
     void testSetUp() override
@@ -285,7 +285,7 @@ TEST_P(BuiltinVariableFragDepthClampingFloatRBOTest, Above0)
 TEST_P(BuiltinVariableFragDepthClampingFloatRBOTest, Below1)
 {
     // TODO(anglebug.com/5360): Failing on ARM-based Apple DTKs.
-    ANGLE_SKIP_TEST_IF(IsOSX() && IsARM64() && IsDesktopOpenGL());
+    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsDesktopOpenGL());
 
     CheckDepthWritten(1.0f, 42.0f);
 }

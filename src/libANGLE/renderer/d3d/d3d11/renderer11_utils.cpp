@@ -9,7 +9,6 @@
 
 #include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
 
-#include <versionhelpers.h>
 #include <algorithm>
 
 #include "common/debug.h"
@@ -29,8 +28,8 @@
 #include "libANGLE/renderer/d3d/d3d11/texture_format_table.h"
 #include "libANGLE/renderer/driver_utils.h"
 #include "libANGLE/renderer/dxgi_support_table.h"
-#include "platform/FeaturesD3D_autogen.h"
 #include "platform/PlatformMethods.h"
+#include "platform/autogen/FeaturesD3D_autogen.h"
 
 namespace rx
 {
@@ -1279,7 +1278,7 @@ unsigned int GetReservedFragmentUniformVectors(D3D_FEATURE_LEVEL featureLevel)
         case D3D_FEATURE_LEVEL_9_3:
         case D3D_FEATURE_LEVEL_9_2:
         case D3D_FEATURE_LEVEL_9_1:
-            return 3;
+            return 4;  // dx_ViewCoords, dx_DepthFront, dx_DepthRange, dx_FragCoordOffset
 
         default:
             UNREACHABLE();
@@ -1343,7 +1342,7 @@ unsigned int GetMaxViewportAndScissorRectanglesPerPipeline(D3D_FEATURE_LEVEL fea
 
 bool IsMultiviewSupported(D3D_FEATURE_LEVEL featureLevel)
 {
-    // The ANGLE_multiview extension can always be supported in D3D11 through geometry shaders.
+    // The multiview extensions can always be supported in D3D11 through geometry shaders.
     switch (featureLevel)
     {
         case D3D_FEATURE_LEVEL_11_1:
@@ -1419,10 +1418,11 @@ void GenerateCaps(ID3D11Device *device,
                   gl::Caps *caps,
                   gl::TextureCapsMap *textureCapsMap,
                   gl::Extensions *extensions,
-                  gl::Limitations *limitations)
+                  gl::Limitations *limitations,
+                  ShPixelLocalStorageOptions *plsOptions)
 {
-    D3D_FEATURE_LEVEL featureLevel  = renderer11DeviceCaps.featureLevel;
-    const gl::FormatSet &allFormats = gl::GetAllSizedInternalFormats();
+    const D3D_FEATURE_LEVEL featureLevel = renderer11DeviceCaps.featureLevel;
+    const gl::FormatSet &allFormats      = gl::GetAllSizedInternalFormats();
     for (GLenum internalFormat : allFormats)
     {
         gl::TextureCaps textureCaps =
@@ -1601,8 +1601,10 @@ void GenerateCaps(ID3D11Device *device,
 
     caps->maxTextureAnisotropy        = GetMaximumAnisotropy(featureLevel);
     caps->queryCounterBitsTimeElapsed = 64;
-    caps->queryCounterBitsTimestamp = 0;  // Timestamps cannot be supported due to D3D11 limitations
-    caps->maxDualSourceDrawBuffers  = 1;
+
+    caps->queryCounterBitsTimestamp = features.enableTimestampQueries.enabled ? 64 : 0;
+
+    caps->maxDualSourceDrawBuffers = 1;
 
     // GL extension support
     extensions->setTextureExtensionSupport(*textureCapsMap);
@@ -1612,17 +1614,16 @@ void GenerateCaps(ID3D11Device *device,
     extensions->compressedETC1RGB8TextureOES    = false;
     extensions->compressedETC1RGB8SubTextureEXT = false;
 
-    extensions->elementIndexUintOES = true;
-    extensions->getProgramBinaryOES = true;
-    extensions->rgb8Rgba8OES        = true;
-    extensions->readFormatBgraEXT   = true;
-    extensions->pixelBufferObjectNV = true;
-    extensions->mapbufferOES        = true;
-    extensions->mapBufferRangeEXT   = true;
-    extensions->textureNpotOES      = GetNPOTTextureSupport(featureLevel);
-    extensions->drawBuffersEXT      = GetMaximumSimultaneousRenderTargets(featureLevel) > 1;
-    extensions->drawBuffersIndexedEXT =
-        (renderer11DeviceCaps.featureLevel >= D3D_FEATURE_LEVEL_10_1);
+    extensions->elementIndexUintOES         = true;
+    extensions->getProgramBinaryOES         = true;
+    extensions->rgb8Rgba8OES                = true;
+    extensions->readFormatBgraEXT           = true;
+    extensions->pixelBufferObjectNV         = true;
+    extensions->mapbufferOES                = true;
+    extensions->mapBufferRangeEXT           = true;
+    extensions->textureNpotOES              = GetNPOTTextureSupport(featureLevel);
+    extensions->drawBuffersEXT              = GetMaximumSimultaneousRenderTargets(featureLevel) > 1;
+    extensions->drawBuffersIndexedEXT       = (featureLevel >= D3D_FEATURE_LEVEL_10_1);
     extensions->drawBuffersIndexedOES       = extensions->drawBuffersIndexedEXT;
     extensions->textureStorageEXT           = true;
     extensions->textureFilterAnisotropicEXT = true;
@@ -1646,6 +1647,11 @@ void GenerateCaps(ID3D11Device *device,
     extensions->standardDerivativesOES      = GetDerivativeInstructionSupport(featureLevel);
     extensions->shaderTextureLodEXT         = GetShaderTextureLODSupport(featureLevel);
     extensions->fragDepthEXT                = true;
+    extensions->conservativeDepthEXT        = (featureLevel >= D3D_FEATURE_LEVEL_11_0);
+    extensions->polygonModeANGLE            = true;
+    extensions->polygonOffsetClampEXT       = (featureLevel >= D3D_FEATURE_LEVEL_10_0);
+    extensions->depthClampEXT               = true;
+    extensions->stencilTexturingANGLE       = (featureLevel >= D3D_FEATURE_LEVEL_10_1);
     extensions->multiviewOVR                = IsMultiviewSupported(featureLevel);
     extensions->multiview2OVR               = IsMultiviewSupported(featureLevel);
     if (extensions->multiviewOVR || extensions->multiview2OVR)
@@ -1670,10 +1676,21 @@ void GenerateCaps(ID3D11Device *device,
     extensions->copyTextureCHROMIUM                 = true;
     extensions->copyCompressedTextureCHROMIUM       = true;
     extensions->textureStorageMultisample2dArrayOES = true;
+    extensions->textureMirrorClampToEdgeEXT         = true;
+    extensions->shaderNoperspectiveInterpolationNV  = (featureLevel >= D3D_FEATURE_LEVEL_10_0);
+    extensions->sampleVariablesOES                  = (featureLevel >= D3D_FEATURE_LEVEL_11_0);
+    extensions->shaderMultisampleInterpolationOES   = (featureLevel >= D3D_FEATURE_LEVEL_11_0);
+    if (extensions->shaderMultisampleInterpolationOES)
+    {
+        caps->subPixelInterpolationOffsetBits = 4;
+        caps->minInterpolationOffset          = -0.5f;
+        caps->maxInterpolationOffset          = +0.4375f;  // +0.5 - (2 ^ -4)
+    }
     extensions->multiviewMultisampleANGLE =
         ((extensions->multiviewOVR || extensions->multiview2OVR) &&
          extensions->textureStorageMultisample2dArrayOES);
     extensions->copyTexture3dANGLE      = true;
+    extensions->textureBorderClampEXT   = true;
     extensions->textureBorderClampOES   = true;
     extensions->multiDrawIndirectEXT    = true;
     extensions->textureMultisampleANGLE = true;
@@ -1681,6 +1698,7 @@ void GenerateCaps(ID3D11Device *device,
     extensions->blendFuncExtendedEXT    = true;
     // http://anglebug.com/4926
     extensions->texture3DOES                             = false;
+    extensions->baseInstanceEXT                          = true;
     extensions->baseVertexBaseInstanceANGLE              = true;
     extensions->baseVertexBaseInstanceShaderBuiltinANGLE = true;
     extensions->drawElementsBaseVertexOES                = true;
@@ -1701,7 +1719,15 @@ void GenerateCaps(ID3D11Device *device,
     extensions->depthBufferFloat2NV = false;
 
     // GL_EXT_clip_control
-    extensions->clipControlEXT = (renderer11DeviceCaps.featureLevel >= D3D_FEATURE_LEVEL_9_3);
+    extensions->clipControlEXT = (featureLevel >= D3D_FEATURE_LEVEL_9_3);
+
+    // GL_APPLE_clip_distance / GL_EXT_clip_cull_distance / GL_ANGLE_clip_cull_distance
+    extensions->clipDistanceAPPLE         = true;
+    extensions->clipCullDistanceEXT       = true;
+    extensions->clipCullDistanceANGLE     = true;
+    caps->maxClipDistances                = D3D11_CLIP_OR_CULL_DISTANCE_COUNT;
+    caps->maxCullDistances                = D3D11_CLIP_OR_CULL_DISTANCE_COUNT;
+    caps->maxCombinedClipAndCullDistances = D3D11_CLIP_OR_CULL_DISTANCE_COUNT;
 
     // GL_KHR_parallel_shader_compile
     extensions->parallelShaderCompileKHR = true;
@@ -1712,21 +1738,35 @@ void GenerateCaps(ID3D11Device *device,
     // GL_OES_texture_buffer
     extensions->textureBufferOES = extensions->textureBufferEXT;
 
+    // ANGLE_shader_pixel_local_storage -- fragment shader UAVs appear in D3D 11.0.
+    if (featureLevel >= D3D_FEATURE_LEVEL_11_0)
+    {
+        extensions->shaderPixelLocalStorageANGLE = true;
+        plsOptions->type                         = ShPixelLocalStorageType::ImageLoadStore;
+        if (renderer11DeviceCaps.supportsRasterizerOrderViews)
+        {
+            extensions->shaderPixelLocalStorageCoherentANGLE = true;
+            plsOptions->fragmentSyncType = ShFragmentSynchronizationType::RasterizerOrderViews_D3D;
+        }
+        // TODO(anglebug.com/7279): If we add RG* support to pixel local storage, these are *NOT*
+        // in the set of common formats, so we need to query support for each individualy:
+        // https://learn.microsoft.com/en-us/windows/win32/direct3d11/typed-unordered-access-view-loads
+        plsOptions->supportsNativeRGBA8ImageFormats =
+            renderer11DeviceCaps.supportsUAVLoadStoreCommonFormats;
+    }
+
     // D3D11 Feature Level 10_0+ uses SV_IsFrontFace in HLSL to emulate gl_FrontFacing.
     // D3D11 Feature Level 9_3 doesn't support SV_IsFrontFace, and has no equivalent, so can't
     // support gl_FrontFacing.
-    limitations->noFrontFacingSupport =
-        (renderer11DeviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3);
+    limitations->noFrontFacingSupport = (featureLevel <= D3D_FEATURE_LEVEL_9_3);
 
     // D3D11 Feature Level 9_3 doesn't support alpha-to-coverage
-    limitations->noSampleAlphaToCoverageSupport =
-        (renderer11DeviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3);
+    limitations->noSampleAlphaToCoverageSupport = (featureLevel <= D3D_FEATURE_LEVEL_9_3);
 
     // D3D11 Feature Levels 9_3 and below do not support non-constant loop indexing and require
     // additional
     // pre-validation of the shader at compile time to produce a better error message.
-    limitations->shadersRequireIndexedLoopValidation =
-        (renderer11DeviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3);
+    limitations->shadersRequireIndexedLoopValidation = (featureLevel <= D3D_FEATURE_LEVEL_9_3);
 
     // D3D11 has no concept of separate masks and refs for front and back faces in the depth stencil
     // state.
@@ -2066,12 +2106,14 @@ D3D11_TEXTURE_ADDRESS_MODE ConvertTextureWrap(GLenum wrap)
     {
         case GL_REPEAT:
             return D3D11_TEXTURE_ADDRESS_WRAP;
+        case GL_MIRRORED_REPEAT:
+            return D3D11_TEXTURE_ADDRESS_MIRROR;
         case GL_CLAMP_TO_EDGE:
             return D3D11_TEXTURE_ADDRESS_CLAMP;
         case GL_CLAMP_TO_BORDER:
             return D3D11_TEXTURE_ADDRESS_BORDER;
-        case GL_MIRRORED_REPEAT:
-            return D3D11_TEXTURE_ADDRESS_MIRROR;
+        case GL_MIRROR_CLAMP_TO_EDGE_EXT:
+            return D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
         default:
             UNREACHABLE();
     }
@@ -2095,6 +2137,9 @@ D3D11_QUERY ConvertQueryType(gl::QueryType type)
             return D3D11_QUERY_SO_STATISTICS;
         case gl::QueryType::TimeElapsed:
             // Two internal queries are also created for begin/end timestamps
+            return D3D11_QUERY_TIMESTAMP_DISJOINT;
+        case gl::QueryType::Timestamp:
+            // A disjoint query is also created for timestamp
             return D3D11_QUERY_TIMESTAMP_DISJOINT;
         case gl::QueryType::CommandsCompleted:
             return D3D11_QUERY_EVENT;
@@ -2549,7 +2594,7 @@ void InitializeFeatures(const Renderer11DeviceCaps &deviceCaps,
     // Allow translating uniform block to StructuredBuffer on Windows 10. This is targeted
     // to work around a slow fxc compile performance issue with dynamic uniform indexing.
     ANGLE_FEATURE_CONDITION(features, allowTranslateUniformBlockToStructuredBuffer,
-                            IsWin10OrGreater());
+                            IsWindows10OrLater());
 }
 
 void InitializeFrontendFeatures(const DXGI_ADAPTER_DESC &adapterDesc,

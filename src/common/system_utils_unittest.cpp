@@ -12,6 +12,8 @@
 #include "common/system_utils.h"
 #include "util/test_utils.h"
 
+#include <fstream>
+#include <sstream>
 #include <vector>
 
 #if defined(ANGLE_PLATFORM_POSIX)
@@ -208,6 +210,78 @@ TEST(SystemUtils, IsFullPath)
 }
 #endif
 
+// Temporary file creation is not supported on Android right now.
+#if defined(ANGLE_PLATFORM_ANDROID)
+#    define MAYBE_CreateAndDeleteTemporaryFile DISABLED_CreateAndDeleteTemporaryFile
+#    define MAYBE_CreateAndDeleteFileInTempDir DISABLED_CreateAndDeleteFileInTempDir
+#else
+#    define MAYBE_CreateAndDeleteTemporaryFile CreateAndDeleteTemporaryFile
+#    define MAYBE_CreateAndDeleteFileInTempDir CreateAndDeleteFileInTempDir
+#endif  // defined(ANGLE_PLATFORM_ANDROID)
+
+// Test creating/using temporary file
+TEST(SystemUtils, MAYBE_CreateAndDeleteTemporaryFile)
+{
+    Optional<std::string> path = CreateTemporaryFile();
+    ASSERT_TRUE(path.valid());
+    ASSERT_TRUE(!path.value().empty());
+
+    const std::string testContents = "test output";
+
+    // Test writing
+    std::ofstream out;
+    out.open(path.value());
+    ASSERT_TRUE(out.is_open());
+    out << testContents;
+    EXPECT_TRUE(out.good());
+    out.close();
+
+    // Test reading
+    std::ifstream in;
+    in.open(path.value());
+    EXPECT_TRUE(in.is_open());
+    std::ostringstream sstr;
+    sstr << in.rdbuf();
+    EXPECT_EQ(sstr.str(), testContents);
+    in.close();
+
+    // Test deleting
+    EXPECT_TRUE(DeleteSystemFile(path.value().c_str()));
+}
+
+// Test creating/using file created in system's temporary directory
+TEST(SystemUtils, MAYBE_CreateAndDeleteFileInTempDir)
+{
+    Optional<std::string> tempDir = GetTempDirectory();
+    ASSERT_TRUE(tempDir.valid());
+
+    Optional<std::string> path = CreateTemporaryFileInDirectory(tempDir.value());
+    ASSERT_TRUE(path.valid());
+    ASSERT_TRUE(!path.value().empty());
+
+    const std::string testContents = "test output";
+
+    // Test writing
+    std::ofstream out;
+    out.open(path.value());
+    ASSERT_TRUE(out.is_open());
+    out << "test output";
+    EXPECT_TRUE(out.good());
+    out.close();
+
+    // Test reading
+    std::ifstream in;
+    in.open(path.value());
+    EXPECT_TRUE(in.is_open());
+    std::ostringstream sstr;
+    sstr << in.rdbuf();
+    EXPECT_EQ(sstr.str(), testContents);
+    in.close();
+
+    // Test deleting
+    EXPECT_TRUE(DeleteSystemFile(path.value().c_str()));
+}
+
 // Test retrieving page size
 TEST(SystemUtils, PageSize)
 {
@@ -220,8 +294,8 @@ TEST(SystemUtils, PageSize)
 #    define MAYBE_PageFaultHandlerInit DISABLED_PageFaultHandlerInit
 #    define MAYBE_PageFaultHandlerProtect DISABLED_PageFaultHandlerProtect
 #    define MAYBE_PageFaultHandlerDefaultHandler DISABLED_PageFaultHandlerDefaultHandler
-// mprotect tests hang on macOS M1.
-#elif defined(ANGLE_PLATFORM_MACOS)
+// mprotect tests hang on macOS M1. Also applies to the iOS simulator.
+#elif ANGLE_PLATFORM_MACOS || ANGLE_PLATFORM_IOS_FAMILY_SIMULATOR
 #    define MAYBE_PageFaultHandlerInit PageFaultHandlerInit
 #    define MAYBE_PageFaultHandlerProtect DISABLED_PageFaultHandlerProtect
 #    define MAYBE_PageFaultHandlerDefaultHandler DISABLED_PageFaultHandlerDefaultHandler
@@ -302,6 +376,14 @@ TEST(SystemUtils, MAYBE_PageFaultHandlerProtect)
     EXPECT_TRUE(handler->disable());
 }
 
+// Tests basic usage of StripFilenameFromPath.
+TEST(SystemUtils, StripFilenameFromPathUsage)
+{
+    EXPECT_EQ(StripFilenameFromPath("/path/to/tests/angle_tests"), "/path/to/tests");
+    EXPECT_EQ(StripFilenameFromPath("C:\\tests\\angle_tests.exe"), "C:\\tests");
+    EXPECT_EQ(StripFilenameFromPath("angle_tests"), "");
+}
+
 #if defined(ANGLE_PLATFORM_POSIX)
 std::mutex gCustomHandlerMutex;
 bool gCustomHandlerCalled = false;
@@ -363,5 +445,54 @@ TEST(SystemUtils, MAYBE_PageFaultHandlerDefaultHandler)
 #else
 TEST(SystemUtils, MAYBE_PageFaultHandlerDefaultHandler) {}
 #endif
+
+// Tests basic usage of GetCurrentThreadId.
+TEST(SystemUtils, GetCurrentThreadId)
+{
+    constexpr size_t kThreadCount = 64;
+
+    std::mutex mutex;
+    std::condition_variable condVar;
+
+    std::vector<std::thread> threads;
+    std::set<ThreadId> threadIds;
+    size_t readyCount = 0;
+
+    for (size_t i = 0; i < kThreadCount; ++i)
+    {
+        threads.emplace_back([&]() {
+            std::unique_lock<std::mutex> lock(mutex);
+
+            // Get threadId
+            const angle::ThreadId threadId = angle::GetCurrentThreadId();
+            EXPECT_NE(threadId, angle::InvalidThreadId());
+            threadIds.insert(threadId);
+
+            // Allow thread to finish only when all threads received the id.
+            // Otherwise new thread may reuse Id of already completed but not joined thread.
+            // Problem can be reproduced on Window platform, for example.
+            ++readyCount;
+            if (readyCount < kThreadCount)
+            {
+                condVar.wait(lock, [&]() { return readyCount == kThreadCount; });
+            }
+            else
+            {
+                condVar.notify_all();
+            }
+
+            // Check that threadId is still the same.
+            EXPECT_EQ(threadId, angle::GetCurrentThreadId());
+        });
+    }
+
+    for (size_t i = 0; i < kThreadCount; ++i)
+    {
+        threads[i].join();
+    }
+
+    // Check that all threadIds were unique.
+    EXPECT_EQ(threadIds.size(), kThreadCount);
+}
 
 }  // anonymous namespace

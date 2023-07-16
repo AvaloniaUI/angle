@@ -17,6 +17,8 @@
 namespace gl
 {
 class Context;
+class PrivateState;
+class ErrorSet;
 
 // GL 4.0
 bool ValidateBeginQueryIndexed(const Context *context,
@@ -42,7 +44,7 @@ bool ValidateGetActiveSubroutineName(const Context *context,
                                      ShaderProgramID programPacked,
                                      GLenum shadertype,
                                      GLuint index,
-                                     GLsizei bufsize,
+                                     GLsizei bufSize,
                                      const GLsizei *length,
                                      const GLchar *name);
 bool ValidateGetActiveSubroutineUniformName(const Context *context,
@@ -50,7 +52,7 @@ bool ValidateGetActiveSubroutineUniformName(const Context *context,
                                             ShaderProgramID programPacked,
                                             GLenum shadertype,
                                             GLuint index,
-                                            GLsizei bufsize,
+                                            GLsizei bufSize,
                                             const GLsizei *length,
                                             const GLchar *name);
 bool ValidateGetActiveSubroutineUniformiv(const Context *context,
@@ -353,41 +355,49 @@ bool ValidateScissorIndexedv(const Context *context,
                              angle::EntryPoint entryPoint,
                              GLuint index,
                              const GLint *v);
-bool ValidateVertexAttribL1d(const Context *context,
+bool ValidateVertexAttribL1d(const PrivateState &state,
+                             ErrorSet *errors,
                              angle::EntryPoint entryPoint,
                              GLuint index,
                              GLdouble x);
-bool ValidateVertexAttribL1dv(const Context *context,
+bool ValidateVertexAttribL1dv(const PrivateState &state,
+                              ErrorSet *errors,
                               angle::EntryPoint entryPoint,
                               GLuint index,
                               const GLdouble *v);
-bool ValidateVertexAttribL2d(const Context *context,
+bool ValidateVertexAttribL2d(const PrivateState &state,
+                             ErrorSet *errors,
                              angle::EntryPoint entryPoint,
                              GLuint index,
                              GLdouble x,
                              GLdouble y);
-bool ValidateVertexAttribL2dv(const Context *context,
+bool ValidateVertexAttribL2dv(const PrivateState &state,
+                              ErrorSet *errors,
                               angle::EntryPoint entryPoint,
                               GLuint index,
                               const GLdouble *v);
-bool ValidateVertexAttribL3d(const Context *context,
+bool ValidateVertexAttribL3d(const PrivateState &state,
+                             ErrorSet *errors,
                              angle::EntryPoint entryPoint,
                              GLuint index,
                              GLdouble x,
                              GLdouble y,
                              GLdouble z);
-bool ValidateVertexAttribL3dv(const Context *context,
+bool ValidateVertexAttribL3dv(const PrivateState &state,
+                              ErrorSet *errors,
                               angle::EntryPoint entryPoint,
                               GLuint index,
                               const GLdouble *v);
-bool ValidateVertexAttribL4d(const Context *context,
+bool ValidateVertexAttribL4d(const PrivateState &state,
+                             ErrorSet *errors,
                              angle::EntryPoint entryPoint,
                              GLuint index,
                              GLdouble x,
                              GLdouble y,
                              GLdouble z,
                              GLdouble w);
-bool ValidateVertexAttribL4dv(const Context *context,
+bool ValidateVertexAttribL4dv(const PrivateState &state,
+                              ErrorSet *errors,
                               angle::EntryPoint entryPoint,
                               GLuint index,
                               const GLdouble *v);
@@ -425,9 +435,9 @@ bool ValidateDrawArraysInstancedBaseInstance(const Context *context,
                                              GLuint baseinstance);
 bool ValidateDrawElementsInstancedBaseInstance(const Context *context,
                                                angle::EntryPoint entryPoint,
-                                               GLenum mode,
+                                               PrimitiveMode modePacked,
                                                GLsizei count,
-                                               GLenum type,
+                                               DrawElementsType typePacked,
                                                const void *indices,
                                                GLsizei instancecount,
                                                GLuint baseinstance);
@@ -486,7 +496,7 @@ bool ValidateGetInternalformati64v(const Context *context,
                                    GLenum target,
                                    GLenum internalformat,
                                    GLenum pname,
-                                   GLsizei bufSize,
+                                   GLsizei count,
                                    const GLint64 *params);
 bool ValidateGetProgramResourceLocationIndex(const Context *context,
                                              angle::EntryPoint entryPoint,
@@ -678,10 +688,11 @@ bool ValidateClearNamedFramebufferuiv(const Context *context,
                                       GLenum buffer,
                                       GLint drawbuffer,
                                       const GLuint *value);
-bool ValidateClipControl(const Context *context,
+bool ValidateClipControl(const PrivateState &state,
+                         ErrorSet *errors,
                          angle::EntryPoint entryPoint,
-                         GLenum origin,
-                         GLenum depth);
+                         ClipOrigin originPacked,
+                         ClipDepthMode depthPacked);
 bool ValidateCompressedTextureSubImage1D(const Context *context,
                                          angle::EntryPoint entryPoint,
                                          TextureID texturePacked,
@@ -1358,7 +1369,8 @@ bool ValidateMultiDrawElementsIndirectCount(const Context *context,
                                             GLintptr drawcount,
                                             GLsizei maxdrawcount,
                                             GLsizei stride);
-bool ValidatePolygonOffsetClamp(const Context *context,
+bool ValidatePolygonOffsetClamp(const PrivateState &state,
+                                ErrorSet *errors,
                                 angle::EntryPoint entryPoint,
                                 GLfloat factor,
                                 GLfloat units,

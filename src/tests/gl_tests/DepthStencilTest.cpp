@@ -10,7 +10,6 @@
 
 #include "test_utils/ANGLETest.h"
 
-#include "platform/FeaturesVk_autogen.h"
 #include "test_utils/gl_raii.h"
 
 using namespace angle;
@@ -18,7 +17,7 @@ using namespace angle;
 namespace
 {
 
-class DepthStencilTest : public ANGLETest
+class DepthStencilTest : public ANGLETest<>
 {
   protected:
     DepthStencilTest()

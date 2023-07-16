@@ -22,8 +22,8 @@ EXIT_FAILURE = 1
 
 TEST_SUITE = 'angle_end2end_tests'
 BUILDERS = [
-    'angle/ci/android-arm64-test', 'angle/ci/android-arm64-exp-test', 'angle/ci/linux-test',
-    'angle/ci/win-test', 'angle/ci/win-x86-test'
+    'angle/ci/android-arm64-test', 'angle/ci/linux-test', 'angle/ci/win-test',
+    'angle/ci/win-x86-test'
 ]
 SWARMING_SERVER = 'chromium-swarm.appspot.com'
 
@@ -32,12 +32,12 @@ THIS_DIR = d(os.path.abspath(__file__))
 ANGLE_ROOT_DIR = d(THIS_DIR)
 
 # Host GPUs
-INTEL_HD630 = '8086:5912'
+INTEL_UHD630 = '8086:9bc5'
 NVIDIA_GTX1660 = '10de:2184'
 SWIFTSHADER = 'none'
-GPUS = [INTEL_HD630, NVIDIA_GTX1660, SWIFTSHADER]
+GPUS = [INTEL_UHD630, NVIDIA_GTX1660, SWIFTSHADER]
 GPU_NAME_MAP = {
-    INTEL_HD630: 'intel_630',
+    INTEL_UHD630: 'intel_630',
     NVIDIA_GTX1660: 'nvidia_1660',
     SWIFTSHADER: 'swiftshader'
 }

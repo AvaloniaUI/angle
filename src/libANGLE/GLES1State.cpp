@@ -34,6 +34,13 @@ LightParameters::LightParameters(const LightParameters &other) = default;
 
 FogParameters::FogParameters() = default;
 
+AlphaTestParameters::AlphaTestParameters() = default;
+
+bool AlphaTestParameters::operator!=(const AlphaTestParameters &other) const
+{
+    return func != other.func || ref != other.ref;
+}
+
 TextureEnvironmentParameters::TextureEnvironmentParameters() = default;
 
 TextureEnvironmentParameters::TextureEnvironmentParameters(
@@ -75,8 +82,6 @@ GLES1State::GLES1State()
       mClientActiveTexture(0),
       mMatrixMode(MatrixType::Modelview),
       mShadeModel(ShadingModel::Smooth),
-      mAlphaTestFunc(AlphaTestFunc::AlwaysPass),
-      mAlphaTestRef(0.0f),
       mLogicOp(LogicalOperation::Copy),
       mLineSmoothHint(HintSetting::DontCare),
       mPointSmoothHint(HintSetting::DontCare),
@@ -87,7 +92,7 @@ GLES1State::GLES1State()
 GLES1State::~GLES1State() = default;
 
 // Taken from the GLES 1.x spec which specifies all initial state values.
-void GLES1State::initialize(const Context *context, const State *state)
+void GLES1State::initialize(const Context *context, const PrivateState *state)
 {
     mGLState = state;
 
@@ -159,8 +164,8 @@ void GLES1State::initialize(const Context *context, const State *state)
 
     mShadeModel = ShadingModel::Smooth;
 
-    mAlphaTestFunc = AlphaTestFunc::AlwaysPass;
-    mAlphaTestRef  = 0.0f;
+    mAlphaTestParameters.func = AlphaTestFunc::AlwaysPass;
+    mAlphaTestParameters.ref  = 0.0f;
 
     mLogicOp = LogicalOperation::Copy;
 
@@ -179,11 +184,11 @@ void GLES1State::initialize(const Context *context, const State *state)
     mDirtyBits.set();
 }
 
-void GLES1State::setAlphaFunc(AlphaTestFunc func, GLfloat ref)
+void GLES1State::setAlphaTestParameters(AlphaTestFunc func, GLfloat ref)
 {
     setDirty(DIRTY_GLES1_ALPHA_TEST);
-    mAlphaTestFunc = func;
-    mAlphaTestRef  = ref;
+    mAlphaTestParameters.func = func;
+    mAlphaTestParameters.ref  = ref;
 }
 
 void GLES1State::setClientTextureUnit(unsigned int unit)
@@ -201,6 +206,19 @@ void GLES1State::setCurrentColor(const ColorF &color)
 {
     setDirty(DIRTY_GLES1_CURRENT_VECTOR);
     mCurrentColor = color;
+
+    // > When enabled, both the ambient (acm) and diffuse (dcm) properties of both the front and
+    // > back material are immediately set to the value of the current color, and will track changes
+    // > to the current color resulting from either the Color commands or drawing vertex arrays with
+    // > the color array enabled.
+    // > The replacements made to material properties are permanent; the replaced values remain
+    // > until changed by either sending a new color or by setting a new material value when
+    // > COLOR_MATERIAL is not currently enabled, to override that particular value.
+    if (isColorMaterialEnabled())
+    {
+        mMaterial.ambient = color;
+        mMaterial.diffuse = color;
+    }
 }
 
 const ColorF &GLES1State::getCurrentColor() const
@@ -332,6 +350,12 @@ void GLES1State::multMatrix(const angle::Mat4 &m)
     setDirty(DIRTY_GLES1_MATRICES);
     angle::Mat4 currentMatrix   = currentMatrixStack().back();
     currentMatrixStack().back() = currentMatrix.product(m);
+}
+
+void GLES1State::setLogicOpEnabled(bool enabled)
+{
+    setDirty(DIRTY_GLES1_LOGIC_OP);
+    mLogicOpEnabled = enabled;
 }
 
 void GLES1State::setLogicOp(LogicalOperation opcodePacked)
@@ -494,6 +518,16 @@ const TextureEnvironmentParameters &GLES1State::textureEnvironment(unsigned int 
     return mTextureEnvironments[unit];
 }
 
+bool operator==(const TextureEnvironmentParameters &a, const TextureEnvironmentParameters &b)
+{
+    return a.tie() == b.tie();
+}
+
+bool operator!=(const TextureEnvironmentParameters &a, const TextureEnvironmentParameters &b)
+{
+    return !(a == b);
+}
+
 PointParameters &GLES1State::pointParameters()
 {
     setDirty(DIRTY_GLES1_POINT_PARAMETERS);
@@ -503,6 +537,11 @@ PointParameters &GLES1State::pointParameters()
 const PointParameters &GLES1State::pointParameters() const
 {
     return mPointParameters;
+}
+
+const AlphaTestParameters &GLES1State::getAlphaTestParameters() const
+{
+    return mAlphaTestParameters;
 }
 
 AttributesMask GLES1State::getVertexArraysAttributeMask() const

@@ -86,7 +86,7 @@ class ComputeShaderEnforcePackingValidationTest : public ComputeShaderValidation
 
     void SetUp() override
     {
-        mExtraCompileOptions |= (SH_VARIABLES | SH_ENFORCE_PACKING_RESTRICTIONS);
+        mCompileOptions.enforcePackingRestrictions = true;
         ShaderCompileTreeTest::SetUp();
     }
 

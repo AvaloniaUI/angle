@@ -69,16 +69,19 @@ class BufferState final : angle::NonCopyable
     GLboolean mExternal;
 };
 
-// Some Vertex Array Objects track buffer data updates.
+// Vertex Array and Texture track buffer data updates.
 struct ContentsObserver
 {
-    VertexArray *vertexArray = nullptr;
-    uint32_t bufferIndex     = 0;
+    static constexpr uint32_t kBufferTextureIndex = std::numeric_limits<uint32_t>::max();
+    uint32_t bufferIndex                          = 0;
+
+    // VertexArray* (bufferIndex != kBufferTextureIndex) or Texture*
+    void *observer = nullptr;
 };
 
 ANGLE_INLINE bool operator==(const ContentsObserver &lhs, const ContentsObserver &rhs)
 {
-    return lhs.vertexArray == rhs.vertexArray && lhs.bufferIndex == rhs.bufferIndex;
+    return lhs.bufferIndex == rhs.bufferIndex && lhs.observer == rhs.observer;
 }
 
 class Buffer final : public RefCountObject<BufferID>,
@@ -91,7 +94,7 @@ class Buffer final : public RefCountObject<BufferID>,
     ~Buffer() override;
     void onDestroy(const Context *context) override;
 
-    void setLabel(const Context *context, const std::string &label) override;
+    angle::Result setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
 
     angle::Result bufferStorageExternal(Context *context,
@@ -188,6 +191,9 @@ class Buffer final : public RefCountObject<BufferID>,
 
     void addContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
     void removeContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
+    void addContentsObserver(Texture *texture);
+    void removeContentsObserver(Texture *texture);
+    bool hasContentsObserver(Texture *texture) const;
 
   private:
     angle::Result bufferDataImpl(Context *context,
@@ -203,7 +209,8 @@ class Buffer final : public RefCountObject<BufferID>,
                                          GLbitfield flags);
 
     void onContentsChange();
-    size_t getContentsObserverIndex(VertexArray *vertexArray, uint32_t bufferIndex) const;
+    size_t getContentsObserverIndex(void *observer, uint32_t bufferIndex) const;
+    void removeContentsObserverImpl(void *observer, uint32_t bufferIndex);
 
     BufferState mState;
     rx::BufferImpl *mImpl;

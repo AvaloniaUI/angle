@@ -937,7 +937,6 @@ angle::Result Blit11::copyTexture(const gl::Context *context,
     GLenum componentType = d3d11::GetComponentType(sourceSRVDesc.Format);
 
     ASSERT(componentType != GL_NONE);
-    ASSERT(componentType != GL_SIGNED_NORMALIZED);
     bool isSrcSigned = (componentType == GL_INT);
 
     D3D11_RENDER_TARGET_VIEW_DESC destRTVDesc;
@@ -1734,8 +1733,10 @@ angle::Result Blit11::resolveDepth(const gl::Context *context,
     stateManager->setSimpleViewport(extents);
 
     // Set the viewport
-    stateManager->setShaderResourceShared(gl::ShaderType::Fragment, 0,
-                                          &depth->getShaderResourceView(context));
+    const d3d11::SharedSRV *srv;
+    ANGLE_TRY(depth->getShaderResourceView(context, &srv));
+
+    stateManager->setShaderResourceShared(gl::ShaderType::Fragment, 0, srv);
 
     // Trigger the blit on the GPU.
     deviceContext->Draw(6, 0);
@@ -1907,8 +1908,9 @@ angle::Result Blit11::resolveStencil(const gl::Context *context,
 
     // Set the viewport
     stateManager->setSimpleViewport(extents);
-    stateManager->setShaderResourceShared(gl::ShaderType::Fragment, 0,
-                                          &depthStencil->getShaderResourceView(context));
+    const d3d11::SharedSRV *srv;
+    ANGLE_TRY(depthStencil->getShaderResourceView(context, &srv));
+    stateManager->setShaderResourceShared(gl::ShaderType::Fragment, 0, srv);
     stateManager->setShaderResource(gl::ShaderType::Fragment, 1, &mStencilSRV);
 
     // Trigger the blit on the GPU.

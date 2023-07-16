@@ -1985,6 +1985,20 @@ typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERTEXTURE2DMULTISAMPLEIMGPROC)(
                                                                                 GLint level,
                                                                                 GLsizei samples);
 
+// GL_NV_polygon_mode
+typedef void(INTERNAL_GL_APIENTRY *PFNGLPOLYGONMODENVPROC)(GLenum face, GLenum mode);
+
+// GL_EXT_polygon_offset_clamp
+typedef void(INTERNAL_GL_APIENTRY *PFNGLPOLYGONOFFSETCLAMPEXTPROC)(GLfloat factor,
+                                                                   GLfloat units,
+                                                                   GLfloat clamp);
+
+// GL_EXT_shader_framebuffer_fetch_non_coherent
+typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERFETCHBARRIEREXTPROC)();
+
+// GL_MESA_framebuffer_flip_y
+typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERPARAMETERIMESAPROC)(GLenum, GLenum, GLint);
+
 }  // namespace rx
 
 #endif  // LIBANGLE_RENDERER_GL_FUNCTIONSGLTYPEDEFS_H_

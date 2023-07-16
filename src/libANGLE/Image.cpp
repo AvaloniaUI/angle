@@ -138,6 +138,16 @@ bool ImageSibling::isYUV() const
     return mTargetOf.get() && mTargetOf->isYUV();
 }
 
+bool ImageSibling::isExternalImageWithoutIndividualSync() const
+{
+    return mTargetOf.get() && mTargetOf->isExternalImageWithoutIndividualSync();
+}
+
+bool ImageSibling::hasFrontBufferUsage() const
+{
+    return mTargetOf.get() && mTargetOf->hasFrontBufferUsage();
+}
+
 bool ImageSibling::hasProtectedContent() const
 {
     return mTargetOf.get() && mTargetOf->hasProtectedContent();
@@ -173,7 +183,7 @@ void ExternalImageSibling::onDestroy(const egl::Display *display)
     mImplementation->onDestroy(display);
 }
 
-Error ExternalImageSibling::initialize(const egl::Display *display)
+Error ExternalImageSibling::initialize(const egl::Display *display, const gl::Context *context)
 {
     return mImplementation->initialize(display);
 }
@@ -216,6 +226,11 @@ bool ExternalImageSibling::isYUV() const
     return mImplementation->isYUV();
 }
 
+bool ExternalImageSibling::hasFrontBufferUsage() const
+{
+    return mImplementation->hasFrontBufferUsage();
+}
+
 bool ExternalImageSibling::isCubeMap() const
 {
     return mImplementation->isCubeMap();
@@ -226,9 +241,11 @@ bool ExternalImageSibling::hasProtectedContent() const
     return mImplementation->hasProtectedContent();
 }
 
-void ExternalImageSibling::onAttach(const gl::Context *context, rx::Serial framebufferSerial) {}
+void ExternalImageSibling::onAttach(const gl::Context *context, rx::UniqueSerial framebufferSerial)
+{}
 
-void ExternalImageSibling::onDetach(const gl::Context *context, rx::Serial framebufferSerial) {}
+void ExternalImageSibling::onDetach(const gl::Context *context, rx::UniqueSerial framebufferSerial)
+{}
 
 GLuint ExternalImageSibling::getId() const
 {
@@ -263,19 +280,21 @@ rx::FramebufferAttachmentObjectImpl *ExternalImageSibling::getAttachmentImpl() c
     return mImplementation.get();
 }
 
-ImageState::ImageState(EGLenum target, ImageSibling *buffer, const AttributeMap &attribs)
-    : label(nullptr),
+ImageState::ImageState(ImageID id,
+                       EGLenum target,
+                       ImageSibling *buffer,
+                       const AttributeMap &attribs)
+    : id(id),
+      label(nullptr),
       target(target),
       imageIndex(GetImageIndex(target, attribs)),
       source(buffer),
-      targets(),
       format(GL_NONE),
       yuv(false),
       cubeMap(false),
       size(),
       samples(),
       levelCount(1),
-      sourceType(target),
       colorspace(
           static_cast<EGLenum>(attribs.get(EGL_GL_COLORSPACE, EGL_GL_COLORSPACE_DEFAULT_EXT))),
       hasProtectedContent(static_cast<bool>(attribs.get(EGL_PROTECTED_CONTENT_EXT, EGL_FALSE)))
@@ -284,16 +303,28 @@ ImageState::ImageState(EGLenum target, ImageSibling *buffer, const AttributeMap 
 ImageState::~ImageState() {}
 
 Image::Image(rx::EGLImplFactory *factory,
+             ImageID id,
              const gl::Context *context,
              EGLenum target,
              ImageSibling *buffer,
              const AttributeMap &attribs)
-    : mState(target, buffer, attribs),
+    : mState(id, target, buffer, attribs),
       mImplementation(factory->createImage(mState, context, target, attribs)),
       mOrphanedAndNeedsInit(false)
 {
     ASSERT(mImplementation != nullptr);
     ASSERT(buffer != nullptr);
+
+    if (kIsSharedContextMutexEnabled && context != nullptr)
+    {
+        ASSERT(context->isSharedContextMutexActive());
+        mSharedContextMutex = context->getContextMutex();
+        mSharedContextMutex->addRef();
+    }
+    else
+    {
+        mSharedContextMutex = nullptr;
+    }
 
     mState.source->addImageSource(this);
 }
@@ -302,7 +333,10 @@ void Image::onDestroy(const Display *display)
 {
     // All targets should hold a ref to the egl image and it should not be deleted until there are
     // no siblings left.
-    ASSERT(mState.targets.empty());
+    ASSERT([&] {
+        std::unique_lock lock(mState.targetsLock);
+        return mState.targets.empty();
+    }());
 
     // Make sure the implementation gets a chance to clean up before we delete the source.
     mImplementation->onDestroy(display);
@@ -313,7 +347,7 @@ void Image::onDestroy(const Display *display)
         mState.source->removeImageSource(this);
 
         // If the source is an external object, delete it
-        if (IsExternalImageTarget(mState.sourceType))
+        if (IsExternalImageTarget(mState.target))
         {
             ExternalImageSibling *externalSibling = rx::GetAs<ExternalImageSibling>(mState.source);
             externalSibling->onDestroy(display);
@@ -327,6 +361,12 @@ void Image::onDestroy(const Display *display)
 Image::~Image()
 {
     SafeDelete(mImplementation);
+
+    if (mSharedContextMutex != nullptr)
+    {
+        mSharedContextMutex->release();
+        mSharedContextMutex = nullptr;
+    }
 }
 
 void Image::setLabel(EGLLabelKHR label)
@@ -341,6 +381,7 @@ EGLLabelKHR Image::getLabel() const
 
 void Image::addTargetSibling(ImageSibling *sibling)
 {
+    std::unique_lock lock(mState.targetsLock);
     mState.targets.insert(sibling);
 }
 
@@ -354,16 +395,20 @@ angle::Result Image::orphanSibling(const gl::Context *context, ImageSibling *sib
     if (mState.source == sibling)
     {
         // The external source of an image cannot be redefined so it cannot be orphaned.
-        ASSERT(!IsExternalImageTarget(mState.sourceType));
+        ASSERT(!IsExternalImageTarget(mState.target));
 
         // If the sibling is the source, it cannot be a target.
-        ASSERT(mState.targets.find(sibling) == mState.targets.end());
+        ASSERT([&] {
+            std::unique_lock lock(mState.targetsLock);
+            return mState.targets.find(sibling) == mState.targets.end();
+        }());
         mState.source = nullptr;
         mOrphanedAndNeedsInit =
             (sibling->initState(GL_NONE, mState.imageIndex) == gl::InitState::MayNeedInit);
     }
     else
     {
+        std::unique_lock lock(mState.targetsLock);
         mState.targets.erase(sibling);
     }
 
@@ -377,50 +422,34 @@ const gl::Format &Image::getFormat() const
 
 bool Image::isRenderable(const gl::Context *context) const
 {
-    if (IsTextureTarget(mState.sourceType))
-    {
-        return mState.format.info->textureAttachmentSupport(context->getClientVersion(),
-                                                            context->getExtensions());
-    }
-    else if (IsRenderbufferTarget(mState.sourceType))
-    {
-        return mState.format.info->renderbufferSupport(context->getClientVersion(),
-                                                       context->getExtensions());
-    }
-    else if (IsExternalImageTarget(mState.sourceType))
-    {
-        ASSERT(mState.source != nullptr);
-        return mState.source->isRenderable(context, GL_NONE, gl::ImageIndex());
-    }
-
-    UNREACHABLE();
-    return false;
+    return mIsRenderable;
 }
 
 bool Image::isTexturable(const gl::Context *context) const
 {
-    if (IsTextureTarget(mState.sourceType))
-    {
-        return mState.format.info->textureSupport(context->getClientVersion(),
-                                                  context->getExtensions());
-    }
-    else if (IsRenderbufferTarget(mState.sourceType))
-    {
-        return true;
-    }
-    else if (IsExternalImageTarget(mState.sourceType))
-    {
-        ASSERT(mState.source != nullptr);
-        return rx::GetAs<ExternalImageSibling>(mState.source)->isTextureable(context);
-    }
-
-    UNREACHABLE();
-    return false;
+    return mIsTexturable;
 }
 
 bool Image::isYUV() const
 {
     return mState.yuv;
+}
+
+bool Image::isExternalImageWithoutIndividualSync() const
+{
+    // Only Vulkan images are individually synced.
+    return IsExternalImageTarget(mState.target) && mState.target != EGL_VULKAN_IMAGE_ANGLE;
+}
+
+bool Image::hasFrontBufferUsage() const
+{
+    if (IsExternalImageTarget(mState.target))
+    {
+        ExternalImageSibling *externalSibling = rx::GetAs<ExternalImageSibling>(mState.source);
+        return externalSibling->hasFrontBufferUsage();
+    }
+
+    return false;
 }
 
 bool Image::isCubeMap() const
@@ -468,12 +497,12 @@ rx::ImageImpl *Image::getImplementation() const
     return mImplementation;
 }
 
-Error Image::initialize(const Display *display)
+Error Image::initialize(const Display *display, const gl::Context *context)
 {
-    if (IsExternalImageTarget(mState.sourceType))
+    if (IsExternalImageTarget(mState.target))
     {
         ExternalImageSibling *externalSibling = rx::GetAs<ExternalImageSibling>(mState.source);
-        ANGLE_TRY(externalSibling->initialize(display));
+        ANGLE_TRY(externalSibling->initialize(display, context));
 
         mState.hasProtectedContent = externalSibling->hasProtectedContent();
         mState.levelCount          = externalSibling->getLevelCount();
@@ -496,7 +525,7 @@ Error Image::initialize(const Display *display)
         mState.format = gl::Format(nonLinearFormat);
     }
 
-    if (!IsExternalImageTarget(mState.sourceType))
+    if (!IsExternalImageTarget(mState.target))
     {
         // Account for the fact that GL_ANGLE_yuv_internal_format extension maybe enabled,
         // in which case the internal format itself could be YUV.
@@ -506,12 +535,42 @@ Error Image::initialize(const Display *display)
     mState.size    = mState.source->getAttachmentSize(mState.imageIndex);
     mState.samples = mState.source->getAttachmentSamples(mState.imageIndex);
 
-    if (IsTextureTarget(mState.sourceType))
+    if (IsTextureTarget(mState.target))
     {
         mState.size.depth = 1;
     }
 
-    return mImplementation->initialize(display);
+    Error error = mImplementation->initialize(display);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    if (IsTextureTarget(mState.target))
+    {
+        mIsTexturable = true;
+        mIsRenderable = mState.format.info->textureAttachmentSupport(context->getClientVersion(),
+                                                                     context->getExtensions());
+    }
+    else if (IsRenderbufferTarget(mState.target))
+    {
+        mIsTexturable = true;
+        mIsRenderable = mState.format.info->renderbufferSupport(context->getClientVersion(),
+                                                                context->getExtensions());
+    }
+    else if (IsExternalImageTarget(mState.target))
+    {
+        ASSERT(mState.source != nullptr);
+        mIsTexturable = rx::GetAs<ExternalImageSibling>(mState.source)->isTextureable(context);
+        mIsRenderable = rx::GetAs<ExternalImageSibling>(mState.source)
+                            ->isRenderable(context, GL_NONE, gl::ImageIndex());
+    }
+    else
+    {
+        UNREACHABLE();
+    }
+
+    return NoError();
 }
 
 bool Image::orphaned() const
@@ -551,6 +610,7 @@ void Image::notifySiblings(const ImageSibling *notifier, angle::SubjectMessage m
         mState.source->onSubjectStateChange(rx::kTextureImageSiblingMessageIndex, message);
     }
 
+    std::unique_lock lock(mState.targetsLock);
     for (ImageSibling *target : mState.targets)
     {
         if (target != notifier)

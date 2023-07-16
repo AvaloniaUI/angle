@@ -16,10 +16,8 @@
 #include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
 #include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
 #include "libANGLE/renderer/driver_utils.h"
-#include "platform/FeaturesD3D_autogen.h"
 #include "platform/PlatformMethods.h"
-
-#include "third_party/systeminfo/SystemInfo.h"
+#include "platform/autogen/FeaturesD3D_autogen.h"
 
 namespace rx
 {
@@ -201,14 +199,17 @@ D3DTEXTUREADDRESS ConvertTextureWrap(GLenum wrap)
         case GL_REPEAT:
             d3dWrap = D3DTADDRESS_WRAP;
             break;
+        case GL_MIRRORED_REPEAT:
+            d3dWrap = D3DTADDRESS_MIRROR;
+            break;
         case GL_CLAMP_TO_EDGE:
             d3dWrap = D3DTADDRESS_CLAMP;
             break;
         case GL_CLAMP_TO_BORDER:
             d3dWrap = D3DTADDRESS_BORDER;
             break;
-        case GL_MIRRORED_REPEAT:
-            d3dWrap = D3DTADDRESS_MIRROR;
+        case GL_MIRROR_CLAMP_TO_EDGE_EXT:
+            d3dWrap = D3DTADDRESS_MIRRORONCE;
             break;
         default:
             UNREACHABLE();
@@ -398,7 +399,7 @@ unsigned int GetReservedVertexUniformVectors()
 
 unsigned int GetReservedFragmentUniformVectors()
 {
-    return 3;  // dx_ViewCoords, dx_DepthFront and dx_DepthRange.
+    return 4;  // dx_ViewCoords, dx_DepthFront, dx_DepthRange, dx_FragCoordoffset.
 }
 
 GLsizei GetSamplesCount(D3DMULTISAMPLE_TYPE type)
@@ -691,7 +692,7 @@ void GenerateCaps(IDirect3D9 *d3d9,
             !(deviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) &&
             !(deviceCaps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP_POW2) &&
             !(deviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) &&
-            !(!isWindowsVistaOrGreater() && IsAMD(adapterId.VendorId));
+            !(!IsWindowsVistaOrLater() && IsAMD(adapterId.VendorId));
 
         // Disable depth texture support on AMD cards (See ANGLE issue 839)
         if (IsAMD(adapterId.VendorId))
@@ -753,6 +754,7 @@ void GenerateCaps(IDirect3D9 *d3d9,
     extensions->textureUsageANGLE           = true;
     extensions->translatedShaderSourceANGLE = true;
     extensions->fboRenderMipmapOES          = true;
+    extensions->textureMirrorClampToEdgeEXT = true;
     extensions->discardFramebufferEXT = false;  // It would be valid to set this to true, since
                                                 // glDiscardFramebufferEXT is just a hint
     extensions->colorBufferFloatEXT   = false;
@@ -763,6 +765,7 @@ void GenerateCaps(IDirect3D9 *d3d9,
     extensions->packSubimageNV        = true;
     extensions->syncQueryCHROMIUM     = extensions->fenceNV;
     extensions->copyTextureCHROMIUM   = true;
+    extensions->textureBorderClampEXT = true;
     extensions->textureBorderClampOES = true;
     extensions->videoTextureWEBGL     = true;
 
@@ -777,6 +780,9 @@ void GenerateCaps(IDirect3D9 *d3d9,
 
     // D3D9 cannot support constant color and alpha blend funcs together
     limitations->noSimultaneousConstantColorAndAlphaBlendFunc = true;
+
+    // D3D9 cannot support unclamped constant blend color
+    limitations->noUnclampedBlendColor = true;
 
     // D3D9 cannot support packing more than one variable to a single varying.
     // TODO(jmadill): Implement more sophisticated component packing in D3D9.
@@ -826,7 +832,7 @@ void MakeValidSize(bool isImage,
     *levelOffset = upsampleCount;
 }
 
-void InitializeFeatures(angle::FeaturesD3D *features)
+void InitializeFeatures(angle::FeaturesD3D *features, DWORD vendorID)
 {
     ANGLE_FEATURE_CONDITION(features, mrtPerfWorkaround, true);
     ANGLE_FEATURE_CONDITION(features, setDataFasterThanImageUpload, false);
@@ -837,6 +843,8 @@ void InitializeFeatures(angle::FeaturesD3D *features)
 
     // crbug.com/1011627 Turn this on for D3D9.
     ANGLE_FEATURE_CONDITION(features, allowClearForRobustResourceInit, true);
+
+    ANGLE_FEATURE_CONDITION(features, borderColorSrgb, IsNvidia(vendorID));
 }
 
 }  // namespace d3d9

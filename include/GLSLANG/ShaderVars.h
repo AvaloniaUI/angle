@@ -12,11 +12,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
-
-// This type is defined here to simplify ANGLE's integration with glslang for SPIR-V.
-using ShCompileOptions = uint64_t;
 
 namespace sh
 {
@@ -27,10 +25,12 @@ typedef unsigned int GLenum;
 enum InterpolationType
 {
     INTERPOLATION_SMOOTH,
+    INTERPOLATION_FLAT,
+    INTERPOLATION_NOPERSPECTIVE,
     INTERPOLATION_CENTROID,
     INTERPOLATION_SAMPLE,
-    INTERPOLATION_FLAT,
-    INTERPOLATION_NOPERSPECTIVE
+    INTERPOLATION_NOPERSPECTIVE_CENTROID,
+    INTERPOLATION_NOPERSPECTIVE_SAMPLE
 };
 
 const char *InterpolationTypeToString(InterpolationType type);
@@ -55,6 +55,7 @@ enum class BlockType
 {
     BLOCK_UNIFORM,
     BLOCK_BUFFER,
+    PIXEL_LOCAL_EXT,  // GL_EXT_shader_pixel_local_storage.
 };
 
 const char *BlockTypeToString(BlockType type);
@@ -216,6 +217,7 @@ struct ShaderVariable
     int binding;
     GLenum imageUnitFormat;
     int offset;
+    bool rasterOrdered;
     bool readonly;
     bool writeonly;
 
@@ -237,6 +239,11 @@ struct ShaderVariable
 
     // If the variable is a sampler that has ever been statically used with texelFetch
     bool texelFetchStaticUse;
+
+    // Id of the variable in the shader.  Currently used by the SPIR-V output to communicate the
+    // SPIR-V id of the variable.  This value is only set for variables that the SPIR-V transformer
+    // needs to know about, i.e. active variables, excluding non-zero array elements etc.
+    uint32_t id;
 
   protected:
     bool isSameVariableAtLinkTime(const ShaderVariable &other,
@@ -290,8 +297,13 @@ struct InterfaceBlock
     int binding;
     bool staticUse;
     bool active;
+    // Only applied to SSBOs, |isReadOnly| tells if the readonly qualifier is specified.
+    bool isReadOnly;
     BlockType blockType;
     std::vector<ShaderVariable> fields;
+
+    // Id of the interface block in the shader.  Similar to |ShaderVariable::id|.
+    uint32_t id;
 };
 
 struct WorkGroupSize

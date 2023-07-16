@@ -21,10 +21,11 @@ namespace rx
 
 enum class ImageMipLevels
 {
-    EnabledLevels = 0,
-    FullMipChain  = 1,
+    EnabledLevels                 = 0,
+    FullMipChainForGenerateMipmap = 1,
+    FullMipChain                  = 2,
 
-    InvalidEnum = 2,
+    InvalidEnum = 3,
 };
 
 enum class TextureUpdateResult
@@ -194,6 +195,13 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                               GLenum binding,
                                               const gl::ImageIndex &imageIndex);
 
+    GLint getRequiredExternalTextureImageUnits([[maybe_unused]] const gl::Context *context) override
+    {
+        // For now, we assume that only one image unit is needed to support
+        // external GL textures in the Vulkan backend.
+        return 1;
+    }
+
     const vk::ImageHelper &getImage() const
     {
         ASSERT(mImage && mImage->valid());
@@ -211,13 +219,15 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
         commandBufferHelper->retainResource(&mBufferViews);
     }
 
+    bool isImmutable() { return mState.getImmutableFormat(); }
     bool imageValid() const { return (mImage && mImage->valid()); }
 
     void releaseOwnershipOfImage(const gl::Context *context);
 
     const vk::ImageView &getReadImageView(vk::Context *context,
                                           GLenum srgbDecode,
-                                          bool texelFetchStaticUse) const;
+                                          bool texelFetchStaticUse,
+                                          bool samplerExternal2DY2YEXT) const;
 
     // A special view for cube maps as a 2D array, used with shaders that do texelFetch() and for
     // seamful cube map emulation.
@@ -236,10 +246,21 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                       const gl::ImageUnit &binding,
                                       const vk::ImageView **imageViewOut);
 
-    const vk::SamplerHelper &getSampler() const
+    const vk::SamplerHelper &getSampler(bool isSamplerExternalY2Y) const
     {
+        if (isSamplerExternalY2Y)
+        {
+            ASSERT(mY2YSampler.valid());
+            return mY2YSampler.get();
+        }
         ASSERT(mSampler.valid());
         return mSampler.get();
+    }
+
+    void resetSampler()
+    {
+        mSampler.reset();
+        mY2YSampler.reset();
     }
 
     // Normally, initialize the image with enabled mipmap level counts.
@@ -290,6 +311,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     {
         return mState.getBuffer();
     }
+    vk::BufferHelper *getPossiblyEmulatedTextureBuffer(vk::Context *context) const;
 
     bool isSRGBOverrideEnabled() const
     {
@@ -307,6 +329,15 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     }
 
     angle::Result onLabelUpdate(const gl::Context *context) override;
+
+    void onNewDescriptorSet(const vk::SharedDescriptorSetCacheKey &sharedCacheKey)
+    {
+        mDescriptorSetCacheManager.addKey(sharedCacheKey);
+    }
+
+    // Check if the texture is consistently specified. Used for flushing mutable textures.
+    bool isMutableTextureConsistentlySpecifiedForFlush();
+    bool isMipImageDescDefined(gl::TextureTarget textureTarget, size_t level);
 
   private:
     // Transform an image index from the frontend into one that can be used on the backing
@@ -328,7 +359,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                         const vk::Format &format,
                         uint32_t imageLevelOffset,
                         uint32_t imageLayerOffset,
-                        bool selfOwned);
+                        bool selfOwned,
+                        UniqueSerial siblingSerial);
 
     vk::ImageViewHelper &getImageViews()
     {
@@ -481,6 +513,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     // Flush image's staged updates for all levels and layers.
     angle::Result flushImageStagedUpdates(ContextVk *contextVk);
 
+    angle::Result performImageQueueTransferIfNecessary(ContextVk *contextVk);
+
     // For various reasons, the underlying image may need to be respecified.  For example because
     // base/max level changed, usage/create flags have changed, the format needs modification to
     // become renderable, generate mipmap is adding levels, etc.  This function is called by
@@ -522,7 +556,6 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                           const vk::ImageHelper *nextImage);
 
     vk::ImageAccess getRequiredImageAccess() const { return mRequiredImageAccess; }
-    bool imageHasActualImageFormat(angle::FormatID actualFormatID) const;
 
     void stageSelfAsSubresourceUpdates(ContextVk *contextVk);
 
@@ -531,7 +564,16 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
 
     void updateCachedImageViewSerials();
 
+    angle::Result updateTextureLabel(ContextVk *contextVk);
+
+    vk::BufferHelper *getRGBAConversionBufferHelper(RendererVk *renderer,
+                                                    angle::FormatID formatID) const;
+    angle::Result convertBufferToRGBA(ContextVk *contextVk, size_t &conversionBufferSize);
+
     bool mOwnsImage;
+    // Generated from ImageVk if EGLImage target, or from throw-away generator if Surface target.
+    UniqueSerial mImageSiblingSerial;
+
     bool mRequiresMutableStorage;
     vk::ImageAccess mRequiredImageAccess;
     bool mImmutableSamplerDirty;
@@ -587,6 +629,9 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     // |mSampler| contains the relevant Vulkan sampler states representing the OpenGL Texture
     // sampling states for the Texture.
     vk::SamplerBinding mSampler;
+    // |mY2YSampler| contains a version of mSampler that is meant for use with
+    // __samplerExternal2DY2YEXT (i.e., skipping conversion of YUV to RGB).
+    vk::SamplerBinding mY2YSampler;
 
     // The created vkImage usage flag.
     VkImageUsageFlags mImageUsageFlags;
@@ -617,6 +662,9 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     // Cached subresource indexes.
     vk::ImageOrBufferViewSubresourceSerial mCachedImageViewSubresourceSerialSRGBDecode;
     vk::ImageOrBufferViewSubresourceSerial mCachedImageViewSubresourceSerialSkipDecode;
+
+    // Manages the texture descriptor set cache that created with this texture
+    vk::DescriptorSetCacheManager mDescriptorSetCacheManager;
 };
 
 }  // namespace rx

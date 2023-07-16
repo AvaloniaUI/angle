@@ -105,14 +105,8 @@ bool IsActiveInterfaceBlock(const sh::InterfaceBlock &interfaceBlock);
 void WriteBlockMemberInfo(BinaryOutputStream *stream, const sh::BlockMemberInfo &var);
 void LoadBlockMemberInfo(BinaryInputStream *stream, sh::BlockMemberInfo *var);
 
-void WriteShaderVar(BinaryOutputStream *stream, const sh::ShaderVariable &var);
-void LoadShaderVar(BinaryInputStream *stream, sh::ShaderVariable *var);
-
 void WriteInterfaceBlock(BinaryOutputStream *stream, const InterfaceBlock &block);
 void LoadInterfaceBlock(BinaryInputStream *stream, InterfaceBlock *block);
-
-void WriteShInterfaceBlock(BinaryOutputStream *stream, const sh::InterfaceBlock &block);
-void LoadShInterfaceBlock(BinaryInputStream *stream, sh::InterfaceBlock *block);
 
 void WriteShaderVariableBuffer(BinaryOutputStream *stream, const ShaderVariableBuffer &var);
 void LoadShaderVariableBuffer(BinaryInputStream *stream, ShaderVariableBuffer *var);
@@ -370,8 +364,8 @@ class ProgramState final : angle::NonCopyable
     friend class Program;
 
     void updateActiveSamplers();
-    void updateProgramInterfaceInputs();
-    void updateProgramInterfaceOutputs();
+    void updateProgramInterfaceInputs(const Context *context);
+    void updateProgramInterfaceOutputs(const Context *context);
 
     // Scans the sampler bindings for type conflicts with sampler 'textureUnitIndex'.
     void setSamplerUniformTextureTypeAndFormat(size_t textureUnitIndex);
@@ -392,7 +386,7 @@ class ProgramState final : angle::NonCopyable
     bool mSeparable;
     rx::SpecConstUsageBits mSpecConstUsageBits;
 
-    // ANGLE_multiview.
+    // GL_OVR_multiview / GL_OVR_multiview2
     int mNumViews;
 
     // GL_ANGLE_multi_draw
@@ -439,7 +433,7 @@ class Program final : public LabeledObject, public angle::Subject
 
     ShaderProgramID id() const;
 
-    void setLabel(const Context *context, const std::string &label) override;
+    angle::Result setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
 
     ANGLE_INLINE rx::ProgramImpl *getImplementation() const
@@ -600,7 +594,8 @@ class Program final : public LabeledObject, public angle::Subject
     void getUniformiv(const Context *context, UniformLocation location, GLint *params) const;
     void getUniformuiv(const Context *context, UniformLocation location, GLuint *params) const;
 
-    void getActiveUniformBlockName(const UniformBlockIndex blockIndex,
+    void getActiveUniformBlockName(const Context *context,
+                                   const UniformBlockIndex blockIndex,
                                    GLsizei bufSize,
                                    GLsizei *length,
                                    GLchar *blockName) const;
@@ -757,6 +752,9 @@ class Program final : public LabeledObject, public angle::Subject
 
         DIRTY_BIT_COUNT = DIRTY_BIT_UNIFORM_BLOCK_BINDING_MAX,
     };
+    static_assert(DIRTY_BIT_UNIFORM_BLOCK_BINDING_0 == 0,
+                  "UniformBlockBindingMask must match DirtyBits because UniformBlockBindingMask is "
+                  "used directly to set dirty bits.");
 
     using DirtyBits = angle::BitSet<DIRTY_BIT_COUNT>;
 
@@ -776,14 +774,24 @@ class Program final : public LabeledObject, public angle::Subject
     // Writes a program's binary to the output memory buffer.
     angle::Result serialize(const Context *context, angle::MemoryBuffer *binaryOut) const;
 
-    rx::Serial serial() const { return mSerial; }
+    rx::UniqueSerial serial() const { return mSerial; }
 
     const ProgramExecutable &getExecutable() const { return mState.getExecutable(); }
     ProgramExecutable &getExecutable() { return mState.getExecutable(); }
 
-  private:
-    struct LinkingState;
+    void onUniformBufferStateChange(size_t uniformBufferIndex)
+    {
+        if (uniformBufferIndex >= mUniformBlockBindingMasks.size())
+        {
+            mUniformBlockBindingMasks.resize(uniformBufferIndex + 1, UniformBlockBindingMask());
+        }
+        mDirtyBits |= mUniformBlockBindingMasks[uniformBufferIndex];
+    }
 
+  private:
+    friend class ProgramPipeline;
+
+    struct LinkingState;
     ~Program() override;
 
     // Loads program state according to the specified binary blob.
@@ -794,9 +802,9 @@ class Program final : public LabeledObject, public angle::Subject
 
     angle::Result linkImpl(const Context *context);
 
-    bool linkValidateShaders(InfoLog &infoLog);
+    bool linkValidateShaders(const Context *context, InfoLog &infoLog);
     bool linkAttributes(const Context *context, InfoLog &infoLog);
-    bool linkVaryings(InfoLog &infoLog) const;
+    bool linkVaryings(const Context *context, InfoLog &infoLog) const;
 
     bool linkUniforms(const Context *context,
                       std::vector<UnusedUniform> *unusedUniformsOutOrNull,
@@ -866,7 +874,9 @@ class Program final : public LabeledObject, public angle::Subject
                                  GLboolean transpose,
                                  const UniformT *v);
 
-    rx::Serial mSerial;
+    void dumpProgramInfo() const;
+
+    rx::UniqueSerial mSerial;
     ProgramState mState;
     rx::ProgramImpl *mProgram;
 
@@ -888,6 +898,18 @@ class Program final : public LabeledObject, public angle::Subject
     const ShaderProgramID mHandle;
 
     DirtyBits mDirtyBits;
+
+    // To simplify dirty bits handling, instead of tracking dirtiness of both uniform block index
+    // and uniform binding index, we only track which uniform block index is dirty. And then when
+    // buffer index is dirty, we look at which uniform blocks are bound to this buffer binding index
+    // and set all of these uniform blocks dirty. This variable tracks all the uniform blocks bound
+    // to the given binding index in the form of bitmask so that we can quickly convert them to the
+    // dirty bits.
+    static constexpr size_t kFastUniformBlockBindingLimit = 8;
+    angle::FastVector<UniformBlockBindingMask, kFastUniformBlockBindingLimit>
+        mUniformBlockBindingMasks;
+
+    std::mutex mHistogramMutex;
 };
 }  // namespace gl
 

@@ -52,13 +52,53 @@ When that is working, add the following GN arg to your setup:
 ```
 build_angle_trace_perf_tests = true
 ```
-To build the angle_perftests:
+### Selecting which traces to build
+
+Since the traces are numerous, you should limit compilation to a subset with the following GN arg:
 ```
-autoninja -C out/<config> angle_perftests
+angle_restricted_traces = ["among_us 5", "street_fighter_duel 1"]
 ```
-Run them like so:
+If you choose not to pick any traces and build them all, you must follow different steps for Android. Skip ahead to [Building and running all traces for Android](#building-and-running-all-traces-for-android)
+
+To build the trace tests:
 ```
-out/<config>/angle_perftests --gtest_filter=TracePerfTest*
+autoninja -C out/<config> angle_trace_tests
+```
+## Running the trace tests
+The trace tests can be run with default options like so:
+```
+out/<config>/angle_trace_tests
+```
+To select a specific trace to run, provide it with a filter:
+```
+out/<config>/angle_trace_tests --gtest_filter=TraceTest.<trace_name>
+```
+The specific options available with traces can be found in the PerfTests [`README`](../perf_tests/README.md#trace-tests)
+
+Common options used are:
+```
+# Use ANGLE as the driver with the system's Vulkan driver as backend
+--use-angle=vulkan
+
+# Use the system's native GLES driver
+--use-gl=native
+```
+
+### Building and running all traces for Android
+Our trace library has gotten large enough that they no longer fit in a single APK.  To support building and running the entire library, we can compile the libraries by themselves, outside of the APK, and push them to locations accessible by the test harness.
+
+To do so, remove `angle_restricted_traces` from your GN args, then compile with:
+```
+autoninja -C out/<config> angle_trace_perf_tests
+```
+and run with (including recommended options):
+```
+out/<config>/angle_trace_tests --filter='*among_us*' --verbose --fixed-test-time-with-warmup 10
+```
+
+If more than one device is connected, the target device serial should be provided as well:
+```
+ANDROID_SERIAL=<device_serial> out/<config>/angle_trace_tests ...
 ```
 
 # Capturing and adding new Android traces
@@ -189,25 +229,22 @@ Allow the app to run until the `*angledata.gz` file is non-zero and no longer gr
 should continue rendering after that:
 ```
 $ adb shell ls -s -w 1 /sdcard/Android/data/$PACKAGE_NAME/angle_capture
-30528 angry_birds_2_capture_context1.angledata.gz
-    8 angry_birds_2_capture_context1.cpp
-    4 angry_birds_2_capture_context1_files.txt
-  768 angry_birds_2_capture_context1_frame001.cpp
-  100 angry_birds_2_capture_context1_frame002.cpp
-  100 angry_birds_2_capture_context1_frame003.cpp
-  100 angry_birds_2_capture_context1_frame004.cpp
-  100 angry_birds_2_capture_context1_frame005.cpp
-  104 angry_birds_2_capture_context1_frame006.cpp
-  100 angry_birds_2_capture_context1_frame007.cpp
-  100 angry_birds_2_capture_context1_frame008.cpp
-  100 angry_birds_2_capture_context1_frame009.cpp
-  100 angry_birds_2_capture_context1_frame010.cpp
-  120 angry_birds_2_capture_context1_frame011.cpp
-    8 angry_birds_2_capture_context1.h
+30528 angry_birds_2.angledata.gz
+    8 angry_birds_2.cpp
+    4 angry_birds_2.json
+  768 angry_birds_2_001.cpp
+  100 angry_birds_2_002.cpp
+  100 angry_birds_2_003.cpp
+  100 angry_birds_2_004.cpp
+  100 angry_birds_2_005.cpp
+  104 angry_birds_2_006.cpp
+  100 angry_birds_2_007.cpp
+  100 angry_birds_2_008.cpp
+  100 angry_birds_2_009.cpp
+  100 angry_birds_2_010.cpp
+  120 angry_birds_2_011.cpp
+    8 angry_birds_2.h
 ```
-Note, you may see multiple contexts captured in the output. When this happens, look at the size of
-the files. The larger files should be the context you care about it. You should move or delete the
-other context files.
 
 ## Pull the trace files
 
@@ -265,7 +302,7 @@ iterations. We cannot delete trace files once they are up on the CIPD.
 Doing additional rounds of content check can help us save CIPD resources.
 
 ```
-./sync_restricted_traces_to_cipd.py
+src/tests/restricted_traces/sync_restricted_traces_to_cipd.py
 ```
 
 ## Upload your CL
@@ -291,7 +328,7 @@ limitations with a Linux app window.
 This will save the original traces in a temporary folder if you need to revert to the prior trace format:
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py backup "*"
+src/tests/restricted_traces/retrace_restricted_traces.py backup "*"
 ```
 
 *Note: on Linux, remove the command `py` prefix to the Python scripts.*
@@ -299,7 +336,7 @@ py ./src/tests/restricted_traces/retrace_restricted_traces.py backup "*"
 This will save the traces to `./retrace-backups`. At any time you can revert the trace files by running:
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py restore "*"
+src/tests/restricted_traces/retrace_restricted_traces.py restore "*"
 ```
 
 ## Part 1: Sanity Check with T-Rex
@@ -313,7 +350,7 @@ configuration and checkout:
 ```
 export TRACE_GN_PATH=out/Debug
 export TRACE_NAME=trex_200
-py ./src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip -f $TRACE_NAME --validation --limit 3
+src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip -f $TRACE_NAME --validation --limit 3
 ```
 
 The `--validation` flag will turn on additional validation checks in the
@@ -327,7 +364,7 @@ The command below will update your copy of the trace, rebuild, the run the
 test suite with validation enabled:
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py validate $TRACE_GN_PATH retrace-wip $TRACE_NAME
+src/tests/restricted_traces/retrace_restricted_traces.py validate $TRACE_GN_PATH retrace-wip $TRACE_NAME
 ```
 
 If the trace failed validation, see the section below on diagnosing tracer
@@ -336,7 +373,7 @@ errors. Otherwise proceed with the steps below.
 ### Step 3/3: Restore the Canonical T-Rex Trace
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py restore $TRACE_NAME
+src/tests/restricted_traces/retrace_restricted_traces.py restore $TRACE_NAME
 ```
 
 ## Part 2: Do a limited trace upgrade with validation enabled
@@ -344,7 +381,7 @@ py ./src/tests/restricted_traces/retrace_restricted_traces.py restore $TRACE_NAM
 ### Step 1/3: Upgrade all traces with a limit of 3 frames
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip --validation --limit 3  --no-overwrite
+src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip --validation --limit 3  --no-overwrite
 ```
 
 If this process gets interrupted, re-run the upgrade command. The
@@ -356,7 +393,7 @@ errors. Otherwise proceed with the steps below.
 ### Step 2/3: Validate all upgraded traces
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py validate $TRACE_GN_PATH retrace-wip "*"
+src/tests/restricted_traces/retrace_restricted_traces.py validate $TRACE_GN_PATH retrace-wip "*"
 ```
 
 If any traces failed validation, see the section below on diagnosing tracer
@@ -365,14 +402,14 @@ errors. Otherwise proceed with the steps below.
 ### Step 3/3: Restore all traces
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py restore "*"
+src/tests/restricted_traces/retrace_restricted_traces.py restore "*"
 ```
 
 ## Part 3: Do the full trace upgrade
 
 ```
 rm -rf retrace-wip
-py ./src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip --no-overwrite
+src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip --no-overwrite
 ```
 
 If this process gets interrupted, re-run the upgrade command. The
@@ -405,9 +442,9 @@ number beginning with 'x'. For example:
 Then run:
 
 ```
-py ./src/tests/restricted_traces/retrace_restricted_traces.py restore -o retrace-wip "*"
-py ./src/tests/restricted_traces/sync_restricted_traces_to_cipd.py
-py ./scripts/run_code_generation.py
+src/tests/restricted_traces/retrace_restricted_traces.py restore -o retrace-wip "*"
+src/tests/restricted_traces/sync_restricted_traces_to_cipd.py
+scripts/run_code_generation.py
 ```
 
 The restore command will copy the new traces from the `retrace-wip` directory
@@ -425,12 +462,33 @@ and incrementing the version of the traces (skipping versions if you prefer)
 and then run:
 
 ```
-py ./src/tests/restricted_traces/sync_restricted_traces_to_cipd.py
-py ./scripts/run_code_generation.py
+src/tests/restricted_traces/sync_restricted_traces_to_cipd.py
+scripts/run_code_generation.py
 ```
 
 Then create and upload a CL as normal. Congratulations, you've finished the
 trace upgrade!
+
+## Finding a trace's minimum requirements
+
+`retrace_restricted_traces.py` can be used to determine a trace's minimum
+extensions and GLES version. Run the command:
+
+```
+src/tests/restricted_traces/retrace_restricted_traces.py get_min_reqs $TRACE_GN_PATH [--traces "*"]
+```
+
+The script will run each listed trace multiple times so it can find the minimum
+required GLES version and each required extension. Finally it records that
+information to the trace's json file.
+
+By default it will run with SwiftShader. To make the script use your machine's
+native vulkan drivers, use the `--no-swiftshader` argument before the script's
+command:
+
+```
+src/tests/restricted_traces/retrace_restricted_traces.py --no-swiftshader get_min_reqs $TRACE_GN_PATH [--traces "*"]
+```
 
 # Diagnosing and fixing tracer errors
 
@@ -441,7 +499,7 @@ to find the exact command line and environment variables the script uses to
 produce the failure. For example:
 
 ```
-INFO:root:ANGLE_CAPTURE_LABEL=trex_200 ANGLE_CAPTURE_OUT_DIR=C:\src\angle\retrace-wip\trex_200 ANGLE_CAPTURE_FRAME_START=2 ANGLE_CAPTURE_FRAME_END=4 ANGLE_CAPTURE_VALIDATION=1 ANGLE_FEATURE_OVERRIDES_ENABLED=allocateNonZeroMemory:forceInitShaderVariables ANGLE_CAPTURE_TRIM_ENABLED=1 out/Debug\angle_perftests.exe --gtest_filter=TracePerfTest.Run/vulkan_swiftshader_trex_200 --max-steps-performed 3 --retrace-mode --enable-all-trace-tests
+INFO:root:ANGLE_CAPTURE_LABEL=trex_200 ANGLE_CAPTURE_OUT_DIR=C:\src\angle\retrace-wip\trex_200 ANGLE_CAPTURE_FRAME_START=2 ANGLE_CAPTURE_FRAME_END=4 ANGLE_CAPTURE_VALIDATION=1 ANGLE_FEATURE_OVERRIDES_ENABLED=allocateNonZeroMemory:forceInitShaderVariables ANGLE_CAPTURE_TRIM_ENABLED=1 out\Debug\angle_trace_tests.exe --gtest_filter=TraceTest.trex_200 --use-angle=swiftshader --max-steps-performed 3 --retrace-mode
 ```
 
 Once you can reproduce the issue you can use a debugger or other standard

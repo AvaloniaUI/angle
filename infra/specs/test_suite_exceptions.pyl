@@ -11,10 +11,17 @@
 # For more info see Chromium's test_suite_exceptions.pyl in testing/buildbot.
 
 {
+  'angle_capture_tests': {
+    'remove_from': [
+      # TODO(b/286067106): Not implemented on Android
+      'android-arm64-pixel4',
+    ],
+  },
+
   'angle_end2end_tests': {
     'modifications': {
-      # anglebug.com/5328 suspecting blue screen caused by multiprocess
-      'linux-intel': {
+      # anglebug.com/7874 suspecting device lost caused by multiprocess
+      'win10-x64-exp-intel': {
         'args': [
           '--max-processes=1',
         ],
@@ -28,7 +35,8 @@
   },
   'angle_restricted_trace_gold_tests': {
     'modifications': {
-      'linux-intel': {
+      # anglebug.com/5415 flaky 4x8 pixel artifacts on Win Intel
+      'win10-x64-exp-intel': {
         'args': [
           '--flaky-retries=1',
         ],
@@ -40,10 +48,16 @@
       },
     },
   },
+  'angle_trace_interpreter_tests': {
+    'remove_from': [
+      # TODO: Implement on Android. http://anglebug.com/7777
+      'android-arm64-pixel4',
+    ],
+  },
   'angle_white_box_tests': {
     'modifications': {
-      # anglebug.com/5328 suspecting blue screen caused by multiprocess
-      'linux-intel': {
+      # anglebug.com/7874 suspecting device lost caused by multiprocess
+      'win10-x64-exp-intel': {
         'args': [
           '--max-processes=1',
         ],

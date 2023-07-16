@@ -185,8 +185,10 @@ class ContextNULL : public ContextImpl
 
     // State sync with dirty bits.
     angle::Result syncState(const gl::Context *context,
-                            const gl::State::DirtyBits &dirtyBits,
-                            const gl::State::DirtyBits &bitMask,
+                            const gl::state::DirtyBits dirtyBits,
+                            const gl::state::DirtyBits bitMask,
+                            const gl::state::ExtendedDirtyBits extendedDirtyBits,
+                            const gl::state::ExtendedDirtyBits extendedBitMask,
                             gl::Command command) override;
 
     // Disjoint timer queries
@@ -201,6 +203,7 @@ class ContextNULL : public ContextImpl
     const gl::TextureCapsMap &getNativeTextureCaps() const override;
     const gl::Extensions &getNativeExtensions() const override;
     const gl::Limitations &getNativeLimitations() const override;
+    const ShPixelLocalStorageOptions &getNativePixelLocalStorageOptions() const override;
 
     // Shader creation
     CompilerImpl *createCompiler() override;
@@ -266,6 +269,7 @@ class ContextNULL : public ContextImpl
     gl::TextureCapsMap mTextureCaps;
     gl::Extensions mExtensions;
     gl::Limitations mLimitations;
+    ShPixelLocalStorageOptions mPLSOptions;
 
     AllocationTrackerNULL *mAllocationTracker;
 };

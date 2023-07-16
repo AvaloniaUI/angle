@@ -11,6 +11,7 @@
 #define UTIL_CAPTURE_FRAME_CAPTURE_TEST_UTILS_H_
 
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <type_traits>
@@ -18,7 +19,9 @@
 
 #include "common/angleutils.h"
 #include "common/debug.h"
+#include "common/frame_capture_utils.h"
 #include "common/system_utils.h"
+#include "trace_interface.h"
 
 #define USE_SYSTEM_ZLIB
 #include "compression_utils_portable.h"
@@ -31,56 +34,16 @@
 namespace angle
 {
 
-inline uint8_t *DecompressBinaryData(const std::vector<uint8_t> &compressedData)
-{
-    uint32_t uncompressedSize =
-        zlib_internal::GetGzipUncompressedSize(compressedData.data(), compressedData.size());
-
-    std::unique_ptr<uint8_t[]> uncompressedData(new uint8_t[uncompressedSize]);
-    uLong destLen = uncompressedSize;
-    int zResult =
-        zlib_internal::GzipUncompressHelper(uncompressedData.get(), &destLen, compressedData.data(),
-                                            static_cast<uLong>(compressedData.size()));
-
-    if (zResult != Z_OK)
-    {
-        std::cerr << "Failure to decompressed binary data: " << zResult << "\n";
-        return nullptr;
-    }
-
-    return uncompressedData.release();
-}
-
-using DecompressCallback              = uint8_t *(*)(const std::vector<uint8_t> &);
 using ValidateSerializedStateCallback = void (*)(const char *, const char *, uint32_t);
 
-using SetBinaryDataDecompressCallbackFunc    = void (*)(DecompressCallback);
-using SetBinaryDataDirFunc                   = void (*)(const char *);
-using SetupReplayFunc                        = void (*)();
-using ReplayFrameFunc                        = void (*)(uint32_t);
-using ResetReplayFunc                        = void (*)();
-using FinishReplayFunc                       = void (*)();
 using GetSerializedContextStateFunc          = const char *(*)(uint32_t);
 using SetValidateSerializedStateCallbackFunc = void (*)(ValidateSerializedStateCallback);
+using SetupEntryPoints = void (*)(angle::TraceCallbacks *, angle::TraceFunctions **);
 
-class TraceLibrary
+class TraceLibrary : angle::NonCopyable, angle::TraceCallbacks
 {
   public:
-    TraceLibrary(const char *traceNameIn)
-    {
-        std::stringstream traceNameStr;
-#if !defined(ANGLE_PLATFORM_WINDOWS)
-        traceNameStr << "lib";
-#endif  // !defined(ANGLE_PLATFORM_WINDOWS)
-        traceNameStr << traceNameIn;
-#if defined(ANGLE_PLATFORM_ANDROID) && defined(COMPONENT_BUILD)
-        // Added to shared library names in Android component builds in
-        // https://chromium.googlesource.com/chromium/src/+/9bacc8c4868cc802f69e1e858eea6757217a508f/build/toolchain/toolchain.gni#56
-        traceNameStr << ".cr";
-#endif  // defined(ANGLE_PLATFORM_ANDROID) && defined(COMPONENT_BUILD)
-        std::string traceName = traceNameStr.str();
-        mTraceLibrary.reset(OpenSharedLibrary(traceName.c_str(), SearchType::ModuleDir));
-    }
+    TraceLibrary(const std::string &traceName, const TraceInfo &traceInfo);
 
     bool valid() const
     {
@@ -89,21 +52,21 @@ class TraceLibrary
 
     void setBinaryDataDir(const char *dataDir)
     {
-        callFunc<SetBinaryDataDirFunc>("SetBinaryDataDir", dataDir);
+        mBinaryDataDir = dataDir;
+        mTraceFunctions->SetBinaryDataDir(dataDir);
     }
 
-    void setBinaryDataDecompressCallback(DecompressCallback callback)
+    void replayFrame(uint32_t frameIndex) { mTraceFunctions->ReplayFrame(frameIndex); }
+
+    void setupReplay() { mTraceFunctions->SetupReplay(); }
+
+    void resetReplay() { mTraceFunctions->ResetReplay(); }
+
+    void finishReplay()
     {
-        callFunc<SetBinaryDataDecompressCallbackFunc>("SetBinaryDataDecompressCallback", callback);
+        mTraceFunctions->FinishReplay();
+        mBinaryData = {};  // set to empty vector to release memory.
     }
-
-    void replayFrame(uint32_t frameIndex) { callFunc<ReplayFrameFunc>("ReplayFrame", frameIndex); }
-
-    void setupReplay() { callFunc<SetupReplayFunc>("SetupReplay"); }
-
-    void resetReplay() { callFunc<ResetReplayFunc>("ResetReplay"); }
-
-    void finishReplay() { callFunc<FinishReplayFunc>("FinishReplay"); }
 
     const char *getSerializedContextState(uint32_t frameIndex)
     {
@@ -114,6 +77,11 @@ class TraceLibrary
     {
         return callFunc<SetValidateSerializedStateCallbackFunc>(
             "SetValidateSerializedStateCallback", callback);
+    }
+
+    void setTraceGzPath(const std::string &traceGzPath)
+    {
+        mTraceFunctions->SetTraceGzPath(traceGzPath);
     }
 
   private:
@@ -130,40 +98,153 @@ class TraceLibrary
         return typedFunc(args...);
     }
 
+    uint8_t *LoadBinaryData(const char *fileName) override;
+
     std::unique_ptr<Library> mTraceLibrary;
-};
-
-static constexpr size_t kTraceInfoMaxNameLen = 128;
-
-struct TraceInfo
-{
-    char name[kTraceInfoMaxNameLen];
-    uint32_t contextClientMajorVersion;
-    uint32_t contextClientMinorVersion;
-    uint32_t frameStart;
-    uint32_t frameEnd;
-    uint32_t drawSurfaceWidth;
-    uint32_t drawSurfaceHeight;
-    uint32_t drawSurfaceColorSpace;
-    uint32_t displayPlatformType;
-    uint32_t displayDeviceType;
-    int configRedBits;
-    int configBlueBits;
-    int configGreenBits;
-    int configAlphaBits;
-    int configDepthBits;
-    int configStencilBits;
-    bool isBinaryDataCompressed;
-    bool areClientArraysEnabled;
-    bool isBindGeneratesResourcesEnabled;
-    bool isWebGLCompatibilityEnabled;
-    bool isRobustResourceInitEnabled;
+    std::vector<uint8_t> mBinaryData;
+    std::string mBinaryDataDir;
+    angle::TraceInfo mTraceInfo;
+    angle::TraceFunctions *mTraceFunctions = nullptr;
 };
 
 bool LoadTraceNamesFromJSON(const std::string jsonFilePath, std::vector<std::string> *namesOut);
 bool LoadTraceInfoFromJSON(const std::string &traceName,
                            const std::string &traceJsonPath,
                            TraceInfo *traceInfoOut);
+
+using TraceFunction    = std::vector<CallCapture>;
+using TraceFunctionMap = std::map<std::string, TraceFunction>;
+
+void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &customFunctions);
+void ReplayCustomFunctionCall(const CallCapture &call, const TraceFunctionMap &customFunctions);
+
+template <typename T>
+struct AssertFalse : std::false_type
+{};
+
+GLuint GetResourceIDMapValue(ResourceIDType resourceIDType, GLuint key);
+
+template <typename T>
+T GetParamValue(ParamType type, const ParamValue &value);
+
+template <>
+inline GLuint GetParamValue<GLuint>(ParamType type, const ParamValue &value)
+{
+    ResourceIDType resourceIDType = GetResourceIDTypeFromParamType(type);
+    if (resourceIDType == ResourceIDType::InvalidEnum)
+    {
+        return value.GLuintVal;
+    }
+    else
+    {
+        return GetResourceIDMapValue(resourceIDType, value.GLuintVal);
+    }
+}
+
+template <>
+inline GLint GetParamValue<GLint>(ParamType type, const ParamValue &value)
+{
+    return value.GLintVal;
+}
+
+template <>
+inline const void *GetParamValue<const void *>(ParamType type, const ParamValue &value)
+{
+    return value.voidConstPointerVal;
+}
+
+template <>
+inline GLuint64 GetParamValue<GLuint64>(ParamType type, const ParamValue &value)
+{
+    return value.GLuint64Val;
+}
+
+template <>
+inline GLint64 GetParamValue<GLint64>(ParamType type, const ParamValue &value)
+{
+    return value.GLint64Val;
+}
+
+template <>
+inline const char *GetParamValue<const char *>(ParamType type, const ParamValue &value)
+{
+    return value.GLcharConstPointerVal;
+}
+
+template <>
+inline void *GetParamValue<void *>(ParamType type, const ParamValue &value)
+{
+    return value.voidPointerVal;
+}
+
+#if defined(ANGLE_IS_64_BIT_CPU)
+template <>
+inline const EGLAttrib *GetParamValue<const EGLAttrib *>(ParamType type, const ParamValue &value)
+{
+    return value.EGLAttribConstPointerVal;
+}
+#endif  // defined(ANGLE_IS_64_BIT_CPU)
+
+template <>
+inline const EGLint *GetParamValue<const EGLint *>(ParamType type, const ParamValue &value)
+{
+    return value.EGLintConstPointerVal;
+}
+
+template <>
+inline const GLchar *const *GetParamValue<const GLchar *const *>(ParamType type,
+                                                                 const ParamValue &value)
+{
+    return value.GLcharConstPointerPointerVal;
+}
+
+// On Apple platforms, std::is_same<uint64_t, long> is false despite being both 8 bits.
+#if defined(ANGLE_PLATFORM_APPLE) || !defined(ANGLE_IS_64_BIT_CPU)
+template <>
+inline long GetParamValue<long>(ParamType type, const ParamValue &value)
+{
+    return static_cast<long>(value.GLint64Val);
+}
+
+template <>
+inline unsigned long GetParamValue<unsigned long>(ParamType type, const ParamValue &value)
+{
+    return static_cast<unsigned long>(value.GLuint64Val);
+}
+#endif  // defined(ANGLE_PLATFORM_APPLE)
+
+template <typename T>
+T GetParamValue(ParamType type, const ParamValue &value)
+{
+    static_assert(AssertFalse<T>::value, "No specialization for type.");
+}
+
+template <typename T>
+struct Traits;
+
+template <typename... Args>
+struct Traits<void(Args...)>
+{
+    static constexpr size_t NArgs = sizeof...(Args);
+    template <size_t Idx>
+    struct Arg
+    {
+        typedef typename std::tuple_element<Idx, std::tuple<Args...>>::type Type;
+    };
+};
+
+template <typename Fn, size_t Idx>
+using FnArg = typename Traits<Fn>::template Arg<Idx>::Type;
+
+template <typename Fn, size_t NArgs>
+using EnableIfNArgs = typename std::enable_if_t<Traits<Fn>::NArgs == NArgs, int>;
+
+template <typename Fn, size_t Idx>
+FnArg<Fn, Idx> Arg(const Captures &cap)
+{
+    ASSERT(Idx < cap.size());
+    return GetParamValue<FnArg<Fn, Idx>>(cap[Idx].type, cap[Idx].value);
+}
 }  // namespace angle
 
 #endif  // UTIL_CAPTURE_FRAME_CAPTURE_TEST_UTILS_H_

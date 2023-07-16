@@ -338,6 +338,7 @@ class CommandBuffer : public WrappedObject<CommandBuffer, VkCommandBuffer>
                                 VkFragmentShadingRateCombinerOpKHR ops[2]);
     void setFrontFace(VkFrontFace frontFace);
     void setLineWidth(float lineWidth);
+    void setLogicOp(VkLogicOp logicOp);
     void setPrimitiveRestartEnable(VkBool32 primitiveRestartEnable);
     void setRasterizerDiscardEnable(VkBool32 rasterizerDiscardEnable);
     void setScissor(uint32_t firstScissor, uint32_t scissorCount, const VkRect2D *scissors);
@@ -424,6 +425,9 @@ class Image final : public WrappedObject<Image, VkImage>
                               uint32_t mipLevel,
                               uint32_t arrayLayer,
                               VkSubresourceLayout *outSubresourceLayout) const;
+
+  private:
+    friend class ImageMemorySuballocator;
 };
 
 class ImageView final : public WrappedObject<ImageView, VkImageView>
@@ -519,6 +523,7 @@ class Allocation final : public WrappedObject<Allocation, VmaAllocation>
 
   private:
     friend class Allocator;
+    friend class ImageMemorySuballocator;
 };
 
 class RenderPass final : public WrappedObject<RenderPass, VkRenderPass>
@@ -587,7 +592,7 @@ class PipelineCache final : public WrappedObject<PipelineCache, VkPipelineCache>
 
     VkResult init(VkDevice device, const VkPipelineCacheCreateInfo &createInfo);
     VkResult getCacheData(VkDevice device, size_t *cacheSize, void *cacheData) const;
-    VkResult merge(VkDevice device, uint32_t srcCacheCount, const VkPipelineCache *srcCaches);
+    VkResult merge(VkDevice device, uint32_t srcCacheCount, const VkPipelineCache *srcCaches) const;
 };
 
 class DescriptorSetLayout final : public WrappedObject<DescriptorSetLayout, VkDescriptorSetLayout>
@@ -756,21 +761,18 @@ ANGLE_INLINE void CommandBuffer::blitImage(const Image &srcImage,
 
 ANGLE_INLINE VkResult CommandBuffer::begin(const VkCommandBufferBeginInfo &info)
 {
-    ANGLE_TRACE_EVENT0("gpu.angle", "CommandBuffer::begin");
     ASSERT(valid());
     return vkBeginCommandBuffer(mHandle, &info);
 }
 
 ANGLE_INLINE VkResult CommandBuffer::end()
 {
-    ANGLE_TRACE_EVENT0("gpu.angle", "CommandBuffer::end");
     ASSERT(valid());
     return vkEndCommandBuffer(mHandle);
 }
 
 ANGLE_INLINE VkResult CommandBuffer::reset()
 {
-    ANGLE_TRACE_EVENT0("gpu.angle", "CommandBuffer::reset");
     ASSERT(valid());
     return vkResetCommandBuffer(mHandle, 0);
 }
@@ -1045,6 +1047,12 @@ ANGLE_INLINE void CommandBuffer::setLineWidth(float lineWidth)
 {
     ASSERT(valid());
     vkCmdSetLineWidth(mHandle, lineWidth);
+}
+
+ANGLE_INLINE void CommandBuffer::setLogicOp(VkLogicOp logicOp)
+{
+    ASSERT(valid());
+    vkCmdSetLogicOpEXT(mHandle, logicOp);
 }
 
 ANGLE_INLINE void CommandBuffer::setPrimitiveRestartEnable(VkBool32 primitiveRestartEnable)
@@ -1480,7 +1488,6 @@ ANGLE_INLINE VkResult DeviceMemory::map(VkDevice device,
                                         VkMemoryMapFlags flags,
                                         uint8_t **mapPointer) const
 {
-    ANGLE_TRACE_EVENT0("gpu.angle", "DeviceMemory::map");
     ASSERT(valid());
     return vkMapMemory(device, mHandle, offset, size, flags, reinterpret_cast<void **>(mapPointer));
 }
@@ -1732,7 +1739,7 @@ ANGLE_INLINE VkResult PipelineCache::init(VkDevice device,
 
 ANGLE_INLINE VkResult PipelineCache::merge(VkDevice device,
                                            uint32_t srcCacheCount,
-                                           const VkPipelineCache *srcCaches)
+                                           const VkPipelineCache *srcCaches) const
 {
     ASSERT(valid());
     return vkMergePipelineCaches(device, mHandle, srcCacheCount, srcCaches);

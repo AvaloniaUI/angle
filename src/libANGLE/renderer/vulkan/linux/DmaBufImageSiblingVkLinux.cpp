@@ -103,10 +103,10 @@ void GetModifiers(const egl::AttributeMap &attribs,
     }
 }
 
-angle::Result GetFormatModifierProperties(DisplayVk *displayVk,
-                                          VkFormat vkFormat,
-                                          uint64_t drmModifier,
-                                          VkDrmFormatModifierPropertiesEXT *modifierPropertiesOut)
+bool GetFormatModifierProperties(DisplayVk *displayVk,
+                                 VkFormat vkFormat,
+                                 uint64_t drmModifier,
+                                 VkDrmFormatModifierPropertiesEXT *modifierPropertiesOut)
 {
     RendererVk *renderer = displayVk->getRenderer();
 
@@ -142,12 +142,14 @@ angle::Result GetFormatModifierProperties(DisplayVk *displayVk,
     }
 
     // Return the properties if found.
-    ANGLE_VK_CHECK(displayVk, propertiesIndex < formatModifierPropertiesList.drmFormatModifierCount,
-                   VK_ERROR_FORMAT_NOT_SUPPORTED);
+    if (propertiesIndex >= formatModifierPropertiesList.drmFormatModifierCount)
+    {
+        return false;
+    }
 
     *modifierPropertiesOut =
         formatModifierPropertiesList.pDrmFormatModifierProperties[propertiesIndex];
-    return angle::Result::Continue;
+    return true;
 }
 
 VkImageUsageFlags GetUsageFlags(RendererVk *renderer,
@@ -156,7 +158,7 @@ VkImageUsageFlags GetUsageFlags(RendererVk *renderer,
                                 bool *texturableOut,
                                 bool *renderableOut)
 {
-    const bool isDepthStencilFormat = format.depthBits > 0 || format.stencilBits > 0;
+    const bool isDepthStencilFormat = format.hasDepthOrStencilBits();
 
     // Check what format features are exposed for this modifier.
     constexpr uint32_t kTextureableRequiredBits =
@@ -196,28 +198,23 @@ bool IsFormatSupported(RendererVk *renderer,
     VkPhysicalDeviceExternalImageFormatInfo externalImageFormatInfo = {};
     externalImageFormatInfo.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
     externalImageFormatInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    imageFormatListInfo.pNext          = &externalImageFormatInfo;
 
     VkPhysicalDeviceImageFormatInfo2 imageFormatInfo = {};
     imageFormatInfo.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
-    imageFormatInfo.pNext  = &externalImageFormatInfo;
     imageFormatInfo.format = vkFormat;
     imageFormatInfo.type   = VK_IMAGE_TYPE_2D;
-    imageFormatInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageFormatInfo.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
     imageFormatInfo.usage  = usageFlags;
     imageFormatInfo.flags  = createFlags;
+    imageFormatInfo.pNext  = &imageFormatListInfo;
 
     VkPhysicalDeviceImageDrmFormatModifierInfoEXT drmFormatModifierInfo = {};
     drmFormatModifierInfo.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT;
     drmFormatModifierInfo.drmFormatModifier = drmModifier;
     drmFormatModifierInfo.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;
-    if (drmModifier != 0)
-    {
-        externalImageFormatInfo.pNext = &drmFormatModifierInfo;
-        imageFormatListInfo.pNext     = &externalImageFormatInfo;
-        imageFormatInfo.pNext         = &imageFormatListInfo;
-        imageFormatInfo.tiling        = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
-    }
+    externalImageFormatInfo.pNext           = &drmFormatModifierInfo;
 
     return vkGetPhysicalDeviceImageFormatProperties2(renderer->getPhysicalDevice(),
                                                      &imageFormatInfo, imageFormatPropertiesOut) !=
@@ -349,7 +346,7 @@ DmaBufImageSiblingVkLinux::~DmaBufImageSiblingVkLinux() {}
 egl::Error DmaBufImageSiblingVkLinux::initialize(const egl::Display *display)
 {
     DisplayVk *displayVk = vk::GetImpl(display);
-    return angle::ToEGL(initImpl(displayVk), displayVk, EGL_BAD_PARAMETER);
+    return angle::ToEGL(initImpl(displayVk), EGL_BAD_PARAMETER);
 }
 
 VkImageUsageFlags FindSupportedUsageFlagsForFormat(
@@ -424,8 +421,12 @@ angle::Result DmaBufImageSiblingVkLinux::initWithFormat(DisplayVk *displayVk,
 
     // First, check the possible features for the format and determine usage and create flags.
     VkDrmFormatModifierPropertiesEXT modifierProperties = {};
-    ANGLE_TRY(
-        GetFormatModifierProperties(displayVk, vulkanFormat, plane0Modifier, &modifierProperties));
+    if (!GetFormatModifierProperties(displayVk, vulkanFormat, plane0Modifier, &modifierProperties))
+    {
+        // Format is incompatible
+        *initResultOut = InitResult::Failed;
+        return angle::Result::Continue;
+    }
 
     VkImageUsageFlags usageFlags =
         GetUsageFlags(renderer, format, modifierProperties, &mTextureable, &mRenderable);
@@ -533,10 +534,10 @@ angle::Result DmaBufImageSiblingVkLinux::initWithFormat(DisplayVk *displayVk,
         const VkSamplerYcbcrModelConversion model = GetYcbcrModel(mAttribs);
         const VkSamplerYcbcrRange range           = GetYcbcrRange(mAttribs);
         const VkComponentMapping components       = {
-                  VK_COMPONENT_SWIZZLE_IDENTITY,
-                  VK_COMPONENT_SWIZZLE_IDENTITY,
-                  VK_COMPONENT_SWIZZLE_IDENTITY,
-                  VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY,
         };
 
         ANGLE_VK_CHECK(displayVk, renderer->getFeatures().supportsYUVSamplerConversion.enabled,

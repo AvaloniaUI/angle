@@ -53,7 +53,7 @@ std::string PrintToStringParamName(
 // Lower-right, which is ( 1.0,-1.0) & (256,   0) in GLES will be red    (0xFF, 0x00, 0x00, 0xFF)
 // Upper-left,  which is (-1.0, 1.0) & (  0, 256) in GLES will be green  (0x00, 0xFF, 0x00, 0xFF)
 // Upper-right, which is ( 1.0, 1.0) & (256, 256) in GLES will be yellow (0xFF, 0xFF, 0x00, 0xFF)
-class EGLPreRotationSurfaceTest : public ANGLETestWithParam<EGLPreRotationSurfaceTestParams>
+class EGLPreRotationSurfaceTest : public ANGLETest<EGLPreRotationSurfaceTestParams>
 {
   protected:
     EGLPreRotationSurfaceTest()
@@ -1113,7 +1113,7 @@ TEST_P(EGLPreRotationBlitFramebufferTest, BlitStencilWithFlip)
     ANGLE_SKIP_TEST_IF(IsLinux() && isSwiftshader());
 
     // We need to fix blit with pre-rotation. http://anglebug.com/5044
-    ANGLE_SKIP_TEST_IF(IsAndroid() || IsWindows());
+    ANGLE_SKIP_TEST_IF(IsPixel4() || IsPixel4XL() || IsWindows());
 
     // To aid in debugging, we want this window visible
     setWindowVisible(mOSWindow, true);

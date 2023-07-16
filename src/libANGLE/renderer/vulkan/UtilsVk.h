@@ -40,7 +40,7 @@ class UtilsVk : angle::NonCopyable
     UtilsVk();
     ~UtilsVk();
 
-    void destroy(RendererVk *renderer);
+    void destroy(ContextVk *contextVk);
 
     struct ConvertIndexParameters
     {
@@ -167,6 +167,18 @@ class UtilsVk : angle::NonCopyable
         uint32_t copyExtents[3];
     };
 
+    struct CopyImageToBufferParameters
+    {
+        int srcOffset[2];
+        vk::LevelIndex srcMip;
+        int srcLayer;
+        uint32_t size[2];
+        ptrdiff_t outputOffset;
+        uint32_t outputPitch;
+        bool reverseRowOrder;
+        const angle::Format *outputFormat;
+    };
+
     struct OverlayDrawParameters
     {
         uint32_t textWidgetCount;
@@ -259,6 +271,23 @@ class UtilsVk : angle::NonCopyable
                                 vk::ImageHelper *dst,
                                 vk::ImageHelper *src,
                                 const CopyImageBitsParameters &params);
+
+    angle::Result copyImageToBuffer(ContextVk *contextVk,
+                                    vk::BufferHelper *dst,
+                                    vk::ImageHelper *src,
+                                    const CopyImageToBufferParameters &params);
+
+    angle::Result copyRgbToRgba(ContextVk *contextVk,
+                                const angle::Format &srcFormat,
+                                vk::BufferHelper *srcBuffer,
+                                uint32_t srcOffset,
+                                uint32_t pixelCount,
+                                vk::BufferHelper *dstBuffer);
+
+    angle::Result transCodeEtcToBc(ContextVk *contextVk,
+                                   vk::BufferHelper *srcBuffer,
+                                   vk::ImageHelper *dstImage,
+                                   const VkBufferImageCopy *copyRegion);
 
     using GenerateMipmapDestLevelViews =
         std::array<const vk::ImageView *, kGenerateMipmapMaxLevels>;
@@ -371,6 +400,18 @@ class UtilsVk : angle::NonCopyable
         uint32_t rotateXY               = 0;
     };
 
+    struct CopyImageToBufferShaderParams
+    {
+        // Structure matching PushConstants in CopyImageToBuffer.comp
+        int32_t srcOffset[2]     = {};
+        int32_t srcDepth         = 0;
+        uint32_t reverseRowOrder = 0;
+        uint32_t size[2]         = {};
+        uint32_t outputOffset    = 0;
+        uint32_t outputPitch     = 0;
+        uint32_t isDstSnorm      = 0;
+    };
+
     union BlitResolveOffset
     {
         int32_t resolve[2];
@@ -407,6 +448,11 @@ class UtilsVk : angle::NonCopyable
         uint32_t rotateXY        = 0;
     };
 
+    struct ExportStencilShaderParams
+    {
+        uint32_t bit = 0;
+    };
+
     struct OverlayDrawShaderParams
     {
         // Structure matching PushConstants in OverlayDraw.vert and OverlayDraw.frag
@@ -422,41 +468,67 @@ class UtilsVk : angle::NonCopyable
         uint32_t levelCount   = 0;
     };
 
+    struct EtcToBcShaderParams
+    {
+        uint32_t offsetX;
+        uint32_t offsetY;
+        int32_t texelOffset;
+        uint32_t width;
+        uint32_t height;
+        uint32_t alphaBits;
+        uint32_t isSigned;
+        uint32_t isEacRg;
+    };
+
     ANGLE_DISABLE_STRUCT_PADDING_WARNINGS
 
     // Functions implemented by the class:
     enum class Function
     {
         // Functions implemented in graphics
-        ImageClear  = 0,
-        ImageCopy   = 1,
-        BlitResolve = 2,
-        OverlayDraw = 3,
+        ImageClear,
+        ImageCopy,
+        BlitResolve,
+        ExportStencil,
+        OverlayDraw,
         // Note: unresolve is special as it has a different layout per attachment count.  Depth and
         // stencil each require a binding, so are counted separately.
-        Unresolve1Attachment   = 4,
-        Unresolve2Attachments  = 5,
-        Unresolve3Attachments  = 6,
-        Unresolve4Attachments  = 7,
-        Unresolve5Attachments  = 8,
-        Unresolve6Attachments  = 9,
-        Unresolve7Attachments  = 10,
-        Unresolve8Attachments  = 11,
-        Unresolve9Attachments  = 12,
-        Unresolve10Attachments = 13,
+        Unresolve1Attachment,
+        Unresolve2Attachments,
+        Unresolve3Attachments,
+        Unresolve4Attachments,
+        Unresolve5Attachments,
+        Unresolve6Attachments,
+        Unresolve7Attachments,
+        Unresolve8Attachments,
+        Unresolve9Attachments,
+        Unresolve10Attachments,
 
         // Functions implemented in compute
-        ComputeStartIndex          = 14,  // Special value to separate draw and dispatch functions.
-        ConvertIndexBuffer         = 14,
-        ConvertVertexBuffer        = 15,
-        BlitResolveStencilNoExport = 16,
-        ConvertIndexIndirectBuffer = 17,
-        ConvertIndexIndirectLineLoopBuffer = 18,
-        ConvertIndirectLineLoopBuffer      = 19,
-        GenerateMipmap                     = 20,
+        ComputeStartIndex,  // Special value to separate draw and dispatch functions.
+        ConvertIndexBuffer = ComputeStartIndex,
+        ConvertVertexBuffer,
+        BlitResolveStencilNoExport,
+        ConvertIndexIndirectBuffer,
+        ConvertIndexIndirectLineLoopBuffer,
+        ConvertIndirectLineLoopBuffer,
+        GenerateMipmap,
+        TransCodeEtcToBc,
+        CopyImageToBuffer,
 
-        InvalidEnum = 21,
-        EnumCount   = 21,
+        InvalidEnum,
+        EnumCount = InvalidEnum,
+    };
+
+    struct GraphicsShaderProgramAndPipelines
+    {
+        vk::ShaderProgramHelper program;
+        CompleteGraphicsPipelineCache pipelines;
+    };
+    struct ComputeShaderProgramAndPipelines
+    {
+        vk::ShaderProgramHelper program;
+        vk::ComputePipelineCache pipelines;
     };
 
     // Common functions that create the pipeline for the specified function, binds it and prepares
@@ -464,17 +536,17 @@ class UtilsVk : angle::NonCopyable
     angle::Result setupComputeProgram(
         ContextVk *contextVk,
         Function function,
-        vk::RefCounted<vk::ShaderAndSerial> *csShader,
-        vk::ShaderProgramHelper *program,
+        vk::RefCounted<vk::ShaderModule> *csShader,
+        ComputeShaderProgramAndPipelines *programAndPipelines,
         const VkDescriptorSet descriptorSet,
         const void *pushConstants,
         size_t pushConstantsSize,
         vk::OutsideRenderPassCommandBufferHelper *commandBufferHelper);
     angle::Result setupGraphicsProgram(ContextVk *contextVk,
                                        Function function,
-                                       vk::RefCounted<vk::ShaderAndSerial> *vsShader,
-                                       vk::RefCounted<vk::ShaderAndSerial> *fsShader,
-                                       vk::ShaderProgramHelper *program,
+                                       vk::RefCounted<vk::ShaderModule> *vsShader,
+                                       vk::RefCounted<vk::ShaderModule> *fsShader,
+                                       GraphicsShaderProgramAndPipelines *programAndPipelines,
                                        const vk::GraphicsPipelineDesc *pipelineDesc,
                                        const VkDescriptorSet descriptorSet,
                                        const void *pushConstants,
@@ -501,10 +573,13 @@ class UtilsVk : angle::NonCopyable
     angle::Result ensureConvertVertexResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureImageClearResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureImageCopyResourcesInitialized(ContextVk *contextVk);
+    angle::Result ensureCopyImageToBufferResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureBlitResolveResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureBlitResolveStencilNoExportResourcesInitialized(ContextVk *contextVk);
+    angle::Result ensureExportStencilResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureOverlayDrawResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureGenerateMipmapResourcesInitialized(ContextVk *contextVk);
+    angle::Result ensureTransCodeEtcToBcResourcesInitialized(ContextVk *contextVk);
     angle::Result ensureUnresolveResourcesInitialized(ContextVk *contextVk,
                                                       Function function,
                                                       uint32_t attachmentIndex);
@@ -540,34 +615,38 @@ class UtilsVk : angle::NonCopyable
     angle::Result allocateDescriptorSet(ContextVk *contextVk,
                                         vk::CommandBufferHelperCommon *commandBufferHelper,
                                         Function function,
-                                        vk::RefCountedDescriptorPoolBinding *bindingOut,
                                         VkDescriptorSet *descriptorSetOut);
 
     angle::PackedEnumMap<Function, vk::DescriptorSetLayoutPointerArray> mDescriptorSetLayouts;
     angle::PackedEnumMap<Function, vk::BindingPointer<vk::PipelineLayout>> mPipelineLayouts;
     angle::PackedEnumMap<Function, vk::DynamicDescriptorPool> mDescriptorPools;
 
-    vk::ShaderProgramHelper mConvertIndexPrograms[vk::InternalShader::ConvertIndex_comp::kArrayLen];
-    vk::ShaderProgramHelper mConvertIndexIndirectLineLoopPrograms
+    ComputeShaderProgramAndPipelines
+        mConvertIndex[vk::InternalShader::ConvertIndex_comp::kArrayLen];
+    ComputeShaderProgramAndPipelines mConvertIndexIndirectLineLoop
         [vk::InternalShader::ConvertIndexIndirectLineLoop_comp::kArrayLen];
-    vk::ShaderProgramHelper mConvertIndirectLineLoopPrograms
-        [vk::InternalShader::ConvertIndirectLineLoop_comp::kArrayLen];
-    vk::ShaderProgramHelper
-        mConvertVertexPrograms[vk::InternalShader::ConvertVertex_comp::kArrayLen];
-    vk::ShaderProgramHelper mImageClearProgramVSOnly;
-    vk::ShaderProgramHelper mImageClearPrograms[vk::InternalShader::ImageClear_frag::kArrayLen];
-    vk::ShaderProgramHelper mImageCopyPrograms[vk::InternalShader::ImageCopy_frag::kArrayLen];
-    vk::ShaderProgramHelper mBlitResolvePrograms[vk::InternalShader::BlitResolve_frag::kArrayLen];
-    vk::ShaderProgramHelper mBlitResolveStencilNoExportPrograms
-        [vk::InternalShader::BlitResolveStencilNoExport_comp::kArrayLen];
-    vk::ShaderProgramHelper mOverlayDrawProgram;
-    vk::ShaderProgramHelper
-        mGenerateMipmapPrograms[vk::InternalShader::GenerateMipmap_comp::kArrayLen];
+    ComputeShaderProgramAndPipelines
+        mConvertIndirectLineLoop[vk::InternalShader::ConvertIndirectLineLoop_comp::kArrayLen];
+    ComputeShaderProgramAndPipelines
+        mConvertVertex[vk::InternalShader::ConvertVertex_comp::kArrayLen];
+    GraphicsShaderProgramAndPipelines mImageClearVSOnly;
+    GraphicsShaderProgramAndPipelines mImageClear[vk::InternalShader::ImageClear_frag::kArrayLen];
+    GraphicsShaderProgramAndPipelines mImageCopy[vk::InternalShader::ImageCopy_frag::kArrayLen];
+    ComputeShaderProgramAndPipelines
+        mCopyImageToBuffer[vk::InternalShader::CopyImageToBuffer_comp::kArrayLen];
+    GraphicsShaderProgramAndPipelines mBlitResolve[vk::InternalShader::BlitResolve_frag::kArrayLen];
+    ComputeShaderProgramAndPipelines
+        mBlitResolveStencilNoExport[vk::InternalShader::BlitResolveStencilNoExport_comp::kArrayLen];
+    GraphicsShaderProgramAndPipelines mExportStencil;
+    GraphicsShaderProgramAndPipelines mOverlayDraw;
+    ComputeShaderProgramAndPipelines
+        mGenerateMipmap[vk::InternalShader::GenerateMipmap_comp::kArrayLen];
+    ComputeShaderProgramAndPipelines mEtcToBc[vk::InternalShader::EtcToBc_comp::kArrayLen];
 
     // Unresolve shaders are special as they are generated on the fly due to the large number of
     // combinations.
-    std::unordered_map<uint32_t, vk::RefCounted<vk::ShaderAndSerial>> mUnresolveFragShaders;
-    std::unordered_map<uint32_t, vk::ShaderProgramHelper> mUnresolvePrograms;
+    std::unordered_map<uint32_t, vk::RefCounted<vk::ShaderModule>> mUnresolveFragShaders;
+    std::unordered_map<uint32_t, GraphicsShaderProgramAndPipelines> mUnresolve;
 
     vk::Sampler mPointSampler;
     vk::Sampler mLinearSampler;
