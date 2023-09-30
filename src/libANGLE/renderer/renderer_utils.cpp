@@ -64,6 +64,17 @@ bool FeatureNameMatch(const std::string &a, const std::string &b)
 }
 }  // anonymous namespace
 
+// FeatureInfo implementation
+static const char *kFeatureOverrideTrue  = "true (override)";
+static const char *kFeatureOverrideFalse = "false (override)";
+
+void FeatureInfo::applyOverride(bool state)
+{
+    enabled     = state;
+    hasOverride = true;
+    condition   = state ? kFeatureOverrideTrue : kFeatureOverrideFalse;
+}
+
 // FeatureSetBase implementation
 void FeatureSetBase::reset()
 {
@@ -71,6 +82,7 @@ void FeatureSetBase::reset()
     {
         FeatureInfo *feature = iter.second;
         feature->enabled     = false;
+        feature->hasOverride = false;
     }
 }
 
@@ -89,7 +101,7 @@ void FeatureSetBase::overrideFeatures(const std::vector<std::string> &featureNam
                 continue;
             }
 
-            feature->enabled = enabled;
+            feature->applyOverride(enabled);
 
             // If name has a wildcard, try to match it with all features.  Otherwise, bail on first
             // match, as names are unique.
@@ -1199,8 +1211,8 @@ angle::Result MultiDrawArraysGeneral(ContextImpl *contextImpl,
                                      const GLsizei *counts,
                                      GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ARRAYS, _, _, 1, 0, 0);
@@ -1247,8 +1259,8 @@ angle::Result MultiDrawArraysInstancedGeneral(ContextImpl *contextImpl,
                                               const GLsizei *instanceCounts,
                                               GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ARRAYS, _INSTANCED, _, 1, 0, 0);
@@ -1269,8 +1281,8 @@ angle::Result MultiDrawElementsGeneral(ContextImpl *contextImpl,
                                        const GLvoid *const *indices,
                                        GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ELEMENTS, _, _, 1, 0, 0);
@@ -1320,8 +1332,8 @@ angle::Result MultiDrawElementsInstancedGeneral(ContextImpl *contextImpl,
                                                 const GLsizei *instanceCounts,
                                                 GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ELEMENTS, _INSTANCED, _, 1, 0, 0);
@@ -1343,10 +1355,10 @@ angle::Result MultiDrawArraysInstancedBaseInstanceGeneral(ContextImpl *contextIm
                                                           const GLuint *baseInstances,
                                                           GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
-    ResetBaseVertexBaseInstance resetUniforms(programObject, false, hasBaseInstance);
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
+    const bool hasBaseInstance        = executable->hasBaseInstanceUniform();
+    ResetBaseVertexBaseInstance resetUniforms(executable, false, hasBaseInstance);
 
     if (hasDrawID && hasBaseInstance)
     {
@@ -1379,11 +1391,11 @@ angle::Result MultiDrawElementsInstancedBaseVertexBaseInstanceGeneral(ContextImp
                                                                       const GLuint *baseInstances,
                                                                       GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
-    const bool hasBaseVertex   = programObject && programObject->hasBaseVertexUniform();
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
-    ResetBaseVertexBaseInstance resetUniforms(programObject, hasBaseVertex, hasBaseInstance);
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
+    const bool hasBaseVertex          = executable->hasBaseVertexUniform();
+    const bool hasBaseInstance        = executable->hasBaseInstanceUniform();
+    ResetBaseVertexBaseInstance resetUniforms(executable, hasBaseVertex, hasBaseInstance);
 
     if (hasDrawID)
     {
@@ -1439,27 +1451,27 @@ angle::Result MultiDrawElementsInstancedBaseVertexBaseInstanceGeneral(ContextImp
     return angle::Result::Continue;
 }
 
-ResetBaseVertexBaseInstance::ResetBaseVertexBaseInstance(gl::Program *programObject,
+ResetBaseVertexBaseInstance::ResetBaseVertexBaseInstance(gl::ProgramExecutable *executable,
                                                          bool resetBaseVertex,
                                                          bool resetBaseInstance)
-    : mProgramObject(programObject),
+    : mExecutable(executable),
       mResetBaseVertex(resetBaseVertex),
       mResetBaseInstance(resetBaseInstance)
 {}
 
 ResetBaseVertexBaseInstance::~ResetBaseVertexBaseInstance()
 {
-    if (mProgramObject)
+    if (mExecutable)
     {
         // Reset emulated uniforms to zero to avoid affecting other draw calls
         if (mResetBaseVertex)
         {
-            mProgramObject->setBaseVertexUniform(0);
+            mExecutable->setBaseVertexUniform(0);
         }
 
         if (mResetBaseInstance)
         {
-            mProgramObject->setBaseInstanceUniform(0);
+            mExecutable->setBaseInstanceUniform(0);
         }
     }
 }

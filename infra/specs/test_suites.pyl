@@ -184,6 +184,8 @@
       'angle_deqp_gles2_metal_tests': {
         'args': [
           '--use-angle=metal',
+          # Flaky crashes. http://anglebug.com/6570
+          '--flaky-retries=2',
         ],
         'merge': {
           'script': '//scripts/angle_deqp_test_merge.py',
@@ -414,7 +416,7 @@
       'angle_deqp_gles3_metal_tests': {
         'args': [
           '--use-angle=metal',
-          # Flakiness on multiple configs. http://anglebug.com/6019
+          # Flaky crashes. http://anglebug.com/6570
           '--flaky-retries=2',
         ],
         'merge': {
@@ -1168,20 +1170,6 @@
       },
     },
 
-    'swangle_end2end_slow_flaky_tests': {
-      'angle_end2end_tests': {
-        'args': [
-          '--gtest_filter=*Vulkan_SwiftShader*',
-          # Flaky retries enabled on ASAN/TSAN. http://anglebug.com/7772
-          '--flaky-retries=2',
-        ],
-        'use_isolated_scripts_api': True,
-        'swarming': {
-          'shards': 6,
-        },
-      },
-    },
-
     'swangle_end2end_slow_tests': {
       'angle_end2end_tests': {
         'args': [
@@ -1200,6 +1188,20 @@
           '--gtest_filter=*Vulkan_SwiftShader*',
         ],
         'use_isolated_scripts_api': True,
+      },
+    },
+
+    'swangle_end2end_very_slow_flaky_tests': {
+      'angle_end2end_tests': {
+        'args': [
+          '--gtest_filter=*Vulkan_SwiftShader*',
+          # Flaky retries enabled on ASAN/TSAN. http://anglebug.com/7772
+          '--flaky-retries=2',
+        ],
+        'use_isolated_scripts_api': True,
+        'swarming': {
+          'shards': 10,
+        },
       },
     },
 
@@ -1271,7 +1273,7 @@
       'angle_unit_gtests',
     ],
 
-    'common_isolated_scripts': [
+    'isolated_scripts_group_common': [
       'angle_capture_isolated_scripts',
       'angle_perf_smoke_isolated_scripts',
       'angle_restricted_trace_gold_isolated_scripts',
@@ -1280,10 +1282,15 @@
       'angle_trace_perf_vulkan_smoke_isolated_scripts',
     ],
 
-    'common_perf_isolated_scripts': [
+    'isolated_scripts_group_perf': [
       'angle_perf_isolated_scripts',
       'angle_trace_perf_native_isolated_scripts',
       'angle_trace_perf_vulkan_isolated_scripts',
+    ],
+
+    'isolated_scripts_group_pixel6': [
+      'angle_capture_isolated_scripts',
+      'angle_restricted_trace_gold_isolated_scripts',
     ],
 
     'linux_intel_gtests': [
@@ -1330,11 +1337,10 @@
       'angle_unit_gtests',
     ],
 
-    # Temporarily disabled for upgrade crbug.com/1456549
-    # 'mac_nvidia_gtests': [
-    #   'angle_end2end_with_retry_gtests',
-    #   'angle_unit_gtests',
-    # ],
+    'mac_nvidia_gtests': [
+      'angle_end2end_with_retry_gtests',
+      'angle_unit_gtests',
+    ],
 
     'swangle_gtests': [
       'swangle_deqp_egl_tests',
@@ -1359,7 +1365,7 @@
     ],
 
     'swangle_non_deqp_slow_flaky_gtests': [
-      'swangle_end2end_slow_flaky_tests',
+      'swangle_end2end_very_slow_flaky_tests',
       'swangle_white_box_tests',
     ],
 
@@ -1373,7 +1379,7 @@
       'swangle_deqp_khr_noctx_gles2_tests',
       'swangle_deqp_khr_noctx_gles32_tests',
       'swangle_deqp_khr_single_gles32_tests',
-      'swangle_end2end_tests',
+      'swangle_end2end_slow_tests',
       'swangle_white_box_tests',
     ],
 

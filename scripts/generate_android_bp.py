@@ -205,6 +205,7 @@ third_party_target_allowlist = [
 
 include_blocklist = [
     '//buildtools/third_party/libc++/',
+    '//third_party/libc++/src/',
     '//out/Android/gen/third_party/vulkan-deps/glslang/src/include/',
     '//third_party/zlib/',
     '//third_party/zlib/google/',
@@ -634,7 +635,7 @@ def main():
             'third_party/vulkan-deps/spirv-tools/src/LICENSE',
             'third_party/vulkan-deps/spirv-tools/src/utils/vscode/src/lsp/LICENSE',
             'third_party/vulkan-deps/vulkan-headers/LICENSE.txt',
-            'third_party/vulkan-deps/vulkan-headers/src/LICENSE.txt',
+            'third_party/vulkan-deps/vulkan-headers/src/LICENSE.md',
             'third_party/vulkan_memory_allocator/LICENSE.txt',
             'tools/flex-bison/third_party/m4sugar/LICENSE',
             'tools/flex-bison/third_party/skeletons/LICENSE',

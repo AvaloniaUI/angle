@@ -52,6 +52,8 @@ class ContextGL : public ContextImpl
     CompilerImpl *createCompiler() override;
     ShaderImpl *createShader(const gl::ShaderState &data) override;
     ProgramImpl *createProgram(const gl::ProgramState &data) override;
+    ProgramExecutableImpl *createProgramExecutable(
+        const gl::ProgramExecutable *executable) override;
 
     // Framebuffer creation
     FramebufferImpl *createFramebuffer(const gl::FramebufferState &data) override;
@@ -311,8 +313,7 @@ class ContextGL : public ContextImpl
                                        GLsizei instanceCount,
                                        const void **outIndices);
 
-    gl::AttributesMask updateAttributesForBaseInstance(const gl::Program *program,
-                                                       GLuint baseInstance);
+    gl::AttributesMask updateAttributesForBaseInstance(GLuint baseInstance);
     void resetUpdatedAttributes(gl::AttributesMask attribMask);
 
     // Resets draw state prior to drawing load/store operations for EXT_shader_pixel_local_storage,

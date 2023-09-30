@@ -1026,7 +1026,8 @@ bool TranslatorSPIRV::translateImpl(TIntermBlock *root,
                 }
             }
 
-            bool hasGLSampleMask = false;
+            bool hasGLSampleMask        = false;
+            bool hasGLSecondaryFragData = false;
 
             for (const ShaderVariable &outputVar : mOutputVariables)
             {
@@ -1034,6 +1035,12 @@ bool TranslatorSPIRV::translateImpl(TIntermBlock *root,
                 {
                     ASSERT(!hasGLSampleMask);
                     hasGLSampleMask = true;
+                    continue;
+                }
+                if (outputVar.name == "gl_SecondaryFragDataEXT")
+                {
+                    ASSERT(!hasGLSecondaryFragData);
+                    hasGLSecondaryFragData = true;
                     continue;
                 }
             }
@@ -1088,7 +1095,7 @@ bool TranslatorSPIRV::translateImpl(TIntermBlock *root,
             }
 
             // Emulate gl_FragColor and gl_FragData with normal output variables.
-            if (!EmulateFragColorData(this, root, &getSymbolTable()))
+            if (!EmulateFragColorData(this, root, &getSymbolTable(), hasGLSecondaryFragData))
             {
                 return false;
             }
@@ -1371,7 +1378,8 @@ void TranslatorSPIRV::assignSpirvIds(TIntermBlock *root)
             // webgl_FragColor, webgl_FragData, webgl_SecondaryFragColor and webgl_SecondaryFragData
             // are recorded with their original names (starting with gl_)
             ImmutableString name(symbol->getName());
-            if (angle::BeginsWith(name.data(), "webgl_"))
+            if (angle::BeginsWith(name.data(), "webgl_") &&
+                symbol->variable().symbolType() == SymbolType::AngleInternal)
             {
                 name = ImmutableString(name.data() + 3, name.length() - 3);
             }

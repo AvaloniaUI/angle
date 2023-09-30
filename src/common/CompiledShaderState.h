@@ -18,6 +18,7 @@
 #include <GLSLANG/ShaderLang.h>
 #include <GLSLANG/ShaderVars.h>
 
+#include <memory>
 #include <string>
 
 namespace sh
@@ -52,6 +53,8 @@ struct CompiledShaderState
     void deserialize(gl::BinaryInputStream &stream);
 
     const gl::ShaderType shaderType;
+
+    bool successfullyCompiled;
 
     int shaderVersion;
     std::string translatedSource;
@@ -89,6 +92,8 @@ struct CompiledShaderState
     GLenum tessGenVertexOrder;
     GLenum tessGenPointMode;
 };
+
+using SharedCompiledShaderState = std::shared_ptr<CompiledShaderState>;
 }  // namespace gl
 
 #endif  // COMMON_COMPILEDSHADERSTATE_H_

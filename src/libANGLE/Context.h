@@ -37,7 +37,6 @@
 #include "libANGLE/RefCountObject.h"
 #include "libANGLE/ResourceManager.h"
 #include "libANGLE/ResourceMap.h"
-#include "libANGLE/SharedContextMutex.h"
 #include "libANGLE/State.h"
 #include "libANGLE/VertexAttribute.h"
 #include "libANGLE/angletypes.h"
@@ -124,6 +123,7 @@ class ErrorSet : angle::NonCopyable
   private:
     void setContextLost();
     void pushError(GLenum errorCode);
+    std::unique_lock<std::mutex> getLockIfNotAlready();
 
     // Non-atomic members of this class are protected by a mutex.  This is to allow errors to be
     // safely set by entry points that don't hold a lock.  Note that other contexts may end up
@@ -169,8 +169,26 @@ class PrivateStateCache final : angle::NonCopyable
     void onCapChange() { mIsCachedBasicDrawStatesErrorValid = false; }
     void onColorMaskChange() { mIsCachedBasicDrawStatesErrorValid = false; }
     void onDefaultVertexAttributeChange() { mIsCachedBasicDrawStatesErrorValid = false; }
-    void onBlendFuncIndexedChange() { mIsCachedBasicDrawStatesErrorValid = false; }
-    void onBlendEquationChange() { mIsCachedBasicDrawStatesErrorValid = false; }
+
+    // Blending updates invalidate draw
+    // state in the following cases:
+    //
+    // * Blend equations have been changed and the context
+    //   supports KHR_blend_equation_advanced. The number
+    //   of enabled draw buffers may need to be checked
+    //   to not be greater than 1.
+    //
+    // * Blend funcs have been changed with indexed
+    //   commands. The D3D11 backend cannot support
+    //   constant color and alpha blend funcs together
+    //   so a check is needed across all draw buffers.
+    //
+    // * Blend funcs have been changed and the context
+    //   supports EXT_blend_func_extended. The number
+    //   of enabled draw buffers may need to be checked
+    //   against MAX_DUAL_SOURCE_DRAW_BUFFERS_EXT limit.
+    void onBlendEquationOrFuncChange() { mIsCachedBasicDrawStatesErrorValid = false; }
+
     void onStencilStateChange() { mIsCachedBasicDrawStatesErrorValid = false; }
 
     bool isCachedBasicDrawStatesErrorValid() const { return mIsCachedBasicDrawStatesErrorValid; }
@@ -236,8 +254,7 @@ class StateCache final : angle::NonCopyable
     // 2. onStencilStateChange.
     // 3. onDefaultVertexAttributeChange.
     // 4. onColorMaskChange.
-    // 5. onBlendFuncIndexedChange.
-    // 6. onBlendEquationChange.
+    // 5. onBlendEquationOrFuncChange.
     intptr_t getBasicDrawStatesErrorString(const Context *context,
                                            const PrivateStateCache *privateStateCache) const
     {
@@ -556,10 +573,10 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     bool isResetNotificationEnabled() const;
 
-    bool isRobustnessEnabled() const;
+    bool isRobustnessEnabled() const { return mState.hasRobustAccess(); }
 
-    const egl::Config *getConfig() const;
-    EGLenum getClientType() const;
+    const egl::Config *getConfig() const { return mConfig; }
+    EGLenum getClientType() const { return mState.getClientType(); }
     EGLenum getRenderBuffer() const;
     EGLenum getContextPriority() const;
 
@@ -645,7 +662,8 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     }
 
     Program *getProgramNoResolveLink(ShaderProgramID handle) const;
-    Shader *getShader(ShaderProgramID handle) const;
+    Shader *getShaderResolveCompile(ShaderProgramID handle) const;
+    Shader *getShaderNoResolveCompile(ShaderProgramID handle) const;
 
     ANGLE_INLINE bool isTextureGenerated(TextureID texture) const
     {
@@ -680,6 +698,9 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     // GL_KHR_parallel_shader_compile
     std::shared_ptr<angle::WorkerThreadPool> getShaderCompileThreadPool() const;
+
+    // Single-threaded pool; runs everything instantly
+    std::shared_ptr<angle::WorkerThreadPool> getSingleThreadPool() const;
 
     // Generic multithread pool.
     std::shared_ptr<angle::WorkerThreadPool> getWorkerThreadPool() const;
@@ -716,6 +737,10 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     egl::Error reacquireHighPowerGPU();
     void onGPUSwitch();
 
+    // EGL_ANGLE_external_context_and_surface implementation.
+    egl::Error acquireExternalContext(egl::Surface *drawAndReadSurface);
+    egl::Error releaseExternalContext();
+
     bool noopDraw(PrimitiveMode mode, GLsizei count) const;
     bool noopDrawInstanced(PrimitiveMode mode, GLsizei count, GLsizei instanceCount) const;
     bool noopMultiDraw(GLsizei drawcount) const;
@@ -725,32 +750,13 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     void addRef() const { mRefCount++; }
     void release() const { mRefCount--; }
-    size_t getRefCount() const { return mRefCount; }
+    bool isReferenced() const { return mRefCount > 0; }
 
     egl::ShareGroup *getShareGroup() const { return mState.getShareGroup(); }
 
-    // Note: mutex may be changed during the API call, including from other thread.
-    egl::ContextMutex *getContextMutex() const
-    {
-        return mState.mContextMutex.load(std::memory_order_relaxed);
-    }
-
-    // For debugging purposes. "ContextMutex" MUST be locked during this call.
-    bool isSharedContextMutexActive() const;
-    // For debugging purposes. "ContextMutex" MUST be locked during this call.
-    bool isContextMutexStateConsistent() const;
-
-    // Important note:
-    //   It is possible that this Context will continue to use "SingleContextMutex" in its current
-    //   thread after this call. Probability of that is controlled by the "kActivationDelayMicro"
-    //   constant. If problem happens or extra safety is critical - increase the
-    //   "kActivationDelayMicro".
-    //   For absolute 100% safety "SingleContextMutex" should not be used.
-    egl::ScopedContextMutexLock lockAndActivateSharedContextMutex();
-
-    // "SharedContextMutex" MUST be locked and active during this call.
-    // Merges "SharedContextMutex" of the Context with other "ShareContextMutex".
-    void mergeSharedContextMutexes(egl::ContextMutex *otherMutex);
+    // Warning! When need to store pointer to the mutex in other object use `getRoot()` pointer, do
+    // NOT get pointer of the `getContextMutex()` reference.
+    egl::ContextMutex &getContextMutex() const { return mState.mContextMutex; }
 
     bool supportsGeometryOrTesselation() const;
     void dirtyAllState();
@@ -789,6 +795,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
   private:
     void initializeDefaultResources();
+    void releaseSharedObjects();
 
     angle::Result prepareForDraw(PrimitiveMode mode);
     angle::Result prepareForClear(GLbitfield mask);
@@ -810,8 +817,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     VertexArray *checkVertexArrayAllocation(VertexArrayID vertexArrayHandle);
     TransformFeedback *checkTransformFeedbackAllocation(TransformFeedbackID transformFeedback);
-
-    angle::Result onProgramLink(Program *programObject);
 
     void detachBuffer(Buffer *buffer);
     void detachTexture(TextureID texture);
@@ -926,6 +931,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     angle::ObserverBinding mVertexArrayObserverBinding;
     angle::ObserverBinding mDrawFramebufferObserverBinding;
     angle::ObserverBinding mReadFramebufferObserverBinding;
+    angle::ObserverBinding mProgramObserverBinding;
     angle::ObserverBinding mProgramPipelineObserverBinding;
     std::vector<angle::ObserverBinding> mUniformBufferObserverBindings;
     std::vector<angle::ObserverBinding> mAtomicCounterBufferObserverBindings;

@@ -17,6 +17,7 @@
 #include "libANGLE/MemoryProgramCache.h"
 #include "libANGLE/renderer/OverlayImpl.h"
 #include "libANGLE/renderer/d3d/CompilerD3D.h"
+#include "libANGLE/renderer/d3d/ProgramExecutableD3D.h"
 #include "libANGLE/renderer/d3d/RenderbufferD3D.h"
 #include "libANGLE/renderer/d3d/SamplerD3D.h"
 #include "libANGLE/renderer/d3d/ShaderD3D.h"
@@ -44,8 +45,19 @@ ANGLE_INLINE bool DrawCallHasDynamicAttribs(const gl::Context *context)
     return vertexArray11->hasActiveDynamicAttrib(context);
 }
 
+bool InstancedPointSpritesActive(RendererD3D *renderer,
+                                 ProgramExecutableD3D *executableD3D,
+                                 gl::PrimitiveMode mode)
+{
+    return executableD3D->usesPointSize() &&
+           executableD3D->usesInstancedPointSpriteEmulation(renderer) &&
+           mode == gl::PrimitiveMode::Points;
+}
+
 bool DrawCallHasStreamingVertexArrays(const gl::Context *context, gl::PrimitiveMode mode)
 {
+    RendererD3D *renderer = GetImplAs<Context11>(context)->getRenderer();
+
     // Direct drawing doesn't support dynamic attribute storage since it needs the first and count
     // to translate when applyVertexBuffer. GL_LINE_LOOP and GL_TRIANGLE_FAN are not supported
     // either since we need to simulate them in D3D.
@@ -55,8 +67,9 @@ bool DrawCallHasStreamingVertexArrays(const gl::Context *context, gl::PrimitiveM
         return true;
     }
 
-    ProgramD3D *programD3D = GetImplAs<ProgramD3D>(context->getState().getProgram());
-    if (InstancedPointSpritesActive(programD3D, mode))
+    ProgramExecutableD3D *executableD3D =
+        GetImplAs<ProgramExecutableD3D>(context->getState().getProgramExecutable());
+    if (InstancedPointSpritesActive(renderer, executableD3D, mode))
     {
         return true;
     }
@@ -113,6 +126,12 @@ angle::Result ReadbackIndirectBuffer(const gl::Context *context,
     *bufferPtrOut = reinterpret_cast<const IndirectBufferT *>(bufferData + offset);
     return angle::Result::Continue;
 }
+
+bool IsSameExecutable(const gl::ProgramExecutable *a, const gl::ProgramExecutable *b)
+{
+    return GetImplAs<ProgramExecutableD3D>(a)->getSerial() ==
+           GetImplAs<ProgramExecutableD3D>(b)->getSerial();
+}
 }  // anonymous namespace
 
 Context11::Context11(const gl::State &state, gl::ErrorSet *errorSet, Renderer11 *renderer)
@@ -155,6 +174,11 @@ ShaderImpl *Context11::createShader(const gl::ShaderState &data)
 ProgramImpl *Context11::createProgram(const gl::ProgramState &data)
 {
     return new Program11(data, mRenderer);
+}
+
+ProgramExecutableImpl *Context11::createProgramExecutable(const gl::ProgramExecutable *executable)
+{
+    return new ProgramExecutableD3D(executable);
 }
 
 FramebufferImpl *Context11::createFramebuffer(const gl::FramebufferState &data)
@@ -549,8 +573,8 @@ angle::Result Context11::multiDrawArrays(const gl::Context *context,
                                          const GLsizei *counts,
                                          GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ARRAYS, _, _, 1, 0, 0);
@@ -570,8 +594,8 @@ angle::Result Context11::multiDrawArraysInstanced(const gl::Context *context,
                                                   const GLsizei *instanceCounts,
                                                   GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ARRAYS, _INSTANCED, _, 1, 0, 0);
@@ -600,8 +624,8 @@ angle::Result Context11::multiDrawElements(const gl::Context *context,
                                            const GLvoid *const *indices,
                                            GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ELEMENTS, _, _, 1, 0, 0);
@@ -622,8 +646,8 @@ angle::Result Context11::multiDrawElementsInstanced(const gl::Context *context,
                                                     const GLsizei *instanceCounts,
                                                     GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
     if (hasDrawID)
     {
         MULTI_DRAW_BLOCK(ELEMENTS, _INSTANCED, _, 1, 0, 0);
@@ -655,10 +679,10 @@ angle::Result Context11::multiDrawArraysInstancedBaseInstance(const gl::Context 
                                                               const GLuint *baseInstances,
                                                               GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
-    ResetBaseVertexBaseInstance resetUniforms(programObject, false, hasBaseInstance);
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
+    const bool hasBaseInstance        = executable->hasBaseInstanceUniform();
+    ResetBaseVertexBaseInstance resetUniforms(executable, false, hasBaseInstance);
 
     if (hasDrawID && hasBaseInstance)
     {
@@ -691,11 +715,11 @@ angle::Result Context11::multiDrawElementsInstancedBaseVertexBaseInstance(
     const GLuint *baseInstances,
     GLsizei drawcount)
 {
-    gl::Program *programObject = context->getState().getLinkedProgram(context);
-    const bool hasDrawID       = programObject && programObject->hasDrawIDUniform();
-    const bool hasBaseVertex   = programObject && programObject->hasBaseVertexUniform();
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
-    ResetBaseVertexBaseInstance resetUniforms(programObject, hasBaseVertex, hasBaseInstance);
+    gl::ProgramExecutable *executable = context->getState().getLinkedProgramExecutable(context);
+    const bool hasDrawID              = executable->hasDrawIDUniform();
+    const bool hasBaseVertex          = executable->hasBaseVertexUniform();
+    const bool hasBaseInstance        = executable->hasBaseInstanceUniform();
+    ResetBaseVertexBaseInstance resetUniforms(executable, hasBaseVertex, hasBaseInstance);
 
     if (hasDrawID)
     {
@@ -954,18 +978,19 @@ angle::Result Context11::dispatchComputeIndirect(const gl::Context *context, GLi
 angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *context,
                                                              gl::PrimitiveMode drawMode)
 {
-    const auto &glState    = context->getState();
-    const auto *va11       = GetImplAs<VertexArray11>(glState.getVertexArray());
-    const auto *drawFBO    = glState.getDrawFramebuffer();
-    gl::Program *program   = glState.getProgram();
-    ProgramD3D *programD3D = GetImplAs<ProgramD3D>(program);
+    const auto &glState                 = context->getState();
+    const auto *va11                    = GetImplAs<VertexArray11>(glState.getVertexArray());
+    const auto *drawFBO                 = glState.getDrawFramebuffer();
+    gl::ProgramExecutable *executable   = glState.getProgramExecutable();
+    ProgramExecutableD3D *executableD3D = GetImplAs<ProgramExecutableD3D>(executable);
 
-    programD3D->updateCachedInputLayout(va11->getCurrentStateSerial(), glState);
-    programD3D->updateCachedOutputLayout(context, drawFBO);
+    executableD3D->updateCachedInputLayout(mRenderer, va11->getCurrentStateSerial(), glState);
+    executableD3D->updateCachedOutputLayout(context, drawFBO);
 
-    bool recompileVS = !programD3D->hasVertexExecutableForCachedInputLayout();
-    bool recompileGS = !programD3D->hasGeometryExecutableForPrimitiveType(glState, drawMode);
-    bool recompilePS = !programD3D->hasPixelExecutableForCachedOutputLayout();
+    bool recompileVS = !executableD3D->hasVertexExecutableForCachedInputLayout();
+    bool recompileGS =
+        !executableD3D->hasGeometryExecutableForPrimitiveType(mRenderer, glState, drawMode);
+    bool recompilePS = !executableD3D->hasPixelExecutableForCachedOutputLayout();
 
     if (!recompileVS && !recompileGS && !recompilePS)
     {
@@ -980,8 +1005,9 @@ angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *
     if (recompileVS)
     {
         ShaderExecutableD3D *vertexExe = nullptr;
-        ANGLE_TRY(programD3D->getVertexExecutableForCachedInputLayout(this, &vertexExe, &infoLog));
-        if (!programD3D->hasVertexExecutableForCachedInputLayout())
+        ANGLE_TRY(executableD3D->getVertexExecutableForCachedInputLayout(this, mRenderer,
+                                                                         &vertexExe, &infoLog));
+        if (!executableD3D->hasVertexExecutableForCachedInputLayout())
         {
             ASSERT(infoLog.getLength() > 0);
             ERR() << "Error compiling dynamic vertex executable: " << infoLog.str();
@@ -992,9 +1018,10 @@ angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *
     if (recompileGS)
     {
         ShaderExecutableD3D *geometryExe = nullptr;
-        ANGLE_TRY(programD3D->getGeometryExecutableForPrimitiveType(this, glState, drawMode,
-                                                                    &geometryExe, &infoLog));
-        if (!programD3D->hasGeometryExecutableForPrimitiveType(glState, drawMode))
+        ANGLE_TRY(executableD3D->getGeometryExecutableForPrimitiveType(
+            this, mRenderer, glState.getCaps(), glState.getProvokingVertex(), drawMode,
+            &geometryExe, &infoLog));
+        if (!executableD3D->hasGeometryExecutableForPrimitiveType(mRenderer, glState, drawMode))
         {
             ASSERT(infoLog.getLength() > 0);
             ERR() << "Error compiling dynamic geometry executable: " << infoLog.str();
@@ -1005,8 +1032,9 @@ angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *
     if (recompilePS)
     {
         ShaderExecutableD3D *pixelExe = nullptr;
-        ANGLE_TRY(programD3D->getPixelExecutableForCachedOutputLayout(this, &pixelExe, &infoLog));
-        if (!programD3D->hasPixelExecutableForCachedOutputLayout())
+        ANGLE_TRY(executableD3D->getPixelExecutableForCachedOutputLayout(this, mRenderer, &pixelExe,
+                                                                         &infoLog));
+        if (!executableD3D->hasPixelExecutableForCachedOutputLayout())
         {
             ASSERT(infoLog.getLength() > 0);
             ERR() << "Error compiling dynamic pixel executable: " << infoLog.str();
@@ -1015,7 +1043,8 @@ angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *
     }
 
     // Refresh the program cache entry.
-    if (mMemoryProgramCache)
+    gl::Program *program = glState.getProgram();
+    if (mMemoryProgramCache && IsSameExecutable(&program->getExecutable(), executable))
     {
         ANGLE_TRY(mMemoryProgramCache->updateProgram(context, program));
     }
@@ -1025,13 +1054,13 @@ angle::Result Context11::triggerDrawCallProgramRecompilation(const gl::Context *
 
 angle::Result Context11::triggerDispatchCallProgramRecompilation(const gl::Context *context)
 {
-    const auto &glState    = context->getState();
-    gl::Program *program   = glState.getProgram();
-    ProgramD3D *programD3D = GetImplAs<ProgramD3D>(program);
+    const auto &glState                 = context->getState();
+    gl::ProgramExecutable *executable   = glState.getProgramExecutable();
+    ProgramExecutableD3D *executableD3D = GetImplAs<ProgramExecutableD3D>(executable);
 
-    programD3D->updateCachedComputeImage2DBindLayout(context);
+    executableD3D->updateCachedComputeImage2DBindLayout(context);
 
-    bool recompileCS = !programD3D->hasComputeExecutableForCachedImage2DBindLayout();
+    bool recompileCS = !executableD3D->hasComputeExecutableForCachedImage2DBindLayout();
 
     if (!recompileCS)
     {
@@ -1044,9 +1073,9 @@ angle::Result Context11::triggerDispatchCallProgramRecompilation(const gl::Conte
     gl::InfoLog infoLog;
 
     ShaderExecutableD3D *computeExe = nullptr;
-    ANGLE_TRY(
-        programD3D->getComputeExecutableForImage2DBindLayout(context, this, &computeExe, &infoLog));
-    if (!programD3D->hasComputeExecutableForCachedImage2DBindLayout())
+    ANGLE_TRY(executableD3D->getComputeExecutableForImage2DBindLayout(this, mRenderer, &computeExe,
+                                                                      &infoLog));
+    if (!executableD3D->hasComputeExecutableForCachedImage2DBindLayout())
     {
         ASSERT(infoLog.getLength() > 0);
         ERR() << "Dynamic recompilation error log: " << infoLog.str();
@@ -1054,7 +1083,8 @@ angle::Result Context11::triggerDispatchCallProgramRecompilation(const gl::Conte
     }
 
     // Refresh the program cache entry.
-    if (mMemoryProgramCache)
+    gl::Program *program = glState.getProgram();
+    if (mMemoryProgramCache && IsSameExecutable(&program->getExecutable(), executable))
     {
         ANGLE_TRY(mMemoryProgramCache->updateProgram(context, program));
     }

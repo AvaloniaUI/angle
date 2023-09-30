@@ -2,11 +2,11 @@
   "src/libANGLE/renderer/angle_format.py":
     "601bfb757e052c50ac8f4cb4e0b58eb5",
   "src/libANGLE/renderer/angle_format_map.json":
-    "4c09d19204afa53cd9d137bb4edbabb1",
+    "eab6744df71f7bf6bfe9e8bb39949b79",
   "src/libANGLE/renderer/gen_angle_format_table.py":
     "2ec32d6ad86d2dece50bc7db3cd0d807",
   "src/libANGLE/renderer/metal/shaders/blit.metal":
-    "b35da1cf7e949d02e5a44c6a432c1f06",
+    "103dfa7c302b03719a36709f9cfa9462",
   "src/libANGLE/renderer/metal/shaders/clear.metal":
     "37ef05208eb5d12110a7d277a4bbcbe1",
   "src/libANGLE/renderer/metal/shaders/common.h":
@@ -20,17 +20,15 @@
   "src/libANGLE/renderer/metal/shaders/gen_mipmap.metal":
     "fab35deec42fd89ae7a11d2f87b6e0b4",
   "src/libANGLE/renderer/metal/shaders/gen_mtl_internal_shaders.py":
-    "5e0600683a59874ecb8cb1ee4f321fc3",
-  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_2_0_ios_autogen.h":
-    "27e00026ef392b5c81d4a408a4c3d111",
-  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_2_0_macos_autogen.h":
-    "4368ac69249f28b26832a1356f975d7b",
-  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_2_1_ios_autogen.h":
-    "fc5322b9914fdea4d9fedb358329253e",
-  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_2_1_macos_autogen.h":
-    "1433cbb0da151d50508ba4ede27a87c4",
+    "35717adb82858bca41bc931284845805",
+  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_autogen.metal":
+    "652efddc19c31a34cd8e3ff156e693d8",
+  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_ios_autogen.h":
+    "a96315520cfb44b9487c11e100384a67",
+  "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_macos_autogen.h":
+    "d99f2a5c5224ed02256e93f620e4f6e9",
   "src/libANGLE/renderer/metal/shaders/mtl_internal_shaders_src_autogen.h":
-    "07e6430d6ebccbe1b56a47122fecb3f1",
+    "483dd9b737eef0d3556f6ee5b840f6f3",
   "src/libANGLE/renderer/metal/shaders/rewrite_indices.metal":
     "a29210b023ed3393e1342d94e338d449",
   "src/libANGLE/renderer/metal/shaders/visibility.metal":

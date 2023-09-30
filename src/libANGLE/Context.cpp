@@ -169,35 +169,15 @@ egl::ShareGroup *AllocateOrGetShareGroup(egl::Display *display, const gl::Contex
     }
 }
 
-egl::ContextMutex *TryAllocateOrUseSharedContextMutex(egl::Display *display,
-                                                      egl::ContextMutex *sharedContextMutex)
+egl::ContextMutex *AllocateOrUseContextMutex(egl::ContextMutex *sharedContextMutex)
 {
-    if (egl::kIsSharedContextMutexEnabled)
+    if (sharedContextMutex != nullptr)
     {
-        if (sharedContextMutex == nullptr)
-        {
-            ASSERT(display->getSharedContextMutexManager() != nullptr);
-            sharedContextMutex = display->getSharedContextMutexManager()->create();
-        }
-        sharedContextMutex->addRef();
+        ASSERT(egl::kIsContextMutexEnabled);
+        ASSERT(sharedContextMutex->isReferenced());
+        return sharedContextMutex;
     }
-    else
-    {
-        ASSERT(sharedContextMutex == nullptr);
-    }
-    return sharedContextMutex;
-}
-
-egl::SingleContextMutex *TryAllocateSingleContextMutex(egl::ContextMutex *sharedContextMutex)
-{
-    egl::SingleContextMutex *singleContextMutex = nullptr;
-    if (!egl::kIsSharedContextMutexEnabled || sharedContextMutex == nullptr)
-    {
-        ASSERT(sharedContextMutex == nullptr);
-        singleContextMutex = new egl::SingleContextMutex();
-        singleContextMutex->addRef();
-    }
-    return singleContextMutex;
+    return new egl::ContextMutex();
 }
 
 template <typename T>
@@ -439,24 +419,13 @@ enum SubjectIndexes : angle::SubjectIndex
     kVertexArraySubjectIndex = kSamplerMaxSubjectIndex,
     kReadFramebufferSubjectIndex,
     kDrawFramebufferSubjectIndex,
+    kProgramSubjectIndex,
     kProgramPipelineSubjectIndex,
 };
 
 bool IsClearBufferEnabled(const FramebufferState &fbState, GLenum buffer, GLint drawbuffer)
 {
     return buffer != GL_COLOR || fbState.getEnabledDrawBuffers()[drawbuffer];
-}
-
-bool IsEmptyScissor(const State &glState)
-{
-    if (!glState.isScissorTestEnabled())
-    {
-        return false;
-    }
-
-    const Extents &dimensions = glState.getDrawFramebuffer()->getExtents();
-    Rectangle framebufferArea(0, 0, dimensions.width, dimensions.height);
-    return !ClipRectangle(framebufferArea, glState.getScissor(), nullptr);
 }
 
 bool IsColorMaskedOut(const BlendStateExt &blendStateExt, const GLint drawbuffer)
@@ -614,8 +583,7 @@ Context::Context(egl::Display *display,
              AllocateOrGetShareGroup(display, shareContext),
              shareTextures,
              shareSemaphores,
-             TryAllocateOrUseSharedContextMutex(display, sharedContextMutex),
-             TryAllocateSingleContextMutex(sharedContextMutex),
+             AllocateOrUseContextMutex(sharedContextMutex),
              &mOverlay,
              clientType,
              GetClientVersion(display, attribs, clientType),
@@ -650,6 +618,7 @@ Context::Context(egl::Display *display,
       mVertexArrayObserverBinding(this, kVertexArraySubjectIndex),
       mDrawFramebufferObserverBinding(this, kDrawFramebufferSubjectIndex),
       mReadFramebufferObserverBinding(this, kReadFramebufferSubjectIndex),
+      mProgramObserverBinding(this, kProgramSubjectIndex),
       mProgramPipelineObserverBinding(this, kProgramPipelineSubjectIndex),
       mFrameCapture(new angle::FrameCapture),
       mRefCount(0),
@@ -658,8 +627,6 @@ Context::Context(egl::Display *display,
       mSaveAndRestoreState(GetSaveAndRestoreState(attribs)),
       mIsDestroyed(false)
 {
-    ASSERT(mState.mSharedContextMutex != nullptr || mState.mSingleContextMutex != nullptr);
-
     for (angle::SubjectIndex uboIndex = kUniformBuffer0SubjectIndex;
          uboIndex < kUniformBufferMaxSubjectIndex; ++uboIndex)
     {
@@ -854,6 +821,9 @@ egl::Error Context::onDestroy(const egl::Display *display)
 {
     if (!mHasBeenCurrent)
     {
+        // Shared objects and ShareGroup must be released regardless.
+        releaseSharedObjects();
+        mState.mShareGroup->release(display);
         // The context is never current, so default resources are not allocated.
         return egl::NoError();
     }
@@ -927,6 +897,20 @@ egl::Error Context::onDestroy(const egl::Display *display)
 
     mState.reset(this);
 
+    releaseSharedObjects();
+
+    mImplementation->onDestroy(this);
+
+    // Backend requires implementation to be destroyed first to close down all the objects
+    mState.mShareGroup->release(display);
+
+    mOverlay.destroy(this);
+
+    return egl::NoError();
+}
+
+void Context::releaseSharedObjects()
+{
     mState.mBufferManager->release(this);
     // mProgramPipelineManager must be before mShaderProgramManager to give each
     // PPO the chance to release any references they have to the Programs that
@@ -940,24 +924,6 @@ egl::Error Context::onDestroy(const egl::Display *display)
     mState.mFramebufferManager->release(this);
     mState.mMemoryObjectManager->release(this);
     mState.mSemaphoreManager->release(this);
-
-    mImplementation->onDestroy(this);
-
-    // Backend requires implementation to be destroyed first to close down all the objects
-    mState.mShareGroup->release(display);
-
-    if (mState.mSharedContextMutex != nullptr)
-    {
-        mState.mSharedContextMutex->release();
-    }
-    if (mState.mSingleContextMutex != nullptr)
-    {
-        mState.mSingleContextMutex->release();
-    }
-
-    mOverlay.destroy(this);
-
-    return egl::NoError();
 }
 
 Context::~Context() {}
@@ -1097,7 +1063,7 @@ GLuint Context::createShaderProgramv(ShaderType type, GLsizei count, const GLcha
     const ShaderProgramID shaderID = PackParam<ShaderProgramID>(createShader(type));
     if (shaderID.value)
     {
-        Shader *shaderObject = getShader(shaderID);
+        Shader *shaderObject = getShaderNoResolveCompile(shaderID);
         ASSERT(shaderObject);
         shaderObject->setSource(this, count, strings, nullptr);
         shaderObject->compile(this);
@@ -1107,6 +1073,9 @@ GLuint Context::createShaderProgramv(ShaderType type, GLsizei count, const GLcha
             gl::Program *programObject = getProgramNoResolveLink(programID);
             ASSERT(programObject);
 
+            // Note: this call serializes the compilation with the following link.  For backends
+            // that prefer parallel compile and link, it's more efficient to remove this check, and
+            // let link fail instead.
             if (shaderObject->isCompiled(this))
             {
                 // As per Khronos issue 2261:
@@ -1114,15 +1083,9 @@ GLuint Context::createShaderProgramv(ShaderType type, GLsizei count, const GLcha
                 // We must wait to mark the program separable until it's successfully compiled.
                 programObject->setSeparable(true);
 
-                programObject->attachShader(shaderObject);
+                programObject->attachShader(this, shaderObject);
 
                 if (programObject->link(this) != angle::Result::Continue)
-                {
-                    deleteShader(shaderID);
-                    deleteProgram(programID);
-                    return 0u;
-                }
-                if (onProgramLink(programObject) != angle::Result::Continue)
                 {
                     deleteShader(shaderID);
                     deleteProgram(programID);
@@ -1132,7 +1095,7 @@ GLuint Context::createShaderProgramv(ShaderType type, GLsizei count, const GLcha
                 programObject->detachShader(this, shaderObject);
             }
 
-            InfoLog &programInfoLog = programObject->getExecutable().getInfoLog();
+            InfoLog &programInfoLog = programObject->getInfoLog();
             programInfoLog << shaderObject->getInfoLogString();
         }
 
@@ -1347,7 +1310,7 @@ gl::LabeledObject *Context::getLabeledObject(GLenum identifier, GLuint name) con
             return getBuffer({name});
         case GL_SHADER:
         case GL_SHADER_OBJECT_EXT:
-            return getShader({name});
+            return getShaderNoResolveCompile({name});
         case GL_PROGRAM:
         case GL_PROGRAM_OBJECT_EXT:
             return getProgramNoResolveLink({name});
@@ -1544,8 +1507,10 @@ void Context::bindImageTexture(GLuint unit,
 
 void Context::useProgram(ShaderProgramID program)
 {
-    ANGLE_CONTEXT_TRY(mState.setProgram(this, getProgramResolveLink(program)));
+    Program *programObject = getProgramResolveLink(program);
+    ANGLE_CONTEXT_TRY(mState.setProgram(this, programObject));
     mStateCache.onProgramExecutableChange(this);
+    mProgramObserverBinding.bind(programObject);
 }
 
 void Context::useProgramStages(ProgramPipelineID pipeline,
@@ -3067,21 +3032,6 @@ GLenum Context::getGraphicsResetStatus()
 bool Context::isResetNotificationEnabled() const
 {
     return mErrors.getResetStrategy() == GL_LOSE_CONTEXT_ON_RESET_EXT;
-}
-
-bool Context::isRobustnessEnabled() const
-{
-    return mState.hasRobustAccess();
-}
-
-const egl::Config *Context::getConfig() const
-{
-    return mConfig;
-}
-
-EGLenum Context::getClientType() const
-{
-    return mState.getClientType();
 }
 
 EGLenum Context::getRenderBuffer() const
@@ -4691,12 +4641,6 @@ void Context::clear(GLbitfield mask)
         return;
     }
 
-    // Noop empty scissors.
-    if (IsEmptyScissor(mState))
-    {
-        return;
-    }
-
     // Remove clear bits that are ineffective. An effective clear changes at least one fragment. If
     // color/depth/stencil masks make the clear ineffective we skip it altogether.
 
@@ -4757,8 +4701,7 @@ bool Context::noopClearBuffer(GLenum buffer, GLint drawbuffer) const
     Framebuffer *framebufferObject = mState.getDrawFramebuffer();
 
     return !IsClearBufferEnabled(framebufferObject->getState(), buffer, drawbuffer) ||
-           mState.isRasterizerDiscardEnabled() || isClearBufferMaskedOut(buffer, drawbuffer) ||
-           IsEmptyScissor(mState);
+           mState.isRasterizerDiscardEnabled() || isClearBufferMaskedOut(buffer, drawbuffer);
 }
 
 void Context::clearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat *values)
@@ -6144,7 +6087,7 @@ void Context::attachShader(ShaderProgramID program, ShaderProgramID shader)
     Program *programObject = mState.mShaderProgramManager->getProgram(program);
     Shader *shaderObject   = mState.mShaderProgramManager->getShader(shader);
     ASSERT(programObject && shaderObject);
-    programObject->attachShader(shaderObject);
+    programObject->attachShader(this, shaderObject);
 }
 
 void Context::copyBufferSubData(BufferBinding readTarget,
@@ -6624,15 +6567,15 @@ void Context::drawArraysInstancedBaseInstance(PrimitiveMode mode,
     }
 
     ANGLE_CONTEXT_TRY(prepareForDraw(mode));
-    Program *programObject = mState.getLinkedProgram(this);
+    ProgramExecutable *executable = mState.getLinkedProgramExecutable(this);
 
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
+    const bool hasBaseInstance = executable->hasBaseInstanceUniform();
     if (hasBaseInstance)
     {
-        programObject->setBaseInstanceUniform(baseInstance);
+        executable->setBaseInstanceUniform(baseInstance);
     }
 
-    rx::ResetBaseVertexBaseInstance resetUniforms(programObject, false, hasBaseInstance);
+    rx::ResetBaseVertexBaseInstance resetUniforms(executable, false, hasBaseInstance);
 
     // The input gl_InstanceID does not follow the baseinstance. gl_InstanceID always falls on
     // the half-open range [0, instancecount). No need to set other stuff. Except for Vulkan.
@@ -6677,21 +6620,22 @@ void Context::drawElementsInstancedBaseVertexBaseInstance(PrimitiveMode mode,
     }
 
     ANGLE_CONTEXT_TRY(prepareForDraw(mode));
-    Program *programObject = mState.getLinkedProgram(this);
+    ProgramExecutable *executable = mState.getLinkedProgramExecutable(this);
 
-    const bool hasBaseVertex = programObject && programObject->hasBaseVertexUniform();
+    const bool hasBaseVertex   = executable->hasBaseVertexUniform();
+    const bool hasBaseInstance = executable->hasBaseInstanceUniform();
+
     if (hasBaseVertex)
     {
-        programObject->setBaseVertexUniform(baseVertex);
+        executable->setBaseVertexUniform(baseVertex);
     }
 
-    const bool hasBaseInstance = programObject && programObject->hasBaseInstanceUniform();
     if (hasBaseInstance)
     {
-        programObject->setBaseInstanceUniform(baseInstance);
+        executable->setBaseInstanceUniform(baseInstance);
     }
 
-    rx::ResetBaseVertexBaseInstance resetUniforms(programObject, hasBaseVertex, hasBaseInstance);
+    rx::ResetBaseVertexBaseInstance resetUniforms(executable, hasBaseVertex, hasBaseInstance);
 
     ANGLE_CONTEXT_TRY(mImplementation->drawElementsInstancedBaseVertexBaseInstance(
         this, mode, count, type, indices, instanceCount, baseVertex, baseInstance));
@@ -6817,7 +6761,7 @@ void Context::detachShader(ShaderProgramID program, ShaderProgramID shader)
     Program *programObject = getProgramNoResolveLink(program);
     ASSERT(programObject);
 
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShaderNoResolveCompile(shader);
     ASSERT(shaderObject);
 
     programObject->detachShader(this, shaderObject);
@@ -6865,7 +6809,7 @@ void Context::getActiveAttrib(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getActiveAttribute(index, bufsize, length, size, type, name);
+    programObject->getExecutable().getActiveAttribute(index, bufsize, length, size, type, name);
 }
 
 void Context::getActiveUniform(ShaderProgramID program,
@@ -6878,7 +6822,7 @@ void Context::getActiveUniform(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getActiveUniform(index, bufsize, length, size, type, name);
+    programObject->getExecutable().getActiveUniform(index, bufsize, length, size, type, name);
 }
 
 void Context::getAttachedShaders(ShaderProgramID program,
@@ -6895,7 +6839,7 @@ GLint Context::getAttribLocation(ShaderProgramID program, const GLchar *name)
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    return programObject->getAttributeLocation(name);
+    return programObject->getExecutable().getAttributeLocation(name);
 }
 
 void Context::getBooleanv(GLenum pname, GLboolean *params)
@@ -7009,7 +6953,7 @@ void Context::getProgramInfoLog(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getExecutable().getInfoLog(bufsize, length, infolog);
+    programObject->getInfoLog(bufsize, length, infolog);
 }
 
 void Context::getProgramPipelineInfoLog(ProgramPipelineID pipeline,
@@ -7020,7 +6964,7 @@ void Context::getProgramPipelineInfoLog(ProgramPipelineID pipeline,
     ProgramPipeline *programPipeline = getProgramPipeline(pipeline);
     if (programPipeline)
     {
-        programPipeline->getExecutable().getInfoLog(bufSize, length, infoLog);
+        programPipeline->getInfoLog(bufSize, length, infoLog);
     }
     else
     {
@@ -7034,7 +6978,7 @@ void Context::getShaderiv(ShaderProgramID shader, GLenum pname, GLint *params)
     Shader *shaderObject = nullptr;
     if (!isContextLost())
     {
-        shaderObject = getShader(shader);
+        shaderObject = getShaderNoResolveCompile(shader);
         ASSERT(shaderObject);
     }
     QueryShaderiv(this, shaderObject, pname, params);
@@ -7054,7 +6998,7 @@ void Context::getShaderInfoLog(ShaderProgramID shader,
                                GLsizei *length,
                                GLchar *infolog)
 {
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShaderNoResolveCompile(shader);
     ASSERT(shaderObject);
     shaderObject->getInfoLog(this, bufsize, length, infolog);
 }
@@ -7135,7 +7079,7 @@ void Context::getShaderSource(ShaderProgramID shader,
                               GLsizei *length,
                               GLchar *source)
 {
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShaderNoResolveCompile(shader);
     ASSERT(shaderObject);
     shaderObject->getSource(bufsize, length, source);
 }
@@ -7144,7 +7088,7 @@ void Context::getUniformfv(ShaderProgramID program, UniformLocation location, GL
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getUniformfv(this, location, params);
+    programObject->getExecutable().getUniformfv(this, location, params);
 }
 
 void Context::getUniformfvRobust(ShaderProgramID program,
@@ -7160,7 +7104,7 @@ void Context::getUniformiv(ShaderProgramID program, UniformLocation location, GL
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getUniformiv(this, location, params);
+    programObject->getExecutable().getUniformiv(this, location, params);
 }
 
 void Context::getUniformivRobust(ShaderProgramID program,
@@ -7176,7 +7120,7 @@ GLint Context::getUniformLocation(ShaderProgramID program, const GLchar *name)
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    return programObject->getUniformLocation(name).value;
+    return programObject->getExecutable().getUniformLocation(name).value;
 }
 
 GLboolean Context::isBuffer(BufferID buffer) const
@@ -7226,7 +7170,7 @@ GLboolean Context::isShader(ShaderProgramID shader) const
         return GL_FALSE;
     }
 
-    return ConvertToGLBoolean(getShader(shader));
+    return ConvertToGLBoolean(getShaderNoResolveCompile(shader));
 }
 
 GLboolean Context::isTexture(TextureID texture) const
@@ -7244,7 +7188,6 @@ void Context::linkProgram(ShaderProgramID program)
     Program *programObject = getProgramNoResolveLink(program);
     ASSERT(programObject);
     ANGLE_CONTEXT_TRY(programObject->link(this));
-    ANGLE_CONTEXT_TRY(onProgramLink(programObject));
 }
 
 void Context::releaseShaderCompiler()
@@ -7258,7 +7201,7 @@ void Context::shaderBinary(GLsizei n,
                            const void *binary,
                            GLsizei length)
 {
-    Shader *shaderObject = getShader(*shaders);
+    Shader *shaderObject = getShaderNoResolveCompile(*shaders);
     ASSERT(shaderObject != nullptr);
     ANGLE_CONTEXT_TRY(shaderObject->loadShaderBinary(this, binary, length));
 }
@@ -7281,7 +7224,7 @@ void Context::bindFragDataLocation(ShaderProgramID program, GLuint colorNumber, 
 int Context::getFragDataIndex(ShaderProgramID program, const char *name)
 {
     Program *programObject = getProgramResolveLink(program);
-    return programObject->getFragDataIndex(name);
+    return programObject->getExecutable().getFragDataIndex(name);
 }
 
 int Context::getProgramResourceLocationIndex(ShaderProgramID program,
@@ -7290,7 +7233,7 @@ int Context::getProgramResourceLocationIndex(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programInterface == GL_PROGRAM_OUTPUT);
-    return programObject->getFragDataIndex(name);
+    return programObject->getExecutable().getFragDataIndex(name);
 }
 
 void Context::shaderSource(ShaderProgramID shader,
@@ -7298,7 +7241,7 @@ void Context::shaderSource(ShaderProgramID shader,
                            const GLchar *const *string,
                            const GLint *length)
 {
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShaderNoResolveCompile(shader);
     ASSERT(shaderObject);
     shaderObject->setSource(this, count, string, length);
 }
@@ -7321,13 +7264,13 @@ Program *Context::getActiveLinkedProgram() const
 void Context::uniform1f(UniformLocation location, GLfloat x)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform1fv(location, 1, &x);
+    program->getExecutable().setUniform1fv(location, 1, &x);
 }
 
 void Context::uniform1fv(UniformLocation location, GLsizei count, const GLfloat *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform1fv(location, count, v);
+    program->getExecutable().setUniform1fv(location, count, v);
 }
 
 void Context::setUniform1iImpl(Program *program,
@@ -7335,7 +7278,7 @@ void Context::setUniform1iImpl(Program *program,
                                GLsizei count,
                                const GLint *v)
 {
-    program->setUniform1iv(this, location, count, v);
+    program->getExecutable().setUniform1iv(this, location, count, v);
 }
 
 void Context::onSamplerUniformChange(size_t textureUnitIndex)
@@ -7360,78 +7303,78 @@ void Context::uniform2f(UniformLocation location, GLfloat x, GLfloat y)
 {
     GLfloat xy[2]    = {x, y};
     Program *program = getActiveLinkedProgram();
-    program->setUniform2fv(location, 1, xy);
+    program->getExecutable().setUniform2fv(location, 1, xy);
 }
 
 void Context::uniform2fv(UniformLocation location, GLsizei count, const GLfloat *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform2fv(location, count, v);
+    program->getExecutable().setUniform2fv(location, count, v);
 }
 
 void Context::uniform2i(UniformLocation location, GLint x, GLint y)
 {
     GLint xy[2]      = {x, y};
     Program *program = getActiveLinkedProgram();
-    program->setUniform2iv(location, 1, xy);
+    program->getExecutable().setUniform2iv(location, 1, xy);
 }
 
 void Context::uniform2iv(UniformLocation location, GLsizei count, const GLint *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform2iv(location, count, v);
+    program->getExecutable().setUniform2iv(location, count, v);
 }
 
 void Context::uniform3f(UniformLocation location, GLfloat x, GLfloat y, GLfloat z)
 {
     GLfloat xyz[3]   = {x, y, z};
     Program *program = getActiveLinkedProgram();
-    program->setUniform3fv(location, 1, xyz);
+    program->getExecutable().setUniform3fv(location, 1, xyz);
 }
 
 void Context::uniform3fv(UniformLocation location, GLsizei count, const GLfloat *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform3fv(location, count, v);
+    program->getExecutable().setUniform3fv(location, count, v);
 }
 
 void Context::uniform3i(UniformLocation location, GLint x, GLint y, GLint z)
 {
     GLint xyz[3]     = {x, y, z};
     Program *program = getActiveLinkedProgram();
-    program->setUniform3iv(location, 1, xyz);
+    program->getExecutable().setUniform3iv(location, 1, xyz);
 }
 
 void Context::uniform3iv(UniformLocation location, GLsizei count, const GLint *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform3iv(location, count, v);
+    program->getExecutable().setUniform3iv(location, count, v);
 }
 
 void Context::uniform4f(UniformLocation location, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
     GLfloat xyzw[4]  = {x, y, z, w};
     Program *program = getActiveLinkedProgram();
-    program->setUniform4fv(location, 1, xyzw);
+    program->getExecutable().setUniform4fv(location, 1, xyzw);
 }
 
 void Context::uniform4fv(UniformLocation location, GLsizei count, const GLfloat *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform4fv(location, count, v);
+    program->getExecutable().setUniform4fv(location, count, v);
 }
 
 void Context::uniform4i(UniformLocation location, GLint x, GLint y, GLint z, GLint w)
 {
     GLint xyzw[4]    = {x, y, z, w};
     Program *program = getActiveLinkedProgram();
-    program->setUniform4iv(location, 1, xyzw);
+    program->getExecutable().setUniform4iv(location, 1, xyzw);
 }
 
 void Context::uniform4iv(UniformLocation location, GLsizei count, const GLint *v)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform4iv(location, count, v);
+    program->getExecutable().setUniform4iv(location, count, v);
 }
 
 void Context::uniformMatrix2fv(UniformLocation location,
@@ -7440,7 +7383,7 @@ void Context::uniformMatrix2fv(UniformLocation location,
                                const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix2fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix2fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix3fv(UniformLocation location,
@@ -7449,7 +7392,7 @@ void Context::uniformMatrix3fv(UniformLocation location,
                                const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix3fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix3fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix4fv(UniformLocation location,
@@ -7458,7 +7401,7 @@ void Context::uniformMatrix4fv(UniformLocation location,
                                const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix4fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix4fv(location, count, transpose, value);
 }
 
 void Context::validateProgram(ShaderProgramID program)
@@ -7505,7 +7448,7 @@ void Context::getProgramBinary(ShaderProgramID program,
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject != nullptr);
 
-    ANGLE_CONTEXT_TRY(programObject->saveBinary(this, binaryFormat, binary, bufSize, length));
+    ANGLE_CONTEXT_TRY(programObject->getBinary(this, binaryFormat, binary, bufSize, length));
 }
 
 void Context::programBinary(ShaderProgramID program,
@@ -7516,58 +7459,57 @@ void Context::programBinary(ShaderProgramID program,
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject != nullptr);
 
-    ANGLE_CONTEXT_TRY(programObject->loadBinary(this, binaryFormat, binary, length));
-    ANGLE_CONTEXT_TRY(onProgramLink(programObject));
+    ANGLE_CONTEXT_TRY(programObject->setBinary(this, binaryFormat, binary, length));
 }
 
 void Context::uniform1ui(UniformLocation location, GLuint v0)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform1uiv(location, 1, &v0);
+    program->getExecutable().setUniform1uiv(location, 1, &v0);
 }
 
 void Context::uniform2ui(UniformLocation location, GLuint v0, GLuint v1)
 {
     Program *program  = getActiveLinkedProgram();
     const GLuint xy[] = {v0, v1};
-    program->setUniform2uiv(location, 1, xy);
+    program->getExecutable().setUniform2uiv(location, 1, xy);
 }
 
 void Context::uniform3ui(UniformLocation location, GLuint v0, GLuint v1, GLuint v2)
 {
     Program *program   = getActiveLinkedProgram();
     const GLuint xyz[] = {v0, v1, v2};
-    program->setUniform3uiv(location, 1, xyz);
+    program->getExecutable().setUniform3uiv(location, 1, xyz);
 }
 
 void Context::uniform4ui(UniformLocation location, GLuint v0, GLuint v1, GLuint v2, GLuint v3)
 {
     Program *program    = getActiveLinkedProgram();
     const GLuint xyzw[] = {v0, v1, v2, v3};
-    program->setUniform4uiv(location, 1, xyzw);
+    program->getExecutable().setUniform4uiv(location, 1, xyzw);
 }
 
 void Context::uniform1uiv(UniformLocation location, GLsizei count, const GLuint *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform1uiv(location, count, value);
+    program->getExecutable().setUniform1uiv(location, count, value);
 }
 void Context::uniform2uiv(UniformLocation location, GLsizei count, const GLuint *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform2uiv(location, count, value);
+    program->getExecutable().setUniform2uiv(location, count, value);
 }
 
 void Context::uniform3uiv(UniformLocation location, GLsizei count, const GLuint *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform3uiv(location, count, value);
+    program->getExecutable().setUniform3uiv(location, count, value);
 }
 
 void Context::uniform4uiv(UniformLocation location, GLsizei count, const GLuint *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniform4uiv(location, count, value);
+    program->getExecutable().setUniform4uiv(location, count, value);
 }
 
 void Context::genQueries(GLsizei n, QueryID *ids)
@@ -7614,7 +7556,7 @@ void Context::uniformMatrix2x3fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix2x3fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix2x3fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix3x2fv(UniformLocation location,
@@ -7623,7 +7565,7 @@ void Context::uniformMatrix3x2fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix3x2fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix3x2fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix2x4fv(UniformLocation location,
@@ -7632,7 +7574,7 @@ void Context::uniformMatrix2x4fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix2x4fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix2x4fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix4x2fv(UniformLocation location,
@@ -7641,7 +7583,7 @@ void Context::uniformMatrix4x2fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix4x2fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix4x2fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix3x4fv(UniformLocation location,
@@ -7650,7 +7592,7 @@ void Context::uniformMatrix3x4fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix3x4fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix3x4fv(location, count, transpose, value);
 }
 
 void Context::uniformMatrix4x3fv(UniformLocation location,
@@ -7659,7 +7601,7 @@ void Context::uniformMatrix4x3fv(UniformLocation location,
                                  const GLfloat *value)
 {
     Program *program = getActiveLinkedProgram();
-    program->setUniformMatrix4x3fv(location, count, transpose, value);
+    program->getExecutable().setUniformMatrix4x3fv(location, count, transpose, value);
 }
 
 void Context::deleteVertexArrays(GLsizei n, const VertexArrayID *arrays)
@@ -7733,7 +7675,8 @@ void Context::getTransformFeedbackVarying(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->getTransformFeedbackVarying(index, bufSize, length, size, type, name);
+    programObject->getExecutable().getTransformFeedbackVarying(index, bufSize, length, size, type,
+                                                               name);
 }
 
 void Context::deleteTransformFeedbacks(GLsizei n, const TransformFeedbackID *ids)
@@ -7800,7 +7743,7 @@ void Context::resumeTransformFeedback()
 void Context::getUniformuiv(ShaderProgramID program, UniformLocation location, GLuint *params)
 {
     const Program *programObject = getProgramResolveLink(program);
-    programObject->getUniformuiv(this, location, params);
+    programObject->getExecutable().getUniformuiv(this, location, params);
 }
 
 void Context::getUniformuivRobust(ShaderProgramID program,
@@ -7815,7 +7758,7 @@ void Context::getUniformuivRobust(ShaderProgramID program,
 GLint Context::getFragDataLocation(ShaderProgramID program, const GLchar *name)
 {
     const Program *programObject = getProgramResolveLink(program);
-    return programObject->getFragDataLocation(name);
+    return programObject->getExecutable().getFragDataLocation(name);
 }
 
 void Context::getUniformIndices(ShaderProgramID program,
@@ -7835,7 +7778,8 @@ void Context::getUniformIndices(ShaderProgramID program,
     {
         for (int uniformId = 0; uniformId < uniformCount; uniformId++)
         {
-            uniformIndices[uniformId] = programObject->getUniformIndex(uniformNames[uniformId]);
+            uniformIndices[uniformId] =
+                programObject->getExecutable().getUniformIndex(uniformNames[uniformId]);
         }
     }
 }
@@ -7857,7 +7801,7 @@ void Context::getActiveUniformsiv(ShaderProgramID program,
 GLuint Context::getUniformBlockIndex(ShaderProgramID program, const GLchar *uniformBlockName)
 {
     const Program *programObject = getProgramResolveLink(program);
-    return programObject->getUniformBlockIndex(uniformBlockName);
+    return programObject->getExecutable().getUniformBlockIndex(uniformBlockName);
 }
 
 void Context::getActiveUniformBlockiv(ShaderProgramID program,
@@ -7886,8 +7830,8 @@ void Context::getActiveUniformBlockName(ShaderProgramID program,
                                         GLchar *uniformBlockName)
 {
     const Program *programObject = getProgramResolveLink(program);
-    programObject->getActiveUniformBlockName(this, uniformBlockIndex, bufSize, length,
-                                             uniformBlockName);
+    programObject->getExecutable().getActiveUniformBlockName(this, uniformBlockIndex, bufSize,
+                                                             length, uniformBlockName);
 }
 
 void Context::uniformBlockBinding(ShaderProgramID program,
@@ -8142,7 +8086,7 @@ void Context::programUniform2iv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform2iv(location, count, value);
+    programObject->getExecutable().setUniform2iv(location, count, value);
 }
 
 void Context::programUniform3iv(ShaderProgramID program,
@@ -8152,7 +8096,7 @@ void Context::programUniform3iv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform3iv(location, count, value);
+    programObject->getExecutable().setUniform3iv(location, count, value);
 }
 
 void Context::programUniform4iv(ShaderProgramID program,
@@ -8162,7 +8106,7 @@ void Context::programUniform4iv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform4iv(location, count, value);
+    programObject->getExecutable().setUniform4iv(location, count, value);
 }
 
 void Context::programUniform1uiv(ShaderProgramID program,
@@ -8172,7 +8116,7 @@ void Context::programUniform1uiv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform1uiv(location, count, value);
+    programObject->getExecutable().setUniform1uiv(location, count, value);
 }
 
 void Context::programUniform2uiv(ShaderProgramID program,
@@ -8182,7 +8126,7 @@ void Context::programUniform2uiv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform2uiv(location, count, value);
+    programObject->getExecutable().setUniform2uiv(location, count, value);
 }
 
 void Context::programUniform3uiv(ShaderProgramID program,
@@ -8192,7 +8136,7 @@ void Context::programUniform3uiv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform3uiv(location, count, value);
+    programObject->getExecutable().setUniform3uiv(location, count, value);
 }
 
 void Context::programUniform4uiv(ShaderProgramID program,
@@ -8202,7 +8146,7 @@ void Context::programUniform4uiv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform4uiv(location, count, value);
+    programObject->getExecutable().setUniform4uiv(location, count, value);
 }
 
 void Context::programUniform1fv(ShaderProgramID program,
@@ -8212,7 +8156,7 @@ void Context::programUniform1fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform1fv(location, count, value);
+    programObject->getExecutable().setUniform1fv(location, count, value);
 }
 
 void Context::programUniform2fv(ShaderProgramID program,
@@ -8222,7 +8166,7 @@ void Context::programUniform2fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform2fv(location, count, value);
+    programObject->getExecutable().setUniform2fv(location, count, value);
 }
 
 void Context::programUniform3fv(ShaderProgramID program,
@@ -8232,7 +8176,7 @@ void Context::programUniform3fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform3fv(location, count, value);
+    programObject->getExecutable().setUniform3fv(location, count, value);
 }
 
 void Context::programUniform4fv(ShaderProgramID program,
@@ -8242,7 +8186,7 @@ void Context::programUniform4fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniform4fv(location, count, value);
+    programObject->getExecutable().setUniform4fv(location, count, value);
 }
 
 void Context::programUniformMatrix2fv(ShaderProgramID program,
@@ -8253,7 +8197,7 @@ void Context::programUniformMatrix2fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix2fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix2fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix3fv(ShaderProgramID program,
@@ -8264,7 +8208,7 @@ void Context::programUniformMatrix3fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix3fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix3fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix4fv(ShaderProgramID program,
@@ -8275,7 +8219,7 @@ void Context::programUniformMatrix4fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix4fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix4fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix2x3fv(ShaderProgramID program,
@@ -8286,7 +8230,7 @@ void Context::programUniformMatrix2x3fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix2x3fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix2x3fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix3x2fv(ShaderProgramID program,
@@ -8297,7 +8241,7 @@ void Context::programUniformMatrix3x2fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix3x2fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix3x2fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix2x4fv(ShaderProgramID program,
@@ -8308,7 +8252,7 @@ void Context::programUniformMatrix2x4fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix2x4fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix2x4fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix4x2fv(ShaderProgramID program,
@@ -8319,7 +8263,7 @@ void Context::programUniformMatrix4x2fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix4x2fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix4x2fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix3x4fv(ShaderProgramID program,
@@ -8330,7 +8274,7 @@ void Context::programUniformMatrix3x4fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix3x4fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix3x4fv(location, count, transpose, value);
 }
 
 void Context::programUniformMatrix4x3fv(ShaderProgramID program,
@@ -8341,7 +8285,7 @@ void Context::programUniformMatrix4x3fv(ShaderProgramID program,
 {
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
-    programObject->setUniformMatrix4x3fv(location, count, transpose, value);
+    programObject->getExecutable().setUniformMatrix4x3fv(location, count, transpose, value);
 }
 
 bool Context::isCurrentTransformFeedback(const TransformFeedback *tf) const
@@ -8430,7 +8374,7 @@ void Context::getTranslatedShaderSource(ShaderProgramID shader,
                                         GLsizei *length,
                                         GLchar *source)
 {
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShaderNoResolveCompile(shader);
     ASSERT(shaderObject);
     shaderObject->getTranslatedSourceWithDebugInfo(this, bufsize, length, source);
 }
@@ -8443,7 +8387,7 @@ void Context::getnUniformfv(ShaderProgramID program,
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
 
-    programObject->getUniformfv(this, location, params);
+    programObject->getExecutable().getUniformfv(this, location, params);
 }
 
 void Context::getnUniformfvRobust(ShaderProgramID program,
@@ -8463,7 +8407,7 @@ void Context::getnUniformiv(ShaderProgramID program,
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
 
-    programObject->getUniformiv(this, location, params);
+    programObject->getExecutable().getUniformiv(this, location, params);
 }
 
 void Context::getnUniformuiv(ShaderProgramID program,
@@ -8474,7 +8418,7 @@ void Context::getnUniformuiv(ShaderProgramID program,
     Program *programObject = getProgramResolveLink(program);
     ASSERT(programObject);
 
-    programObject->getUniformuiv(this, location, params);
+    programObject->getExecutable().getUniformuiv(this, location, params);
 }
 
 void Context::getnUniformivRobust(ShaderProgramID program,
@@ -9062,89 +9006,6 @@ void Context::getFramebufferPixelLocalStorageParameterivRobust(GLint plane,
     }
 }
 
-bool Context::isSharedContextMutexActive() const
-{
-    if (!mState.mIsSharedContextMutexActive)
-    {
-        return false;
-    }
-    ASSERT(mState.mSharedContextMutex != nullptr);
-    ASSERT(getContextMutex() == mState.mSharedContextMutex);
-    return true;
-}
-
-bool Context::isContextMutexStateConsistent() const
-{
-    if (!mState.mIsSharedContextMutexActive)
-    {
-        ASSERT(mState.mSingleContextMutex != nullptr);
-        // "SharedContextMutex" may be nullptr. "ContextMutex" may be "SharedContextMutex".
-        return true;
-    }
-    ASSERT(mState.mSharedContextMutex != nullptr);
-    ASSERT(getContextMutex() == mState.mSharedContextMutex);
-
-    if (mState.mSingleContextMutex != nullptr &&
-        mState.mSingleContextMutex->isLocked(std::memory_order_acquire))
-    {
-        ERR() << "SingleContextMutex is locked while SharedContextMutex is active!";
-        return false;
-    }
-
-    return true;
-}
-
-egl::ScopedContextMutexLock Context::lockAndActivateSharedContextMutex()
-{
-    constexpr uint32_t kActivationDelayMicro = 100;
-
-    ASSERT(mState.mSharedContextMutex != nullptr);
-
-    // All state updates must be protected by "SharedContextMutex".
-    egl::ScopedContextMutexLock lock(mState.mSharedContextMutex, this);
-
-    if (!mState.mIsSharedContextMutexActive)
-    {
-        ASSERT(mState.mSingleContextMutex != nullptr);
-
-        // First, start using "SharedContextMutex".
-        mState.mContextMutex.store(mState.mSharedContextMutex);
-
-        // Second, sleep some time so that currently active Context thread start using new mutex.
-        // Logic assumes that there will be no new "SingleContextMutex" locks after this.
-        // In very rare cases when this happens, new Context may start executing commands using the
-        // "SharedContextMutex", while existing Context will continue execute a command (or few) in
-        // parallel, because it is still using the "SingleContextMutex". Commands from new and old
-        // Contexts may access same shared state and cause undefined behaviour. So for a problem to
-        // happened, not only mutex replacement should fail (from the the point of view of existing
-        // Context), but also current and new Contexts must execute commands (right after mutex
-        // replacement) that both access shared state in a way that may cause undefined behaviour.
-        std::this_thread::sleep_for(std::chrono::microseconds(kActivationDelayMicro));
-
-        // Next, wait while "SingleContextMutex" is locked (until unlocked).
-        // In real-world applications this condition will almost always be "false"
-        while (mState.mSingleContextMutex->isLocked(std::memory_order_acquire))
-        {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-
-        // Finally, activate "SharedContextMutex".
-        mState.mIsSharedContextMutexActive = true;
-    }
-
-    ASSERT(getContextMutex() == mState.mSharedContextMutex);
-
-    return lock;
-}
-
-void Context::mergeSharedContextMutexes(egl::ContextMutex *otherMutex)
-{
-    ASSERT(otherMutex != nullptr);
-    ASSERT(isSharedContextMutexActive());
-    egl::ContextMutexManager *mutexManager = mDisplay->getSharedContextMutexManager();
-    mutexManager->merge(mState.mSharedContextMutex, otherMutex);
-}
-
 void Context::eGLImageTargetTexStorage(GLenum target, egl::ImageID image, const GLint *attrib_list)
 {
     Texture *texture        = getTextureByType(FromGLenum<TextureType>(target));
@@ -9291,7 +9152,17 @@ Program *Context::getProgramNoResolveLink(ShaderProgramID handle) const
     return mState.mShaderProgramManager->getProgram(handle);
 }
 
-Shader *Context::getShader(ShaderProgramID handle) const
+Shader *Context::getShaderResolveCompile(ShaderProgramID handle) const
+{
+    Shader *shader = getShaderNoResolveCompile(handle);
+    if (shader)
+    {
+        shader->resolveCompile(this);
+    }
+    return shader;
+}
+
+Shader *Context::getShaderNoResolveCompile(ShaderProgramID handle) const
 {
     return mState.mShaderProgramManager->getShader(handle);
 }
@@ -9372,6 +9243,11 @@ std::shared_ptr<angle::WorkerThreadPool> Context::getShaderCompileThreadPool() c
     return mDisplay->getSingleThreadPool();
 }
 
+std::shared_ptr<angle::WorkerThreadPool> Context::getSingleThreadPool() const
+{
+    return mDisplay->getSingleThreadPool();
+}
+
 std::shared_ptr<angle::WorkerThreadPool> Context::getWorkerThreadPool() const
 {
     return mDisplay->getMultiThreadPool();
@@ -9429,15 +9305,35 @@ void Context::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
             }
             break;
 
-        case kProgramPipelineSubjectIndex:
+        case kProgramSubjectIndex:
             switch (message)
             {
-                case angle::SubjectMessage::SubjectChanged:
-                    ANGLE_CONTEXT_TRY(mState.onProgramPipelineExecutableChange(this));
+                case angle::SubjectMessage::ProgramUnlinked:
                     mStateCache.onProgramExecutableChange(this);
                     break;
                 case angle::SubjectMessage::ProgramRelinked:
-                    ANGLE_CONTEXT_TRY(mState.mProgramPipeline->link(this));
+                {
+                    Program *program = mState.getProgram();
+                    ASSERT(program->isLinked());
+                    ANGLE_CONTEXT_TRY(mState.installProgramExecutable(this));
+                    mStateCache.onProgramExecutableChange(this);
+                    break;
+                }
+                default:
+                    // Ignore all the other notifications
+                    break;
+            }
+            break;
+
+        case kProgramPipelineSubjectIndex:
+            switch (message)
+            {
+                case angle::SubjectMessage::ProgramUnlinked:
+                    mStateCache.onProgramExecutableChange(this);
+                    break;
+                case angle::SubjectMessage::ProgramRelinked:
+                    ANGLE_CONTEXT_TRY(mState.installProgramPipelineExecutable(this));
+                    mStateCache.onProgramExecutableChange(this);
                     break;
                 default:
                     UNREACHABLE();
@@ -9486,29 +9382,6 @@ void Context::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
             }
             break;
     }
-}
-
-angle::Result Context::onProgramLink(Program *programObject)
-{
-    // Don't parallel link a program which is active in any GL contexts. With this assumption, we
-    // don't need to worry that:
-    //   1. Draw calls after link use the new executable code or the old one depending on the link
-    //      result.
-    //   2. When a backend program, e.g., ProgramD3D is linking, other backend classes like
-    //      StateManager11, Renderer11, etc., may have a chance to make unexpected calls to
-    //      ProgramD3D.
-    if (programObject->isInUse())
-    {
-        programObject->resolveLink(this);
-        if (programObject->isLinked())
-        {
-            ANGLE_TRY(mState.onProgramExecutableChange(this, programObject));
-            programObject->onStateChange(angle::SubjectMessage::ProgramRelinked);
-        }
-        mStateCache.onProgramExecutableChange(this);
-    }
-
-    return angle::Result::Continue;
 }
 
 egl::Error Context::setDefaultFramebuffer(egl::Surface *drawSurface, egl::Surface *readSurface)
@@ -9643,6 +9516,25 @@ void Context::onGPUSwitch()
     // Re-initialize the renderer string, which just changed, and
     // which must be visible to applications.
     initRendererString();
+}
+
+egl::Error Context::acquireExternalContext(egl::Surface *drawAndReadSurface)
+{
+    mImplementation->acquireExternalContext(this);
+
+    if (drawAndReadSurface != mCurrentDrawSurface || drawAndReadSurface != mCurrentReadSurface)
+    {
+        ANGLE_TRY(unsetDefaultFramebuffer());
+        ANGLE_TRY(setDefaultFramebuffer(drawAndReadSurface, drawAndReadSurface));
+    }
+
+    return egl::NoError();
+}
+
+egl::Error Context::releaseExternalContext()
+{
+    mImplementation->releaseExternalContext(this);
+    return egl::NoError();
 }
 
 std::mutex &Context::getProgramCacheMutex() const
@@ -9952,6 +9844,17 @@ void ErrorSet::validationErrorF(angle::EntryPoint entryPoint,
     }
 }
 
+std::unique_lock<std::mutex> ErrorSet::getLockIfNotAlready()
+{
+    // Avoid mutex recursion and return the lock only if it is not already locked.  This can happen
+    // if device loss is generated while it is being queried.
+    if (mMutex.try_lock())
+    {
+        return std::unique_lock<std::mutex>(mMutex, std::adopt_lock);
+    }
+    return std::unique_lock<std::mutex>();
+}
+
 void ErrorSet::pushError(GLenum errorCode)
 {
     ASSERT(errorCode != GL_NO_ERROR);
@@ -9979,7 +9882,9 @@ GLenum ErrorSet::popError()
 // NOTE: this function should not assume that this context is current!
 void ErrorSet::markContextLost(GraphicsResetStatus status)
 {
-    std::lock_guard<std::mutex> lock(mMutex);
+    // This function may be called indirectly through ErrorSet::getGraphicsResetStatus() from the
+    // backend, in which case mMutex is already held.
+    std::unique_lock<std::mutex> lock = getLockIfNotAlready();
 
     ASSERT(status != GraphicsResetStatus::NoError);
     if (mResetStrategy == GL_LOSE_CONTEXT_ON_RESET_EXT)
@@ -10473,7 +10378,7 @@ void StateCache::updateActiveShaderStorageBufferIndices(Context *context)
     {
         for (const InterfaceBlock &block : executable->getShaderStorageBlocks())
         {
-            mCachedActiveShaderStorageBufferIndices.set(block.binding);
+            mCachedActiveShaderStorageBufferIndices.set(block.pod.binding);
         }
     }
 }
@@ -10496,9 +10401,16 @@ void StateCache::updateActiveImageUnitIndices(Context *context)
 
 void StateCache::updateCanDraw(Context *context)
 {
+    // Can draw if:
+    //
+    // - Is GLES1: GLES1 always creates programs as needed
+    // - There is an installed executable with a vertex shader
+    // - A program pipeline is to be used: Program pipelines don't have a specific link function, so
+    //   the pipeline might just be waiting to be linked at draw time (in which case there won't
+    //   necessarily be an executable installed yet).
     mCachedCanDraw =
-        (context->isGLES1() || (context->getState().getProgramExecutable() &&
-                                context->getState().getProgramExecutable()->hasVertexShader()));
+        context->isGLES1() || (context->getState().getProgramExecutable() &&
+                               context->getState().getProgramExecutable()->hasVertexShader());
 }
 
 bool StateCache::isCurrentContext(const Context *context,
