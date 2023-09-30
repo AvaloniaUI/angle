@@ -3,12 +3,13 @@
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
-		<PackageVersion>2.2.0.20230930</PackageVersion>
+		<PackageVersion>2.1.22045.20230930</PackageVersion>
     	<Authors>Avalonia Team</Authors>
     	<Copyright>Copyright 2013-$([System.DateTime]::Now.ToString(`yyyy`)) &#169; The AvaloniaUI Project</Copyright>		
 		<PackageProjectUrl>https://avaloniaui.net</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/AvaloniaUI/angle/</RepositoryUrl>
 		<PackageIcon>Icon.png</PackageIcon>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<PackageDescription>Avalonia is a cross-platform UI framework for .NET providing a flexible styling system and supporting a wide range of Operating Systems such as Windows, Linux, macOS and with experimental support for Android, iOS and WebAssembly.</PackageDescription>
 	</PropertyGroup>
 
@@ -29,6 +30,10 @@
 		</Content>
 
     	<None Include="$(MSBuildThisFileDirectory)/Icon.png">
+			<Pack>true</Pack>
+			<PackagePath></PackagePath>
+		</None>
+    	<None Include="$(MSBuildThisFileDirectory)/../LICENSE">
 			<Pack>true</Pack>
 			<PackagePath></PackagePath>
 		</None>
