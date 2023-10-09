@@ -1,14 +1,24 @@
 <Project>
     <PropertyGroup>
         <StaticAvaloniaAngleLinking Condition=" '$(StaticAvaloniaAngleLinking)' == '' ">false</StaticAvaloniaAngleLinking>
-        
-        <_AngleBinariesRuntimePath Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('x64'))">$(MSBuildThisFileDirectory)\runtimes\win-x64\native</_AngleBinariesRuntimePath>
-        <_AngleBinariesRuntimePath Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('x86'))">$(MSBuildThisFileDirectory)\runtimes\win-x86\native</_AngleBinariesRuntimePath>
-        <_AngleBinariesRuntimePath Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('arm64'))">$(MSBuildThisFileDirectory)\runtimes\win-arm64\native</_AngleBinariesRuntimePath>
+
+        <_AngleNormalizedRuntimeIdentifier Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('x64'))">win-x64</_AngleNormalizedRuntimeIdentifier>
+        <_AngleNormalizedRuntimeIdentifier Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('x86'))">win-x86</_AngleNormalizedRuntimeIdentifier>
+        <_AngleNormalizedRuntimeIdentifier Condition="$(RuntimeIdentifier.StartsWith('win')) and $(RuntimeIdentifier.EndsWith('arm64'))">win-arm64</_AngleNormalizedRuntimeIdentifier>
+        <_AngleDynamicLibPathInPackage Condition="'$(_AngleNormalizedRuntimeIdentifier)' != ''">runtimes/$(_AngleNormalizedRuntimeIdentifier)/native/av_libglesv2.dll</_AngleDynamicLibPathInPackage>
+        <_AngleStaticLibPathInPackage Condition="'$(_AngleNormalizedRuntimeIdentifier)' != ''">runtimes/$(_AngleNormalizedRuntimeIdentifier)/static/av_libglesv2.lib</_AngleStaticLibPathInPackage>
+        <_AngleStaticLibPath Condition="'$(_AngleStaticLibPathInPackage)' != ''">$(MSBuildThisFileDirectory)..\$(_AngleStaticLibPathInPackage)</_AngleStaticLibPath>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(StaticAvaloniaAngleLinking)' == 'true' and '$(NativeLib)' != 'Static' and '$(_AngleBinariesRuntimePath)' != ''">
-      <NativeLibrary Include="$(_AngleBinariesRuntimePath)\av_libglesv2.lib" />
-      <DirectPInvoke Include="av_libglesv2" />
+    <ItemGroup Condition="'$(StaticAvaloniaAngleLinking)' == 'true' and '$(NativeLib)' != 'Static' and '$(_AngleStaticLibPath)' != ''">
+        <NativeLibrary Include="$(_AngleStaticLibPath)" />
+        <DirectPInvoke Include="av_libglesv2" />
     </ItemGroup>
+
+    <Target Name="_RemoveAvaloniaAngleFromOutput" BeforeTargets="ComputeLinkedFilesToPublish"
+            Condition="'$(StaticAvaloniaAngleLinking)' == 'true' and '$(NativeLib)' != 'Static' and '$(_AngleStaticLibPath)' != ''">
+        <ItemGroup>
+            <_AssembliesToSkipPublish Include="@(_ResolvedCopyLocalPublishAssets->HasMetadata('PathInPackage')->WithMetadataValue('PathInPackage', '$(_AngleDynamicLibPathInPackage)'))" />
+        </ItemGroup>
+    </Target>
 </Project>

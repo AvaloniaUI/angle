@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
-		<PackageVersion>2.1.22083.20231008</PackageVersion>
+		<PackageVersion>2.1.22087.20231008</PackageVersion>
     	<Authors>Avalonia Team</Authors>
     	<Copyright>Copyright 2013-$([System.DateTime]::Now.ToString(`yyyy`)) &#169; The AvaloniaUI Project</Copyright>		
 		<PackageProjectUrl>https://avaloniaui.net</PackageProjectUrl>
@@ -20,7 +20,7 @@
 		</Content>
 		<Content Include="..\out\x64\av_libglesv2.lib">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\win-x64\native</PackagePath>
+			<PackagePath>runtimes\win-x64\static</PackagePath>
 		</Content>
 
 		<Content Include="..\out\x86\av_libglesv2.dll">
@@ -29,7 +29,7 @@
 		</Content>
 		<Content Include="..\out\x86\av_libglesv2.lib">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\win-x86\native</PackagePath>
+			<PackagePath>runtimes\win-x86\static</PackagePath>
 		</Content>
 
 		<Content Include="..\out\arm64\av_libglesv2.dll">
@@ -38,7 +38,7 @@
 		</Content>
 		<Content Include="..\out\arm64\av_libglesv2.lib">
 			<Pack>true</Pack>
-			<PackagePath>runtimes\win-arm64\native</PackagePath>
+			<PackagePath>runtimes\win-arm64\static</PackagePath>
 		</Content>
 
 		<Content Include="*.props">
