@@ -317,6 +317,12 @@ static angle::Result InitializeCompressedTextureContents(const gl::Context *cont
     gl::Extents extents    = texture->size(index);
     if (texture->isCPUAccessible())
     {
+        if (textureObjFormat.isPVRTC())
+        {
+            // Replace Region Validation: rowBytes must be 0
+            bytesPerRow = 0;
+        }
+
         angle::MemoryBuffer buffer;
         if (!buffer.resize(bytesPerImage))
         {
@@ -1074,6 +1080,10 @@ MTLTextureType GetTextureType(gl::TextureType glType)
     {
         case gl::TextureType::_2D:
             return MTLTextureType2D;
+        case gl::TextureType::_2DArray:
+            return MTLTextureType2DArray;
+        case gl::TextureType::_3D:
+            return MTLTextureType3D;
         case gl::TextureType::CubeMap:
             return MTLTextureTypeCube;
         default:
