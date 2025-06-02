@@ -98,7 +98,7 @@ TLayoutBlockStorage GetBlockStorage(const TType &type)
 
 ShaderVariable ToShaderVariable(const TFieldListCollection *block,
                                 GLenum type,
-                                const TSpan<const unsigned int> arraySizes,
+                                const angle::Span<const unsigned int> arraySizes,
                                 bool isRowMajor)
 {
     ShaderVariable var;
@@ -794,7 +794,7 @@ void SPIRVBuilder::predefineCommonTypes()
     type.type = EbtFloat;
     id        = spirv::IdRef(kIdFloat);
     mTypeMap.insert({type, {id}});
-    spirv::WriteTypeFloat(&mSpirvTypeAndConstantDecls, id, spirv::LiteralInteger(32));
+    spirv::WriteTypeFloat(&mSpirvTypeAndConstantDecls, id, spirv::LiteralInteger(32), nullptr);
 
     // vecN ids equal vec2 id + (vec size - 2)
     static_assert(kIdVec3 == kIdVec2 + 1);
@@ -999,14 +999,24 @@ SpirvTypeData SPIRVBuilder::declareType(const SpirvType &type, const TSymbol *bl
     {
         // Declaring a sampler.  First, declare the non-sampled image and then a combined
         // image-sampler.
+        //
+        // For sampler buffers, combined image-sampler shouldn't be created.  While this is allowed
+        // for SPIR-V before 1.6, it was never intended to be correct.
 
         SpirvType imageType          = type;
         imageType.isSamplerBaseImage = true;
 
         const spirv::IdRef nonSampledId = getSpirvTypeData(imageType, nullptr).id;
 
-        typeId = getNewId({});
-        spirv::WriteTypeSampledImage(&mSpirvTypeAndConstantDecls, typeId, nonSampledId);
+        if (IsSamplerBuffer(type.type))
+        {
+            typeId = nonSampledId;
+        }
+        else
+        {
+            typeId = getNewId({});
+            spirv::WriteTypeSampledImage(&mSpirvTypeAndConstantDecls, typeId, nonSampledId);
+        }
     }
     else if (IsImage(type.type) || IsSubpassInputType(type.type) || type.isSamplerBaseImage)
     {
@@ -1063,10 +1073,6 @@ SpirvTypeData SPIRVBuilder::declareType(const SpirvType &type, const TSymbol *bl
         // Declaring a basic type.  There's a different instruction for each.
         switch (type.type)
         {
-            case EbtDouble:
-                // TODO: support desktop GLSL.  http://anglebug.com/6197
-                UNIMPLEMENTED();
-                break;
             case EbtBool:
                 spirv::WriteTypeBool(&mSpirvTypeAndConstantDecls, typeId);
                 break;
@@ -1151,7 +1157,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
             break;
         case EbtSampler2DMS:
         case EbtImage2DMS:
-        case EbtSubpassInputMS:
             isMultisampled = true;
             break;
         case EbtSampler2DMSArray:
@@ -1180,7 +1185,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
             break;
         case EbtISampler2DMS:
         case EbtIImage2DMS:
-        case EbtISubpassInputMS:
             sampledType    = EbtInt;
             isMultisampled = true;
             break;
@@ -1204,7 +1208,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
             break;
         case EbtUSampler2DMS:
         case EbtUImage2DMS:
-        case EbtUSubpassInputMS:
             sampledType    = EbtUInt;
             isMultisampled = true;
             break;
@@ -1277,52 +1280,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
             isArrayed   = true;
             break;
 
-        // Float 1D images
-        case EbtSampler1D:
-        case EbtImage1D:
-            *dimOut = spv::Dim1D;
-            break;
-        case EbtSampler1DArray:
-        case EbtImage1DArray:
-            *dimOut   = spv::Dim1D;
-            isArrayed = true;
-            break;
-        case EbtSampler1DShadow:
-            *dimOut = spv::Dim1D;
-            isDepth = true;
-            break;
-        case EbtSampler1DArrayShadow:
-            *dimOut   = spv::Dim1D;
-            isDepth   = true;
-            isArrayed = true;
-            break;
-
-        // Integer 1D images
-        case EbtISampler1D:
-        case EbtIImage1D:
-            sampledType = EbtInt;
-            *dimOut     = spv::Dim1D;
-            break;
-        case EbtISampler1DArray:
-        case EbtIImage1DArray:
-            sampledType = EbtInt;
-            *dimOut     = spv::Dim1D;
-            isArrayed   = true;
-            break;
-
-        // Unsigned integer 1D images
-        case EbtUSampler1D:
-        case EbtUImage1D:
-            sampledType = EbtUInt;
-            *dimOut     = spv::Dim1D;
-            break;
-        case EbtUSampler1DArray:
-        case EbtUImage1DArray:
-            sampledType = EbtUInt;
-            *dimOut     = spv::Dim1D;
-            isArrayed   = true;
-            break;
-
         // Rect images
         case EbtSampler2DRect:
         case EbtImageRect:
@@ -1387,7 +1344,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
     //
     //     Dim          Sampled         Storage            Storage Array
     //     --------------------------------------------------------------
-    //     1D           Sampled1D       Image1D
     //     2D           Shader                             ImageMSArray
     //     3D
     //     Cube         Shader                             ImageCubeArray
@@ -1400,9 +1356,6 @@ void SPIRVBuilder::getImageTypeParameters(TBasicType type,
     //
     switch (*dimOut)
     {
-        case spv::Dim1D:
-            addCapability(isSampledImage ? spv::CapabilitySampled1D : spv::CapabilityImage1D);
-            break;
         case spv::Dim2D:
             if (!isSampledImage && isArrayed && isMultisampled)
             {
@@ -1716,6 +1669,17 @@ spirv::IdRef SPIRVBuilder::declareVariable(spirv::IdRef typeId,
         writeDebugName(variableId, name);
     }
 
+    if (!isFunctionLocal)
+    {
+        // With SPIR-V 1.4, every global variable must be specified in OpEntryPoint
+        // With SPIR-V 1.3, only the Input and Output variables must be specified.
+        if (mCompileOptions.emitSPIRV14 || storageClass == spv::StorageClassInput ||
+            storageClass == spv::StorageClassOutput)
+        {
+            addEntryPointInterfaceVariableId(variableId);
+        }
+    }
+
     return variableId;
 }
 
@@ -1969,7 +1933,8 @@ void SPIRVBuilder::writeInterfaceVariableDecorations(const TType &type, spirv::I
     }
 
     // If the resource declaration is an input attachment, add the InputAttachmentIndex decoration.
-    if (needsInputAttachmentIndex)
+    // Depth and stencil input attachments are exempt.
+    if (needsInputAttachmentIndex && layoutQualifier.inputAttachmentIndex >= 0)
     {
         spirv::WriteDecorate(&mSpirvDecorations, variableId, spv::DecorationInputAttachmentIndex,
                              {spirv::LiteralInteger(layoutQualifier.inputAttachmentIndex)});
@@ -2321,7 +2286,9 @@ spirv::Blob SPIRVBuilder::getSpirv()
                    mSpirvFunctions.size());
 
     // Generate the SPIR-V header.
-    spirv::WriteSpirvHeader(&result, mNextAvailableId);
+    spirv::WriteSpirvHeader(&result,
+                            mCompileOptions.emitSPIRV14 ? spirv::kVersion_1_4 : spirv::kVersion_1_3,
+                            mNextAvailableId);
 
     // Generate metadata in the following order:
     //

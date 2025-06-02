@@ -7,9 +7,9 @@
 #ifndef COMPILER_TRANSLATOR_MSL_PIPELINE_H_
 #define COMPILER_TRANSLATOR_MSL_PIPELINE_H_
 
+#include "compiler/translator/Name.h"
 #include "compiler/translator/Symbol.h"
 #include "compiler/translator/msl/ModifyStruct.h"
-#include "compiler/translator/msl/Name.h"
 #include "compiler/translator/msl/SymbolEnv.h"
 
 namespace sh
@@ -24,7 +24,7 @@ struct PipelineScoped
     const T *external = nullptr;
 
     // Extra data that is configured to talk externally to the program.
-    // Used only for adjusting Metal's InstanceId.
+    // Used for framebuffer fetch and for adjusting Metal's InstanceId.
     const T *externalExtra = nullptr;
 
     // Data that is configured to talk internally within the program.

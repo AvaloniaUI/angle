@@ -23,6 +23,7 @@
 namespace rx
 {
 class BufferImpl;
+struct BufferFeedback;
 class GLImplFactory;
 }  // namespace rx
 
@@ -30,6 +31,30 @@ namespace gl
 {
 class Buffer;
 class Context;
+
+enum class WebGLBufferType
+{
+    Undefined,
+    ElementArray,
+    OtherData,
+};
+
+// Track vertex array's binding index of all contexts that a buffer is bound to
+class VertexArrayBufferBindingMaskAndContext final
+{
+  public:
+    VertexArrayBufferBindingMaskAndContext();
+    ~VertexArrayBufferBindingMaskAndContext();
+
+    void add(const gl::Context *context, size_t bindingIndex);
+    void remove(const gl::Context *context, size_t bindingIndex);
+    VertexArrayBufferBindingMask getBufferBindingMask(const gl::Context *context) const;
+
+  private:
+    // The expectation is that one buffer will only used in a very small number of shared contexts,
+    // the cost of searching in a vector is negligible.
+    std::vector<std::pair<const gl::Context *, VertexArrayBufferBindingMask>> mBufferBindingMask;
+};
 
 class BufferState final : angle::NonCopyable
 {
@@ -47,6 +72,7 @@ class BufferState final : angle::NonCopyable
     GLint64 getSize() const { return mSize; }
     bool isBoundForTransformFeedback() const { return mTransformFeedbackIndexedBindingCount != 0; }
     std::string getLabel() const { return mLabel; }
+    WebGLBufferType getWebGLType() const { return mWebGLType; }
 
   private:
     friend class Buffer;
@@ -67,6 +93,7 @@ class BufferState final : angle::NonCopyable
     GLboolean mImmutable;
     GLbitfield mStorageExtUsageFlags;
     GLboolean mExternal;
+    WebGLBufferType mWebGLType;
 };
 
 // Vertex Array and Texture track buffer data updates.
@@ -84,15 +111,16 @@ ANGLE_INLINE bool operator==(const ContentsObserver &lhs, const ContentsObserver
     return lhs.bufferIndex == rhs.bufferIndex && lhs.observer == rhs.observer;
 }
 
-class Buffer final : public RefCountObject<BufferID>,
+class Buffer final : public ThreadSafeRefCountObject<BufferID>,
                      public LabeledObject,
-                     public angle::ObserverInterface,
                      public angle::Subject
 {
   public:
     Buffer(rx::GLImplFactory *factory, BufferID id);
     ~Buffer() override;
     void onDestroy(const Context *context) override;
+
+    void onBind(const Context *context, BufferBinding target);
 
     angle::Result setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
@@ -130,7 +158,7 @@ class Buffer final : public RefCountObject<BufferID>,
     angle::Result unmap(const Context *context, GLboolean *result);
 
     // These are called when another operation changes Buffer data.
-    void onDataChanged();
+    void onDataChanged(const Context *context);
 
     angle::Result getIndexRange(const gl::Context *context,
                                 DrawElementsType type,
@@ -186,8 +214,18 @@ class Buffer final : public RefCountObject<BufferID>,
                              GLsizeiptr size,
                              void *outData);
 
-    // angle::ObserverInterface implementation.
-    void onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message) override;
+    void addVertexArrayBinding(const gl::Context *context, size_t bindingIndex)
+    {
+        mVertexArrayBufferBindingMaskAndContext.add(context, bindingIndex);
+    }
+    void removeVertexArrayBinding(const gl::Context *context, size_t bindingIndex)
+    {
+        mVertexArrayBufferBindingMaskAndContext.remove(context, bindingIndex);
+    }
+    VertexArrayBufferBindingMask getVertexArrayBinding(const gl::Context *context) const
+    {
+        return mVertexArrayBufferBindingMaskAndContext.getBufferBindingMask(context);
+    }
 
     void addContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
     void removeContentsObserver(VertexArray *vertexArray, uint32_t bufferIndex);
@@ -195,26 +233,41 @@ class Buffer final : public RefCountObject<BufferID>,
     void removeContentsObserver(Texture *texture);
     bool hasContentsObserver(Texture *texture) const;
 
+    void applyImplFeedback(const gl::Context *context, const rx::BufferFeedback &feedback);
+
   private:
     angle::Result bufferDataImpl(Context *context,
                                  BufferBinding target,
                                  const void *data,
                                  GLsizeiptr size,
                                  BufferUsage usage,
-                                 GLbitfield flags);
+                                 GLbitfield flags,
+                                 BufferStorage bufferStorage);
     angle::Result bufferExternalDataImpl(Context *context,
                                          BufferBinding target,
                                          GLeglClientBufferEXT clientBuffer,
                                          GLsizeiptr size,
                                          GLbitfield flags);
 
-    void onContentsChange();
+    void onStateChange(const Context *context, angle::SubjectMessage message);
+    void onContentsChange(const Context *context);
     size_t getContentsObserverIndex(void *observer, uint32_t bufferIndex) const;
     void removeContentsObserverImpl(void *observer, uint32_t bufferIndex);
 
+    angle::Result setDataWithUsageFlags(const gl::Context *context,
+                                        gl::BufferBinding target,
+                                        GLeglClientBufferEXT clientBuffer,
+                                        const void *data,
+                                        size_t size,
+                                        gl::BufferUsage usage,
+                                        GLbitfield flags,
+                                        gl::BufferStorage bufferStorage);
+
     BufferState mState;
     rx::BufferImpl *mImpl;
-    angle::ObserverBinding mImplObserver;
+
+    // Current VertexArray's binding index bitmask
+    VertexArrayBufferBindingMaskAndContext mVertexArrayBufferBindingMaskAndContext;
 
     angle::FastVector<ContentsObserver, angle::kMaxFixedObservers> mContentsObservers;
     mutable IndexRangeCache mIndexRangeCache;

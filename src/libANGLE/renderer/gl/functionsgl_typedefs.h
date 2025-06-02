@@ -1745,13 +1745,21 @@ typedef void(INTERNAL_GL_APIENTRY *PFNGLGETINTERNALFORMATSAMPLEIVNVPROC)(GLenum 
                                                                          GLsizei bufSize,
                                                                          GLint *params);
 
-// GL_OVR_multiview2
+// GL_OVR_multiview
 typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC)(GLenum target,
                                                                             GLenum attachment,
                                                                             GLuint texture,
                                                                             GLint level,
                                                                             GLint baseViewIndex,
                                                                             GLsizei numViews);
+typedef void(INTERNAL_GL_APIENTRY *PFNGLNAMEDFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC)(
+    GLuint framebuffer,
+    GLenum attachment,
+    GLuint texture,
+    GLint level,
+    GLint baseViewIndex,
+    GLsizei numViews);
+
 // EXT_debug_marker
 typedef void(INTERNAL_GL_APIENTRY *PFNGLINSERTEVENTMARKEREXTPROC)(GLsizei length,
                                                                   const GLchar *marker);
@@ -1998,6 +2006,32 @@ typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERFETCHBARRIEREXTPROC)();
 
 // GL_MESA_framebuffer_flip_y
 typedef void(INTERNAL_GL_APIENTRY *PFNGLFRAMEBUFFERPARAMETERIMESAPROC)(GLenum, GLenum, GLint);
+
+// GL_QCOM_tiled_rendering
+typedef void(INTERNAL_GL_APIENTRY *PFNGLSTARTTILINGQCOMPROC)(GLuint x,
+                                                             GLuint y,
+                                                             GLuint width,
+                                                             GLuint height,
+                                                             GLbitfield preserveMask);
+typedef void(INTERNAL_GL_APIENTRY *PFNGLENDTILINGQCOMPROC)(GLbitfield preserveMask);
+
+// GL_EXT_clear_texture
+typedef void(INTERNAL_GL_APIENTRY *PFNGLCLEARTEXIMAGEEXTPROC)(GLuint texture,
+                                                              GLint level,
+                                                              GLenum format,
+                                                              GLenum type,
+                                                              const void *data);
+typedef void(INTERNAL_GL_APIENTRY *PFNGLCLEARTEXSUBIMAGEEXTPROC)(GLuint texture,
+                                                                 GLint level,
+                                                                 GLint xoffset,
+                                                                 GLint yoffset,
+                                                                 GLint zoffset,
+                                                                 GLsizei width,
+                                                                 GLsizei height,
+                                                                 GLsizei depth,
+                                                                 GLenum format,
+                                                                 GLenum type,
+                                                                 const void *data);
 
 }  // namespace rx
 

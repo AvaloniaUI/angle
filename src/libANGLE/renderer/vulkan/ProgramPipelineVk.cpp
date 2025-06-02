@@ -34,9 +34,11 @@ angle::Result ProgramPipelineVk::link(const gl::Context *glContext,
                                       const gl::ProgramVaryingPacking &varyingPacking)
 {
     ContextVk *contextVk                      = vk::GetImpl(glContext);
+    vk::Renderer *renderer                    = contextVk->getRenderer();
     const gl::ProgramExecutable &glExecutable = mState.getExecutable();
     ProgramExecutableVk *executableVk         = vk::GetImpl(&glExecutable);
-    SpvSourceOptions options                  = SpvCreateSourceOptions(contextVk->getFeatures());
+    SpvSourceOptions options                  = SpvCreateSourceOptions(contextVk->getFeatures(),
+                                                                       renderer->getMaxColorInputAttachmentCount());
     SpvProgramInterfaceInfo spvProgramInterfaceInfo = {};
 
     reset(contextVk);
@@ -101,26 +103,15 @@ angle::Result ProgramPipelineVk::link(const gl::Context *glContext,
                                                       &contextVk->getDescriptorSetLayoutCache(),
                                                       &contextVk->getMetaDescriptorPools()));
 
-    vk::RenderPass temporaryCompatibleRenderPass;
-    angle::Result result = executableVk->warmUpPipelineCache(
-        contextVk, contextVk->pipelineRobustness(), contextVk->pipelineProtectedAccess(),
-        &temporaryCompatibleRenderPass);
+    angle::Result result = angle::Result::Continue;
 
-    temporaryCompatibleRenderPass.destroy(contextVk->getDevice());
+    if (contextVk->getFeatures().warmUpPipelineCacheAtLink.enabled)
+    {
+        ANGLE_TRY(executableVk->warmUpPipelineCache(renderer, contextVk->pipelineRobustness(),
+                                                    contextVk->pipelineProtectedAccess()));
+    }
+
     return result;
 }  // namespace rx
 
-angle::Result ProgramPipelineVk::syncState(const gl::Context *context,
-                                           const gl::Program::DirtyBits &dirtyBits)
-{
-    ASSERT(dirtyBits.any());
-    // Push dirty bits to executable so that they can be used later.
-    getExecutable()->mDirtyBits |= dirtyBits;
-    return angle::Result::Continue;
-}
-
-void ProgramPipelineVk::onProgramUniformUpdate(gl::ShaderType shaderType)
-{
-    getExecutable()->mDefaultUniformBlocksDirty.set(shaderType);
-}
 }  // namespace rx

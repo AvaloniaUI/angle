@@ -31,7 +31,6 @@ class ProgramD3DMetadata final : angle::NonCopyable
     ProgramD3DMetadata(RendererD3D *renderer,
                        const gl::SharedCompiledShaderState &fragmentShader,
                        const gl::ShaderMap<SharedCompiledShaderStateD3D> &attachedShaders,
-                       EGLenum clientType,
                        int shaderVersion);
     ~ProgramD3DMetadata();
 
@@ -61,12 +60,10 @@ class ProgramD3DMetadata final : angle::NonCopyable
   private:
     const int mRendererMajorShaderModel;
     const std::string mShaderModelSuffix;
-    const bool mUsesInstancedPointSpriteEmulation;
     const bool mUsesViewScale;
     const bool mCanSelectViewInVertexShader;
     gl::SharedCompiledShaderState mFragmentShader;
     const gl::ShaderMap<SharedCompiledShaderStateD3D> &mAttachedShaders;
-    const EGLenum mClientType;
     int mShaderVersion;
 };
 
@@ -80,7 +77,8 @@ class ProgramD3D : public ProgramImpl
 
     angle::Result load(const gl::Context *context,
                        gl::BinaryInputStream *stream,
-                       std::shared_ptr<LinkTask> *loadTaskOut) override;
+                       std::shared_ptr<LinkTask> *loadTaskOut,
+                       egl::CacheGetResult *resultOut) override;
     void save(const gl::Context *context, gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
     void setSeparable(bool separable) override;
@@ -115,7 +113,6 @@ class ProgramD3D : public ProgramImpl
     angle::Result linkJobImpl(d3d::Context *context,
                               const gl::Caps &caps,
                               const gl::Version &clientVersion,
-                              EGLenum clientType,
                               const gl::ProgramLinkedResources &resources,
                               const gl::ProgramMergedVaryings &mergedVaryings);
     const SharedCompiledShaderStateD3D &getAttachedShader(gl::ShaderType shaderType)

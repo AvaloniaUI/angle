@@ -107,28 +107,32 @@ class ProgramGL::LinkTaskGL final : public LinkTask
     {}
     ~LinkTaskGL() override = default;
 
-    std::vector<std::shared_ptr<LinkSubTask>> link(
-        const gl::ProgramLinkedResources &resources,
-        const gl::ProgramMergedVaryings &mergedVaryings) override
+    void link(const gl::ProgramLinkedResources &resources,
+              const gl::ProgramMergedVaryings &mergedVaryings,
+              std::vector<std::shared_ptr<LinkSubTask>> *linkSubTasksOut,
+              std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut) override
     {
-        mProgram->linkJobImpl(mExtensions);
+        ASSERT(linkSubTasksOut && linkSubTasksOut->empty());
+        ASSERT(postLinkSubTasksOut && postLinkSubTasksOut->empty());
+
+        mResult = mProgram->linkJobImpl(mExtensions);
 
         // If there is no native parallel compile, do the post-link right away.
-        if (!mHasNativeParallelCompile)
+        if (mResult == angle::Result::Continue && !mHasNativeParallelCompile)
         {
             mResult = mProgram->postLinkJobImpl(resources);
         }
 
         // See comment on mResources
         mResources = &resources;
-        return {};
+        return;
     }
 
     angle::Result getResult(const gl::Context *context, gl::InfoLog &infoLog) override
     {
         ANGLE_TRACE_EVENT0("gpu.angle", "LinkTaskGL::getResult");
 
-        if (mHasNativeParallelCompile)
+        if (mResult == angle::Result::Continue && mHasNativeParallelCompile)
         {
             mResult = mProgram->postLinkJobImpl(*mResources);
         }
@@ -188,7 +192,8 @@ void ProgramGL::destroy(const gl::Context *context)
 
 angle::Result ProgramGL::load(const gl::Context *context,
                               gl::BinaryInputStream *stream,
-                              std::shared_ptr<LinkTask> *loadTaskOut)
+                              std::shared_ptr<LinkTask> *loadTaskOut,
+                              egl::CacheGetResult *resultOut)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "ProgramGL::load");
     ProgramExecutableGL *executableGL = getExecutable();
@@ -202,16 +207,19 @@ angle::Result ProgramGL::load(const gl::Context *context,
     // Load the binary
     mFunctions->programBinary(mProgramID, binaryFormat, binary, binaryLength);
 
-    // Verify that the program linked
-    if (!checkLinkStatus())
+    // Verify that the program linked.  Ensure failure if program binary is intentionally corrupted,
+    // even if the corruption didn't really cause a failure.
+    if (!checkLinkStatus() ||
+        GetImplAs<ContextGL>(context)->getFeaturesGL().corruptProgramBinaryForTesting.enabled)
     {
-        return angle::Result::Incomplete;
+        return angle::Result::Continue;
     }
 
     executableGL->postLink(mFunctions, mStateManager, mFeatures, mProgramID);
-    reapplyUBOBindingsIfNeeded(context);
+    executableGL->reapplyUBOBindings();
 
     *loadTaskOut = {};
+    *resultOut   = egl::CacheGetResult::Success;
 
     return angle::Result::Continue;
 }
@@ -228,22 +236,21 @@ void ProgramGL::save(const gl::Context *context, gl::BinaryOutputStream *stream)
 
     stream->writeInt(binaryFormat);
     stream->writeInt(binaryLength);
+
+    const angle::FeaturesGL &features = GetImplAs<ContextGL>(context)->getFeaturesGL();
+    if (features.corruptProgramBinaryForTesting.enabled)
+    {
+        // Random corruption of the binary data.  Corrupting the first byte has proven to be enough
+        // to later cause the binary load to fail on most platforms.
+        ++binary[0];
+    }
+
     stream->writeBytes(binary.data(), binaryLength);
 
-    reapplyUBOBindingsIfNeeded(context);
-}
-
-void ProgramGL::reapplyUBOBindingsIfNeeded(const gl::Context *context)
-{
     // Re-apply UBO bindings to work around driver bugs.
-    const angle::FeaturesGL &features = GetImplAs<ContextGL>(context)->getFeaturesGL();
     if (features.reapplyUBOBindingsAfterUsingBinaryProgram.enabled)
     {
-        const auto &blocks = mState.getExecutable().getUniformBlocks();
-        for (size_t blockIndex : mState.getExecutable().getActiveUniformBlockBindings())
-        {
-            setUniformBlockBinding(static_cast<GLuint>(blockIndex), blocks[blockIndex].pod.binding);
-        }
+        getExecutable()->reapplyUBOBindings();
     }
 }
 
@@ -286,7 +293,7 @@ angle::Result ProgramGL::link(const gl::Context *context, std::shared_ptr<LinkTa
     return angle::Result::Continue;
 }
 
-void ProgramGL::linkJobImpl(const gl::Extensions &extensions)
+angle::Result ProgramGL::linkJobImpl(const gl::Extensions &extensions)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "ProgramGL::linkJobImpl");
     const gl::ProgramExecutable &executable = mState.getExecutable();
@@ -367,13 +374,15 @@ void ProgramGL::linkJobImpl(const gl::Extensions &extensions)
             if (fragmentShader && fragmentShader->shaderVersion == 100 &&
                 mFunctions->standard == STANDARD_GL_DESKTOP)
             {
+                ASSERT(!mFeatures.avoidBindFragDataLocation.enabled);
+
                 const auto &shaderOutputs = fragmentShader->activeOutputVariables;
                 for (const auto &output : shaderOutputs)
                 {
-                    // TODO(http://anglebug.com/1085) This could be cleaner if the transformed names
-                    // would be set correctly in ShaderVariable::mappedName. This would require some
-                    // refactoring in the translator. Adding a mapped name dictionary for builtins
-                    // into the symbol table would be one fairly clean way to do it.
+                    // TODO(http://anglebug.com/40644593) This could be cleaner if the transformed
+                    // names would be set correctly in ShaderVariable::mappedName. This would
+                    // require some refactoring in the translator. Adding a mapped name dictionary
+                    // for builtins into the symbol table would be one fairly clean way to do it.
                     if (output.name == "gl_SecondaryFragColorEXT")
                     {
                         mFunctions->bindFragDataLocationIndexed(mProgramID, 0, 0,
@@ -411,59 +420,64 @@ void ProgramGL::linkJobImpl(const gl::Extensions &extensions)
             else if (fragmentShader && fragmentShader->shaderVersion >= 300)
             {
                 // ESSL 3.00 and up.
-                const auto &outputLocations          = executable.getOutputLocations();
-                const auto &secondaryOutputLocations = executable.getSecondaryOutputLocations();
-                for (size_t outputLocationIndex = 0u; outputLocationIndex < outputLocations.size();
-                     ++outputLocationIndex)
-                {
-                    const gl::VariableLocation &outputLocation =
-                        outputLocations[outputLocationIndex];
-                    if (outputLocation.arrayIndex == 0 && outputLocation.used() &&
-                        !outputLocation.ignored)
-                    {
-                        const gl::ProgramOutput &outputVar =
-                            executable.getOutputVariables()[outputLocation.index];
-                        if (outputVar.pod.location == -1 || outputVar.pod.index == -1)
+                auto assignOutputLocations =
+                    [this](const std::vector<gl::VariableLocation> &locations) {
+                        const gl::ProgramExecutable &executable = mState.getExecutable();
+                        for (size_t outputLocationIndex = 0u;
+                             outputLocationIndex < locations.size(); ++outputLocationIndex)
                         {
-                            // We only need to assign the location and index via the API in case the
-                            // variable doesn't have a shader-assigned location and index. If a
-                            // variable doesn't have its location set in the shader it doesn't have
-                            // the index set either.
-                            ASSERT(outputVar.pod.index == -1);
+                            const gl::VariableLocation &outputLocation =
+                                locations[outputLocationIndex];
+                            if (outputLocation.arrayIndex != 0 || !outputLocation.used() ||
+                                outputLocation.ignored)
+                            {
+                                continue;
+                            }
+
+                            const gl::ProgramOutput &outputVar =
+                                executable.getOutputVariables()[outputLocation.index];
+                            if (outputVar.pod.hasShaderAssignedLocation)
+                            {
+                                continue;
+                            }
+
+                            // We only need to assign the location and index via the API if the
+                            // variable doesn't have a shader-assigned location.
+                            ASSERT(outputVar.pod.index != -1);
+
+                            // Avoid calling glBindFragDataLocationIndexed unless the application
+                            // did it explicitly to avoid Qualcomm driver bugs with multiple render
+                            // targets.
+                            if (mFeatures.avoidBindFragDataLocation.enabled &&
+                                !outputVar.pod.hasApiAssignedLocation)
+                            {
+                                continue;
+                            }
+
                             mFunctions->bindFragDataLocationIndexed(
-                                mProgramID, static_cast<int>(outputLocationIndex), 0,
-                                outputVar.mappedName.c_str());
+                                mProgramID, static_cast<int>(outputLocationIndex),
+                                outputVar.pod.index, outputVar.mappedName.c_str());
                         }
-                    }
-                }
-                for (size_t outputLocationIndex = 0u;
-                     outputLocationIndex < secondaryOutputLocations.size(); ++outputLocationIndex)
+                    };
+
+                ANGLE_GL_CLEAR_ERRORS(mFunctions);
+
+                assignOutputLocations(executable.getOutputLocations());
+                assignOutputLocations(executable.getSecondaryOutputLocations());
+
+                GLenum error = mFunctions->getError();
+                if (error != GL_NO_ERROR)
                 {
-                    const gl::VariableLocation &outputLocation =
-                        secondaryOutputLocations[outputLocationIndex];
-                    if (outputLocation.arrayIndex == 0 && outputLocation.used() &&
-                        !outputLocation.ignored)
-                    {
-                        const gl::ProgramOutput &outputVar =
-                            executable.getOutputVariables()[outputLocation.index];
-                        if (outputVar.pod.location == -1 || outputVar.pod.index == -1)
-                        {
-                            // We only need to assign the location and index via the API in case the
-                            // variable doesn't have a shader-assigned location and index.  If a
-                            // variable doesn't have its location set in the shader it doesn't have
-                            // the index set either.
-                            ASSERT(outputVar.pod.index == -1);
-                            mFunctions->bindFragDataLocationIndexed(
-                                mProgramID, static_cast<int>(outputLocationIndex), 1,
-                                outputVar.mappedName.c_str());
-                        }
-                    }
+                    executable.getInfoLog()
+                        << "Failed to bind frag data locations. See http://anglebug.com/42267082";
+                    return angle::Result::Stop;
                 }
             }
         }
     }
 
     mFunctions->linkProgram(mProgramID);
+    return angle::Result::Continue;
 }
 
 angle::Result ProgramGL::postLinkJobImpl(const gl::ProgramLinkedResources &resources)
@@ -506,31 +520,6 @@ GLboolean ProgramGL::validate(const gl::Caps & /*caps*/)
 {
     // TODO(jmadill): implement validate
     return true;
-}
-
-void ProgramGL::setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding)
-{
-    const gl::ProgramExecutable &executable = mState.getExecutable();
-    ProgramExecutableGL *executableGL       = getExecutable();
-
-    // Lazy init
-    if (executableGL->mUniformBlockRealLocationMap.empty())
-    {
-        executableGL->mUniformBlockRealLocationMap.reserve(executable.getUniformBlocks().size());
-        for (const gl::InterfaceBlock &uniformBlock : executable.getUniformBlocks())
-        {
-            const std::string &mappedNameWithIndex = uniformBlock.mappedNameWithArrayIndex();
-            GLuint blockIndex =
-                mFunctions->getUniformBlockIndex(mProgramID, mappedNameWithIndex.c_str());
-            executableGL->mUniformBlockRealLocationMap.push_back(blockIndex);
-        }
-    }
-
-    GLuint realBlockIndex = executableGL->mUniformBlockRealLocationMap[uniformBlockIndex];
-    if (realBlockIndex != GL_INVALID_INDEX)
-    {
-        mFunctions->uniformBlockBinding(mProgramID, realBlockIndex, uniformBlockBinding);
-    }
 }
 
 bool ProgramGL::getUniformBlockSize(const std::string & /* blockName */,
@@ -777,19 +766,17 @@ void ProgramGL::linkResources(const gl::ProgramLinkedResources &resources)
     std::map<int, unsigned int> sizeMap;
     getAtomicCounterBufferSizeMap(&sizeMap);
     resources.atomicCounterBufferLinker.link(sizeMap);
+
+    const gl::SharedCompiledShaderState &fragmentShader =
+        mState.getAttachedShader(gl::ShaderType::Fragment);
+    if (fragmentShader != nullptr)
+    {
+        resources.pixelLocalStorageLinker.link(fragmentShader->pixelLocalStorageFormats);
+    }
 }
 
-angle::Result ProgramGL::syncState(const gl::Context *context,
-                                   const gl::Program::DirtyBits &dirtyBits)
+void ProgramGL::onUniformBlockBinding(gl::UniformBlockIndex uniformBlockIndex)
 {
-    const gl::ProgramExecutable &executable = mState.getExecutable();
-
-    for (size_t dirtyBit : dirtyBits)
-    {
-        ASSERT(dirtyBit <= gl::Program::DIRTY_BIT_UNIFORM_BLOCK_BINDING_MAX);
-        GLuint binding = static_cast<GLuint>(dirtyBit);
-        setUniformBlockBinding(binding, executable.getUniformBlockBinding(binding));
-    }
-    return angle::Result::Continue;
+    getExecutable()->mDirtyUniformBlockBindings.set(uniformBlockIndex.value);
 }
 }  // namespace rx

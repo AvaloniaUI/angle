@@ -891,6 +891,11 @@ void DispatchTableGL::initProcsDesktopGL(const gl::Version &version,
         ASSIGN("glBlendFuncSeparateEXT", blendFuncSeparate);
     }
 
+    if (extensions.count("GL_EXT_blend_minmax") != 0)
+    {
+        ASSIGN("glBlendEquationEXT", blendEquation);
+    }
+
     if (extensions.count("GL_EXT_copy_texture") != 0)
     {
         ASSIGN("glCopyTexImage1DEXT", copyTexImage1D);
@@ -946,21 +951,54 @@ void DispatchTableGL::initProcsDesktopGL(const gl::Version &version,
         ASSIGN("glNamedRenderbufferStorageMultisampleEXT", namedRenderbufferStorageMultisample);
         ASSIGN("glProgramUniform1dEXT", programUniform1d);
         ASSIGN("glProgramUniform1dvEXT", programUniform1dv);
+        ASSIGN("glProgramUniform1fEXT", programUniform1f);
+        ASSIGN("glProgramUniform1fvEXT", programUniform1fv);
+        ASSIGN("glProgramUniform1iEXT", programUniform1i);
+        ASSIGN("glProgramUniform1ivEXT", programUniform1iv);
+        ASSIGN("glProgramUniform1uiEXT", programUniform1ui);
+        ASSIGN("glProgramUniform1uivEXT", programUniform1uiv);
         ASSIGN("glProgramUniform2dEXT", programUniform2d);
         ASSIGN("glProgramUniform2dvEXT", programUniform2dv);
+        ASSIGN("glProgramUniform2fEXT", programUniform2f);
+        ASSIGN("glProgramUniform2fvEXT", programUniform2fv);
+        ASSIGN("glProgramUniform2iEXT", programUniform2i);
+        ASSIGN("glProgramUniform2ivEXT", programUniform2iv);
+        ASSIGN("glProgramUniform2uiEXT", programUniform2ui);
+        ASSIGN("glProgramUniform2uivEXT", programUniform2uiv);
         ASSIGN("glProgramUniform3dEXT", programUniform3d);
         ASSIGN("glProgramUniform3dvEXT", programUniform3dv);
+        ASSIGN("glProgramUniform3fEXT", programUniform3f);
+        ASSIGN("glProgramUniform3fvEXT", programUniform3fv);
+        ASSIGN("glProgramUniform3iEXT", programUniform3i);
+        ASSIGN("glProgramUniform3ivEXT", programUniform3iv);
+        ASSIGN("glProgramUniform3uiEXT", programUniform3ui);
+        ASSIGN("glProgramUniform3uivEXT", programUniform3uiv);
         ASSIGN("glProgramUniform4dEXT", programUniform4d);
         ASSIGN("glProgramUniform4dvEXT", programUniform4dv);
+        ASSIGN("glProgramUniform4fEXT", programUniform4f);
+        ASSIGN("glProgramUniform4fvEXT", programUniform4fv);
+        ASSIGN("glProgramUniform4iEXT", programUniform4i);
+        ASSIGN("glProgramUniform4ivEXT", programUniform4iv);
+        ASSIGN("glProgramUniform4uiEXT", programUniform4ui);
+        ASSIGN("glProgramUniform4uivEXT", programUniform4uiv);
         ASSIGN("glProgramUniformMatrix2dvEXT", programUniformMatrix2dv);
+        ASSIGN("glProgramUniformMatrix2fvEXT", programUniformMatrix2fv);
         ASSIGN("glProgramUniformMatrix2x3dvEXT", programUniformMatrix2x3dv);
+        ASSIGN("glProgramUniformMatrix2x3fvEXT", programUniformMatrix2x3fv);
         ASSIGN("glProgramUniformMatrix2x4dvEXT", programUniformMatrix2x4dv);
+        ASSIGN("glProgramUniformMatrix2x4fvEXT", programUniformMatrix2x4fv);
         ASSIGN("glProgramUniformMatrix3dvEXT", programUniformMatrix3dv);
+        ASSIGN("glProgramUniformMatrix3fvEXT", programUniformMatrix3fv);
         ASSIGN("glProgramUniformMatrix3x2dvEXT", programUniformMatrix3x2dv);
+        ASSIGN("glProgramUniformMatrix3x2fvEXT", programUniformMatrix3x2fv);
         ASSIGN("glProgramUniformMatrix3x4dvEXT", programUniformMatrix3x4dv);
+        ASSIGN("glProgramUniformMatrix3x4fvEXT", programUniformMatrix3x4fv);
         ASSIGN("glProgramUniformMatrix4dvEXT", programUniformMatrix4dv);
+        ASSIGN("glProgramUniformMatrix4fvEXT", programUniformMatrix4fv);
         ASSIGN("glProgramUniformMatrix4x2dvEXT", programUniformMatrix4x2dv);
+        ASSIGN("glProgramUniformMatrix4x2fvEXT", programUniformMatrix4x2fv);
         ASSIGN("glProgramUniformMatrix4x3dvEXT", programUniformMatrix4x3dv);
+        ASSIGN("glProgramUniformMatrix4x3fvEXT", programUniformMatrix4x3fv);
         ASSIGN("glTextureBufferEXT", textureBuffer);
         ASSIGN("glTextureBufferRangeEXT", textureBufferRange);
         ASSIGN("glTextureParameterIivEXT", textureParameterIiv);
@@ -1013,6 +1051,11 @@ void DispatchTableGL::initProcsDesktopGL(const gl::Version &version,
         ASSIGN("glIsFramebufferEXT", isFramebuffer);
         ASSIGN("glIsRenderbufferEXT", isRenderbuffer);
         ASSIGN("glRenderbufferStorageEXT", renderbufferStorage);
+    }
+
+    if (extensions.count("GL_EXT_geometry_shader4") != 0)
+    {
+        ASSIGN("glProgramParameteriEXT", programParameteri);
     }
 
     if (extensions.count("GL_EXT_gpu_shader4") != 0)
@@ -2092,6 +2135,54 @@ void DispatchTableGL::initProcsGLES(const gl::Version &version,
         ASSIGN("glReadnPixelsEXT", readnPixels);
     }
 
+    if (extensions.count("GL_EXT_separate_shader_objects") != 0)
+    {
+        ASSIGN("glActiveShaderProgramEXT", activeShaderProgram);
+        ASSIGN("glBindProgramPipelineEXT", bindProgramPipeline);
+        ASSIGN("glCreateShaderProgramvEXT", createShaderProgramv);
+        ASSIGN("glDeleteProgramPipelinesEXT", deleteProgramPipelines);
+        ASSIGN("glGenProgramPipelinesEXT", genProgramPipelines);
+        ASSIGN("glGetProgramPipelineInfoLogEXT", getProgramPipelineInfoLog);
+        ASSIGN("glGetProgramPipelineivEXT", getProgramPipelineiv);
+        ASSIGN("glIsProgramPipelineEXT", isProgramPipeline);
+        ASSIGN("glProgramParameteriEXT", programParameteri);
+        ASSIGN("glProgramUniform1fEXT", programUniform1f);
+        ASSIGN("glProgramUniform1fvEXT", programUniform1fv);
+        ASSIGN("glProgramUniform1iEXT", programUniform1i);
+        ASSIGN("glProgramUniform1ivEXT", programUniform1iv);
+        ASSIGN("glProgramUniform1uiEXT", programUniform1ui);
+        ASSIGN("glProgramUniform1uivEXT", programUniform1uiv);
+        ASSIGN("glProgramUniform2fEXT", programUniform2f);
+        ASSIGN("glProgramUniform2fvEXT", programUniform2fv);
+        ASSIGN("glProgramUniform2iEXT", programUniform2i);
+        ASSIGN("glProgramUniform2ivEXT", programUniform2iv);
+        ASSIGN("glProgramUniform2uiEXT", programUniform2ui);
+        ASSIGN("glProgramUniform2uivEXT", programUniform2uiv);
+        ASSIGN("glProgramUniform3fEXT", programUniform3f);
+        ASSIGN("glProgramUniform3fvEXT", programUniform3fv);
+        ASSIGN("glProgramUniform3iEXT", programUniform3i);
+        ASSIGN("glProgramUniform3ivEXT", programUniform3iv);
+        ASSIGN("glProgramUniform3uiEXT", programUniform3ui);
+        ASSIGN("glProgramUniform3uivEXT", programUniform3uiv);
+        ASSIGN("glProgramUniform4fEXT", programUniform4f);
+        ASSIGN("glProgramUniform4fvEXT", programUniform4fv);
+        ASSIGN("glProgramUniform4iEXT", programUniform4i);
+        ASSIGN("glProgramUniform4ivEXT", programUniform4iv);
+        ASSIGN("glProgramUniform4uiEXT", programUniform4ui);
+        ASSIGN("glProgramUniform4uivEXT", programUniform4uiv);
+        ASSIGN("glProgramUniformMatrix2fvEXT", programUniformMatrix2fv);
+        ASSIGN("glProgramUniformMatrix2x3fvEXT", programUniformMatrix2x3fv);
+        ASSIGN("glProgramUniformMatrix2x4fvEXT", programUniformMatrix2x4fv);
+        ASSIGN("glProgramUniformMatrix3fvEXT", programUniformMatrix3fv);
+        ASSIGN("glProgramUniformMatrix3x2fvEXT", programUniformMatrix3x2fv);
+        ASSIGN("glProgramUniformMatrix3x4fvEXT", programUniformMatrix3x4fv);
+        ASSIGN("glProgramUniformMatrix4fvEXT", programUniformMatrix4fv);
+        ASSIGN("glProgramUniformMatrix4x2fvEXT", programUniformMatrix4x2fv);
+        ASSIGN("glProgramUniformMatrix4x3fvEXT", programUniformMatrix4x3fv);
+        ASSIGN("glUseProgramStagesEXT", useProgramStages);
+        ASSIGN("glValidateProgramPipelineEXT", validateProgramPipeline);
+    }
+
     if (extensions.count("GL_EXT_tessellation_shader") != 0)
     {
         ASSIGN("glPatchParameteriEXT", patchParameteri);
@@ -2152,6 +2243,20 @@ void DispatchTableGL::initProcsGLES(const gl::Version &version,
         ASSIGN("glReadnPixelsKHR", readnPixels);
     }
 
+    if (extensions.count("GL_MESA_sampler_objects") != 0)
+    {
+        ASSIGN("glBindSampler", bindSampler);
+        ASSIGN("glDeleteSamplers", deleteSamplers);
+        ASSIGN("glGenSamplers", genSamplers);
+        ASSIGN("glGetSamplerParameterfv", getSamplerParameterfv);
+        ASSIGN("glGetSamplerParameteriv", getSamplerParameteriv);
+        ASSIGN("glIsSampler", isSampler);
+        ASSIGN("glSamplerParameterf", samplerParameterf);
+        ASSIGN("glSamplerParameterfv", samplerParameterfv);
+        ASSIGN("glSamplerParameteri", samplerParameteri);
+        ASSIGN("glSamplerParameteriv", samplerParameteriv);
+    }
+
     if (extensions.count("GL_NV_framebuffer_blit") != 0)
     {
         ASSIGN("glBlitFramebufferNV", blitFramebufferNV);
@@ -2165,6 +2270,11 @@ void DispatchTableGL::initProcsGLES(const gl::Version &version,
     if (extensions.count("GL_OES_EGL_image") != 0)
     {
         ASSIGN("glEGLImageTargetRenderbufferStorageOES", eGLImageTargetRenderbufferStorageOES);
+        ASSIGN("glEGLImageTargetTexture2DOES", eGLImageTargetTexture2DOES);
+    }
+
+    if (extensions.count("GL_OES_EGL_image_external") != 0)
+    {
         ASSIGN("glEGLImageTargetTexture2DOES", eGLImageTargetTexture2DOES);
     }
 
@@ -2286,6 +2396,12 @@ void DispatchTableGL::initProcsGLES(const gl::Version &version,
         ASSIGN("glViewportArrayvOES", viewportArrayv);
         ASSIGN("glViewportIndexedfOES", viewportIndexedf);
         ASSIGN("glViewportIndexedfvOES", viewportIndexedfv);
+    }
+
+    if (extensions.count("GL_QCOM_tiled_rendering") != 0)
+    {
+        ASSIGN("glEndTilingQCOM", endTilingQCOM);
+        ASSIGN("glStartTilingQCOM", startTilingQCOM);
     }
 
     if (version >= gl::Version(2, 0))
@@ -2665,11 +2781,6 @@ void DispatchTableGL::initProcsGLES(const gl::Version &version,
 
 void DispatchTableGL::initProcsSharedExtensions(const std::set<std::string> &extensions)
 {
-    if (extensions.count("GL_EXT_blend_minmax") != 0)
-    {
-        ASSIGN("glBlendEquationEXT", blendEquation);
-    }
-
     if (extensions.count("GL_EXT_debug_label") != 0)
     {
         ASSIGN("glGetObjectLabelEXT", getObjectLabel);
@@ -2755,54 +2866,6 @@ void DispatchTableGL::initProcsSharedExtensions(const std::set<std::string> &ext
         ASSIGN("glImportSemaphoreWin32NameEXT", importSemaphoreWin32NameEXT);
     }
 
-    if (extensions.count("GL_EXT_separate_shader_objects") != 0)
-    {
-        ASSIGN("glActiveShaderProgramEXT", activeShaderProgram);
-        ASSIGN("glBindProgramPipelineEXT", bindProgramPipeline);
-        ASSIGN("glCreateShaderProgramvEXT", createShaderProgramv);
-        ASSIGN("glDeleteProgramPipelinesEXT", deleteProgramPipelines);
-        ASSIGN("glGenProgramPipelinesEXT", genProgramPipelines);
-        ASSIGN("glGetProgramPipelineInfoLogEXT", getProgramPipelineInfoLog);
-        ASSIGN("glGetProgramPipelineivEXT", getProgramPipelineiv);
-        ASSIGN("glIsProgramPipelineEXT", isProgramPipeline);
-        ASSIGN("glProgramParameteriEXT", programParameteri);
-        ASSIGN("glProgramUniform1fEXT", programUniform1f);
-        ASSIGN("glProgramUniform1fvEXT", programUniform1fv);
-        ASSIGN("glProgramUniform1iEXT", programUniform1i);
-        ASSIGN("glProgramUniform1ivEXT", programUniform1iv);
-        ASSIGN("glProgramUniform1uiEXT", programUniform1ui);
-        ASSIGN("glProgramUniform1uivEXT", programUniform1uiv);
-        ASSIGN("glProgramUniform2fEXT", programUniform2f);
-        ASSIGN("glProgramUniform2fvEXT", programUniform2fv);
-        ASSIGN("glProgramUniform2iEXT", programUniform2i);
-        ASSIGN("glProgramUniform2ivEXT", programUniform2iv);
-        ASSIGN("glProgramUniform2uiEXT", programUniform2ui);
-        ASSIGN("glProgramUniform2uivEXT", programUniform2uiv);
-        ASSIGN("glProgramUniform3fEXT", programUniform3f);
-        ASSIGN("glProgramUniform3fvEXT", programUniform3fv);
-        ASSIGN("glProgramUniform3iEXT", programUniform3i);
-        ASSIGN("glProgramUniform3ivEXT", programUniform3iv);
-        ASSIGN("glProgramUniform3uiEXT", programUniform3ui);
-        ASSIGN("glProgramUniform3uivEXT", programUniform3uiv);
-        ASSIGN("glProgramUniform4fEXT", programUniform4f);
-        ASSIGN("glProgramUniform4fvEXT", programUniform4fv);
-        ASSIGN("glProgramUniform4iEXT", programUniform4i);
-        ASSIGN("glProgramUniform4ivEXT", programUniform4iv);
-        ASSIGN("glProgramUniform4uiEXT", programUniform4ui);
-        ASSIGN("glProgramUniform4uivEXT", programUniform4uiv);
-        ASSIGN("glProgramUniformMatrix2fvEXT", programUniformMatrix2fv);
-        ASSIGN("glProgramUniformMatrix2x3fvEXT", programUniformMatrix2x3fv);
-        ASSIGN("glProgramUniformMatrix2x4fvEXT", programUniformMatrix2x4fv);
-        ASSIGN("glProgramUniformMatrix3fvEXT", programUniformMatrix3fv);
-        ASSIGN("glProgramUniformMatrix3x2fvEXT", programUniformMatrix3x2fv);
-        ASSIGN("glProgramUniformMatrix3x4fvEXT", programUniformMatrix3x4fv);
-        ASSIGN("glProgramUniformMatrix4fvEXT", programUniformMatrix4fv);
-        ASSIGN("glProgramUniformMatrix4x2fvEXT", programUniformMatrix4x2fv);
-        ASSIGN("glProgramUniformMatrix4x3fvEXT", programUniformMatrix4x3fv);
-        ASSIGN("glUseProgramStagesEXT", useProgramStages);
-        ASSIGN("glValidateProgramPipelineEXT", validateProgramPipeline);
-    }
-
     if (extensions.count("GL_EXT_shader_framebuffer_fetch_non_coherent") != 0)
     {
         ASSIGN("glFramebufferFetchBarrierEXT", framebufferFetchBarrierEXT);
@@ -2816,6 +2879,11 @@ void DispatchTableGL::initProcsSharedExtensions(const std::set<std::string> &ext
         ASSIGN("glTextureStorage1DEXT", textureStorage1D);
         ASSIGN("glTextureStorage2DEXT", textureStorage2D);
         ASSIGN("glTextureStorage3DEXT", textureStorage3D);
+    }
+
+    if (extensions.count("GL_KHR_blend_equation_advanced") != 0)
+    {
+        ASSIGN("glBlendBarrierKHR", blendBarrier);
     }
 
     if (extensions.count("GL_KHR_parallel_shader_compile") != 0)
@@ -2852,6 +2920,7 @@ void DispatchTableGL::initProcsSharedExtensions(const std::set<std::string> &ext
     if (extensions.count("GL_OVR_multiview") != 0)
     {
         ASSIGN("glFramebufferTextureMultiviewOVR", framebufferTextureMultiviewOVR);
+        ASSIGN("glNamedFramebufferTextureMultiviewOVR", namedFramebufferTextureMultiviewOVR);
     }
 }
 
@@ -3719,6 +3788,11 @@ void DispatchTableGL::initProcsDesktopGLNULL(const gl::Version &version,
         blendFuncSeparate = &glBlendFuncSeparateNULL;
     }
 
+    if (extensions.count("GL_EXT_blend_minmax") != 0)
+    {
+        blendEquation = &glBlendEquationNULL;
+    }
+
     if (extensions.count("GL_EXT_copy_texture") != 0)
     {
         copyTexImage1D    = &glCopyTexImage1DNULL;
@@ -3773,21 +3847,54 @@ void DispatchTableGL::initProcsDesktopGLNULL(const gl::Version &version,
         namedRenderbufferStorageMultisample      = &glNamedRenderbufferStorageMultisampleNULL;
         programUniform1d                         = &glProgramUniform1dNULL;
         programUniform1dv                        = &glProgramUniform1dvNULL;
+        programUniform1f                         = &glProgramUniform1fNULL;
+        programUniform1fv                        = &glProgramUniform1fvNULL;
+        programUniform1i                         = &glProgramUniform1iNULL;
+        programUniform1iv                        = &glProgramUniform1ivNULL;
+        programUniform1ui                        = &glProgramUniform1uiNULL;
+        programUniform1uiv                       = &glProgramUniform1uivNULL;
         programUniform2d                         = &glProgramUniform2dNULL;
         programUniform2dv                        = &glProgramUniform2dvNULL;
+        programUniform2f                         = &glProgramUniform2fNULL;
+        programUniform2fv                        = &glProgramUniform2fvNULL;
+        programUniform2i                         = &glProgramUniform2iNULL;
+        programUniform2iv                        = &glProgramUniform2ivNULL;
+        programUniform2ui                        = &glProgramUniform2uiNULL;
+        programUniform2uiv                       = &glProgramUniform2uivNULL;
         programUniform3d                         = &glProgramUniform3dNULL;
         programUniform3dv                        = &glProgramUniform3dvNULL;
+        programUniform3f                         = &glProgramUniform3fNULL;
+        programUniform3fv                        = &glProgramUniform3fvNULL;
+        programUniform3i                         = &glProgramUniform3iNULL;
+        programUniform3iv                        = &glProgramUniform3ivNULL;
+        programUniform3ui                        = &glProgramUniform3uiNULL;
+        programUniform3uiv                       = &glProgramUniform3uivNULL;
         programUniform4d                         = &glProgramUniform4dNULL;
         programUniform4dv                        = &glProgramUniform4dvNULL;
+        programUniform4f                         = &glProgramUniform4fNULL;
+        programUniform4fv                        = &glProgramUniform4fvNULL;
+        programUniform4i                         = &glProgramUniform4iNULL;
+        programUniform4iv                        = &glProgramUniform4ivNULL;
+        programUniform4ui                        = &glProgramUniform4uiNULL;
+        programUniform4uiv                       = &glProgramUniform4uivNULL;
         programUniformMatrix2dv                  = &glProgramUniformMatrix2dvNULL;
+        programUniformMatrix2fv                  = &glProgramUniformMatrix2fvNULL;
         programUniformMatrix2x3dv                = &glProgramUniformMatrix2x3dvNULL;
+        programUniformMatrix2x3fv                = &glProgramUniformMatrix2x3fvNULL;
         programUniformMatrix2x4dv                = &glProgramUniformMatrix2x4dvNULL;
+        programUniformMatrix2x4fv                = &glProgramUniformMatrix2x4fvNULL;
         programUniformMatrix3dv                  = &glProgramUniformMatrix3dvNULL;
+        programUniformMatrix3fv                  = &glProgramUniformMatrix3fvNULL;
         programUniformMatrix3x2dv                = &glProgramUniformMatrix3x2dvNULL;
+        programUniformMatrix3x2fv                = &glProgramUniformMatrix3x2fvNULL;
         programUniformMatrix3x4dv                = &glProgramUniformMatrix3x4dvNULL;
+        programUniformMatrix3x4fv                = &glProgramUniformMatrix3x4fvNULL;
         programUniformMatrix4dv                  = &glProgramUniformMatrix4dvNULL;
+        programUniformMatrix4fv                  = &glProgramUniformMatrix4fvNULL;
         programUniformMatrix4x2dv                = &glProgramUniformMatrix4x2dvNULL;
+        programUniformMatrix4x2fv                = &glProgramUniformMatrix4x2fvNULL;
         programUniformMatrix4x3dv                = &glProgramUniformMatrix4x3dvNULL;
+        programUniformMatrix4x3fv                = &glProgramUniformMatrix4x3fvNULL;
         textureBuffer                            = &glTextureBufferNULL;
         textureBufferRange                       = &glTextureBufferRangeNULL;
         textureParameterIiv                      = &glTextureParameterIivNULL;
@@ -3840,6 +3947,11 @@ void DispatchTableGL::initProcsDesktopGLNULL(const gl::Version &version,
         isFramebuffer                       = &glIsFramebufferNULL;
         isRenderbuffer                      = &glIsRenderbufferNULL;
         renderbufferStorage                 = &glRenderbufferStorageNULL;
+    }
+
+    if (extensions.count("GL_EXT_geometry_shader4") != 0)
+    {
+        programParameteri = &glProgramParameteriNULL;
     }
 
     if (extensions.count("GL_EXT_gpu_shader4") != 0)
@@ -4918,6 +5030,54 @@ void DispatchTableGL::initProcsGLESNULL(const gl::Version &version,
         readnPixels            = &glReadnPixelsNULL;
     }
 
+    if (extensions.count("GL_EXT_separate_shader_objects") != 0)
+    {
+        activeShaderProgram       = &glActiveShaderProgramNULL;
+        bindProgramPipeline       = &glBindProgramPipelineNULL;
+        createShaderProgramv      = &glCreateShaderProgramvNULL;
+        deleteProgramPipelines    = &glDeleteProgramPipelinesNULL;
+        genProgramPipelines       = &glGenProgramPipelinesNULL;
+        getProgramPipelineInfoLog = &glGetProgramPipelineInfoLogNULL;
+        getProgramPipelineiv      = &glGetProgramPipelineivNULL;
+        isProgramPipeline         = &glIsProgramPipelineNULL;
+        programParameteri         = &glProgramParameteriNULL;
+        programUniform1f          = &glProgramUniform1fNULL;
+        programUniform1fv         = &glProgramUniform1fvNULL;
+        programUniform1i          = &glProgramUniform1iNULL;
+        programUniform1iv         = &glProgramUniform1ivNULL;
+        programUniform1ui         = &glProgramUniform1uiNULL;
+        programUniform1uiv        = &glProgramUniform1uivNULL;
+        programUniform2f          = &glProgramUniform2fNULL;
+        programUniform2fv         = &glProgramUniform2fvNULL;
+        programUniform2i          = &glProgramUniform2iNULL;
+        programUniform2iv         = &glProgramUniform2ivNULL;
+        programUniform2ui         = &glProgramUniform2uiNULL;
+        programUniform2uiv        = &glProgramUniform2uivNULL;
+        programUniform3f          = &glProgramUniform3fNULL;
+        programUniform3fv         = &glProgramUniform3fvNULL;
+        programUniform3i          = &glProgramUniform3iNULL;
+        programUniform3iv         = &glProgramUniform3ivNULL;
+        programUniform3ui         = &glProgramUniform3uiNULL;
+        programUniform3uiv        = &glProgramUniform3uivNULL;
+        programUniform4f          = &glProgramUniform4fNULL;
+        programUniform4fv         = &glProgramUniform4fvNULL;
+        programUniform4i          = &glProgramUniform4iNULL;
+        programUniform4iv         = &glProgramUniform4ivNULL;
+        programUniform4ui         = &glProgramUniform4uiNULL;
+        programUniform4uiv        = &glProgramUniform4uivNULL;
+        programUniformMatrix2fv   = &glProgramUniformMatrix2fvNULL;
+        programUniformMatrix2x3fv = &glProgramUniformMatrix2x3fvNULL;
+        programUniformMatrix2x4fv = &glProgramUniformMatrix2x4fvNULL;
+        programUniformMatrix3fv   = &glProgramUniformMatrix3fvNULL;
+        programUniformMatrix3x2fv = &glProgramUniformMatrix3x2fvNULL;
+        programUniformMatrix3x4fv = &glProgramUniformMatrix3x4fvNULL;
+        programUniformMatrix4fv   = &glProgramUniformMatrix4fvNULL;
+        programUniformMatrix4x2fv = &glProgramUniformMatrix4x2fvNULL;
+        programUniformMatrix4x3fv = &glProgramUniformMatrix4x3fvNULL;
+        useProgramStages          = &glUseProgramStagesNULL;
+        validateProgramPipeline   = &glValidateProgramPipelineNULL;
+    }
+
     if (extensions.count("GL_EXT_tessellation_shader") != 0)
     {
         patchParameteri = &glPatchParameteriNULL;
@@ -4978,6 +5138,20 @@ void DispatchTableGL::initProcsGLESNULL(const gl::Version &version,
         readnPixels            = &glReadnPixelsNULL;
     }
 
+    if (extensions.count("GL_MESA_sampler_objects") != 0)
+    {
+        bindSampler           = &glBindSamplerNULL;
+        deleteSamplers        = &glDeleteSamplersNULL;
+        genSamplers           = &glGenSamplersNULL;
+        getSamplerParameterfv = &glGetSamplerParameterfvNULL;
+        getSamplerParameteriv = &glGetSamplerParameterivNULL;
+        isSampler             = &glIsSamplerNULL;
+        samplerParameterf     = &glSamplerParameterfNULL;
+        samplerParameterfv    = &glSamplerParameterfvNULL;
+        samplerParameteri     = &glSamplerParameteriNULL;
+        samplerParameteriv    = &glSamplerParameterivNULL;
+    }
+
     if (extensions.count("GL_NV_framebuffer_blit") != 0)
     {
         blitFramebufferNV = &glBlitFramebufferNVNULL;
@@ -4992,6 +5166,11 @@ void DispatchTableGL::initProcsGLESNULL(const gl::Version &version,
     {
         eGLImageTargetRenderbufferStorageOES = &glEGLImageTargetRenderbufferStorageOESNULL;
         eGLImageTargetTexture2DOES           = &glEGLImageTargetTexture2DOESNULL;
+    }
+
+    if (extensions.count("GL_OES_EGL_image_external") != 0)
+    {
+        eGLImageTargetTexture2DOES = &glEGLImageTargetTexture2DOESNULL;
     }
 
     if (extensions.count("GL_OES_copy_image") != 0)
@@ -5112,6 +5291,12 @@ void DispatchTableGL::initProcsGLESNULL(const gl::Version &version,
         viewportArrayv    = &glViewportArrayvNULL;
         viewportIndexedf  = &glViewportIndexedfNULL;
         viewportIndexedfv = &glViewportIndexedfvNULL;
+    }
+
+    if (extensions.count("GL_QCOM_tiled_rendering") != 0)
+    {
+        endTilingQCOM   = &glEndTilingQCOMNULL;
+        startTilingQCOM = &glStartTilingQCOMNULL;
     }
 
     if (version >= gl::Version(2, 0))
@@ -5491,11 +5676,6 @@ void DispatchTableGL::initProcsGLESNULL(const gl::Version &version,
 
 void DispatchTableGL::initProcsSharedExtensionsNULL(const std::set<std::string> &extensions)
 {
-    if (extensions.count("GL_EXT_blend_minmax") != 0)
-    {
-        blendEquation = &glBlendEquationNULL;
-    }
-
     if (extensions.count("GL_EXT_debug_label") != 0)
     {
         getObjectLabel = &glGetObjectLabelNULL;
@@ -5581,54 +5761,6 @@ void DispatchTableGL::initProcsSharedExtensionsNULL(const std::set<std::string> 
         importSemaphoreWin32NameEXT   = &glImportSemaphoreWin32NameEXTNULL;
     }
 
-    if (extensions.count("GL_EXT_separate_shader_objects") != 0)
-    {
-        activeShaderProgram       = &glActiveShaderProgramNULL;
-        bindProgramPipeline       = &glBindProgramPipelineNULL;
-        createShaderProgramv      = &glCreateShaderProgramvNULL;
-        deleteProgramPipelines    = &glDeleteProgramPipelinesNULL;
-        genProgramPipelines       = &glGenProgramPipelinesNULL;
-        getProgramPipelineInfoLog = &glGetProgramPipelineInfoLogNULL;
-        getProgramPipelineiv      = &glGetProgramPipelineivNULL;
-        isProgramPipeline         = &glIsProgramPipelineNULL;
-        programParameteri         = &glProgramParameteriNULL;
-        programUniform1f          = &glProgramUniform1fNULL;
-        programUniform1fv         = &glProgramUniform1fvNULL;
-        programUniform1i          = &glProgramUniform1iNULL;
-        programUniform1iv         = &glProgramUniform1ivNULL;
-        programUniform1ui         = &glProgramUniform1uiNULL;
-        programUniform1uiv        = &glProgramUniform1uivNULL;
-        programUniform2f          = &glProgramUniform2fNULL;
-        programUniform2fv         = &glProgramUniform2fvNULL;
-        programUniform2i          = &glProgramUniform2iNULL;
-        programUniform2iv         = &glProgramUniform2ivNULL;
-        programUniform2ui         = &glProgramUniform2uiNULL;
-        programUniform2uiv        = &glProgramUniform2uivNULL;
-        programUniform3f          = &glProgramUniform3fNULL;
-        programUniform3fv         = &glProgramUniform3fvNULL;
-        programUniform3i          = &glProgramUniform3iNULL;
-        programUniform3iv         = &glProgramUniform3ivNULL;
-        programUniform3ui         = &glProgramUniform3uiNULL;
-        programUniform3uiv        = &glProgramUniform3uivNULL;
-        programUniform4f          = &glProgramUniform4fNULL;
-        programUniform4fv         = &glProgramUniform4fvNULL;
-        programUniform4i          = &glProgramUniform4iNULL;
-        programUniform4iv         = &glProgramUniform4ivNULL;
-        programUniform4ui         = &glProgramUniform4uiNULL;
-        programUniform4uiv        = &glProgramUniform4uivNULL;
-        programUniformMatrix2fv   = &glProgramUniformMatrix2fvNULL;
-        programUniformMatrix2x3fv = &glProgramUniformMatrix2x3fvNULL;
-        programUniformMatrix2x4fv = &glProgramUniformMatrix2x4fvNULL;
-        programUniformMatrix3fv   = &glProgramUniformMatrix3fvNULL;
-        programUniformMatrix3x2fv = &glProgramUniformMatrix3x2fvNULL;
-        programUniformMatrix3x4fv = &glProgramUniformMatrix3x4fvNULL;
-        programUniformMatrix4fv   = &glProgramUniformMatrix4fvNULL;
-        programUniformMatrix4x2fv = &glProgramUniformMatrix4x2fvNULL;
-        programUniformMatrix4x3fv = &glProgramUniformMatrix4x3fvNULL;
-        useProgramStages          = &glUseProgramStagesNULL;
-        validateProgramPipeline   = &glValidateProgramPipelineNULL;
-    }
-
     if (extensions.count("GL_EXT_shader_framebuffer_fetch_non_coherent") != 0)
     {
         framebufferFetchBarrierEXT = &glFramebufferFetchBarrierEXTNULL;
@@ -5642,6 +5774,11 @@ void DispatchTableGL::initProcsSharedExtensionsNULL(const std::set<std::string> 
         textureStorage1D = &glTextureStorage1DNULL;
         textureStorage2D = &glTextureStorage2DNULL;
         textureStorage3D = &glTextureStorage3DNULL;
+    }
+
+    if (extensions.count("GL_KHR_blend_equation_advanced") != 0)
+    {
+        blendBarrier = &glBlendBarrierNULL;
     }
 
     if (extensions.count("GL_KHR_parallel_shader_compile") != 0)
@@ -5678,6 +5815,7 @@ void DispatchTableGL::initProcsSharedExtensionsNULL(const std::set<std::string> 
     if (extensions.count("GL_OVR_multiview") != 0)
     {
         framebufferTextureMultiviewOVR = &glFramebufferTextureMultiviewOVRNULL;
+        namedFramebufferTextureMultiviewOVR = &glNamedFramebufferTextureMultiviewOVRNULL;
     }
 }
 #endif  // defined(ANGLE_ENABLE_OPENGL_NULL)

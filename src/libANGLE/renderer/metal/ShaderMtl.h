@@ -22,20 +22,16 @@ class ShaderMtl : public ShaderImpl
     ShaderMtl(const gl::ShaderState &state);
     ~ShaderMtl() override;
 
-    std::shared_ptr<WaitableCompileEvent> compile(const gl::Context *context,
-                                                  gl::ShCompilerInstance *compilerInstance,
-                                                  ShCompileOptions *options) override;
+    std::shared_ptr<ShaderTranslateTask> compile(const gl::Context *context,
+                                                 ShCompileOptions *options) override;
+    std::shared_ptr<ShaderTranslateTask> load(const gl::Context *context,
+                                              gl::BinaryInputStream *stream) override;
 
     const SharedCompiledShaderStateMtl &getCompiledState() const { return mCompiledState; }
 
     std::string getDebugInfo() const override;
 
   private:
-    std::shared_ptr<WaitableCompileEvent> compileImplMtl(const gl::Context *context,
-                                                         gl::ShCompilerInstance *compilerInstance,
-                                                         const std::string &source,
-                                                         ShCompileOptions *compileOptions);
-
     SharedCompiledShaderStateMtl mCompiledState;
 };
 

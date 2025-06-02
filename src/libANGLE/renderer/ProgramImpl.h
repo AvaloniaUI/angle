@@ -62,11 +62,15 @@ class LinkTask
   public:
     virtual ~LinkTask() = default;
     // Used for link()
-    virtual std::vector<std::shared_ptr<LinkSubTask>> link(
-        const gl::ProgramLinkedResources &resources,
-        const gl::ProgramMergedVaryings &mergedVaryings);
+    // Backends should populate only one of linkSubTasksOut or postLinkSubTasksOut.
+    virtual void link(const gl::ProgramLinkedResources &resources,
+                      const gl::ProgramMergedVaryings &mergedVaryings,
+                      std::vector<std::shared_ptr<LinkSubTask>> *linkSubTasksOut,
+                      std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut);
     // Used for load()
-    virtual std::vector<std::shared_ptr<LinkSubTask>> load();
+    // Backends should populate only one of linkSubTasksOut or postLinkSubTasksOut.
+    virtual void load(std::vector<std::shared_ptr<LinkSubTask>> *linkSubTasksOut,
+                      std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut);
     virtual angle::Result getResult(const gl::Context *context, gl::InfoLog &infoLog) = 0;
 
     // Used by the GL backend to query whether the driver is linking in parallel internally.
@@ -82,7 +86,8 @@ class ProgramImpl : angle::NonCopyable
 
     virtual angle::Result load(const gl::Context *context,
                                gl::BinaryInputStream *stream,
-                               std::shared_ptr<LinkTask> *loadTaskOut)            = 0;
+                               std::shared_ptr<LinkTask> *loadTaskOut,
+                               egl::CacheGetResult *resultOut)                    = 0;
     virtual void save(const gl::Context *context, gl::BinaryOutputStream *stream) = 0;
     virtual void setBinaryRetrievableHint(bool retrievable)                       = 0;
     virtual void setSeparable(bool separable)                                     = 0;
@@ -102,20 +107,14 @@ class ProgramImpl : angle::NonCopyable
 
     const gl::ProgramState &getState() const { return mState; }
 
-    virtual angle::Result syncState(const gl::Context *context,
-                                    const gl::Program::DirtyBits &dirtyBits);
-
     virtual angle::Result onLabelUpdate(const gl::Context *context);
+
+    // Called when glUniformBlockBinding is called.
+    virtual void onUniformBlockBinding(gl::UniformBlockIndex uniformBlockIndex) {}
 
   protected:
     const gl::ProgramState &mState;
 };
-
-inline angle::Result ProgramImpl::syncState(const gl::Context *context,
-                                            const gl::Program::DirtyBits &dirtyBits)
-{
-    return angle::Result::Continue;
-}
 
 }  // namespace rx
 

@@ -11,6 +11,7 @@
 
 #include "GLSLANG/ShaderLang.h"
 
+#include "common/PackedEnums.h"
 #include "compiler/translator/Compiler.h"
 #include "compiler/translator/InitializeDll.h"
 #include "compiler/translator/length_limits.h"
@@ -193,12 +194,14 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->EXT_shader_framebuffer_fetch_non_coherent      = 0;
     resources->NV_shader_framebuffer_fetch                    = 0;
     resources->ARM_shader_framebuffer_fetch                   = 0;
+    resources->ARM_shader_framebuffer_fetch_depth_stencil     = 0;
     resources->OVR_multiview                                  = 0;
     resources->OVR_multiview2                                 = 0;
     resources->EXT_YUV_target                                 = 0;
     resources->EXT_geometry_shader                            = 0;
     resources->OES_geometry_shader                            = 0;
     resources->EXT_gpu_shader5                                = 0;
+    resources->OES_gpu_shader5                                = 0;
     resources->OES_shader_io_blocks                           = 0;
     resources->EXT_shader_io_blocks                           = 0;
     resources->EXT_shader_non_constant_global_initializers    = 0;
@@ -214,11 +217,14 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->APPLE_clip_distance                            = 0;
     resources->OES_texture_cube_map_array                     = 0;
     resources->EXT_texture_cube_map_array                     = 0;
+    resources->EXT_texture_query_lod                          = 0;
+    resources->EXT_texture_shadow_lod                         = 0;
     resources->EXT_shadow_samplers                            = 0;
     resources->OES_shader_multisample_interpolation           = 0;
     resources->NV_draw_buffers                                = 0;
     resources->OES_shader_image_atomic                        = 0;
     resources->EXT_tessellation_shader                        = 0;
+    resources->OES_tessellation_shader                        = 0;
     resources->OES_texture_buffer                             = 0;
     resources->EXT_texture_buffer                             = 0;
     resources->OES_sample_variables                           = 0;
@@ -248,6 +254,7 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->HashFunction = nullptr;
 
     resources->MaxExpressionComplexity = 256;
+    resources->MaxStatementDepth       = 256;
     resources->MaxCallStackDepth       = 256;
     resources->MaxFunctionParameters   = 1024;
 
@@ -603,14 +610,12 @@ int GetVertexShaderNumViews(const ShHandle handle)
     return compiler->getNumViews();
 }
 
-bool EnablesPerSampleShading(const ShHandle handle)
+const std::vector<ShPixelLocalStorageFormat> *GetPixelLocalStorageFormats(const ShHandle handle)
 {
     TCompiler *compiler = GetCompilerFromHandle(handle);
-    if (compiler == nullptr)
-    {
-        return false;
-    }
-    return compiler->enablesPerSampleShading();
+    ASSERT(compiler);
+
+    return &compiler->GetPixelLocalStorageFormats();
 }
 
 uint32_t GetShaderSpecConstUsageBits(const ShHandle handle)
@@ -765,7 +770,7 @@ uint8_t GetCullDistanceArraySize(const ShHandle handle)
     return compiler->getCullDistanceArraySize();
 }
 
-bool HasClipDistanceInVertexShader(const ShHandle handle)
+uint32_t GetMetadataFlags(const ShHandle handle)
 {
     ASSERT(handle);
 
@@ -773,95 +778,7 @@ bool HasClipDistanceInVertexShader(const ShHandle handle)
     TCompiler *compiler = base->getAsCompiler();
     ASSERT(compiler);
 
-    return compiler->getShaderType() == GL_VERTEX_SHADER && compiler->hasClipDistance();
-}
-
-bool HasDiscardInFragmentShader(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getShaderType() == GL_FRAGMENT_SHADER && compiler->hasDiscard();
-}
-
-bool HasValidGeometryShaderInputPrimitiveType(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getGeometryShaderInputPrimitiveType() != EptUndefined;
-}
-
-bool HasValidGeometryShaderOutputPrimitiveType(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getGeometryShaderOutputPrimitiveType() != EptUndefined;
-}
-
-bool HasValidGeometryShaderMaxVertices(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getGeometryShaderMaxVertices() >= 0;
-}
-
-bool HasValidTessGenMode(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getTessEvaluationShaderInputPrimitiveType() != EtetUndefined;
-}
-
-bool HasValidTessGenSpacing(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getTessEvaluationShaderInputVertexSpacingType() != EtetUndefined;
-}
-
-bool HasValidTessGenVertexOrder(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getTessEvaluationShaderInputOrderingType() != EtetUndefined;
-}
-
-bool HasValidTessGenPointMode(const ShHandle handle)
-{
-    ASSERT(handle);
-
-    TShHandleBase *base = static_cast<TShHandleBase *>(handle);
-    TCompiler *compiler = base->getAsCompiler();
-    ASSERT(compiler);
-
-    return compiler->getTessEvaluationShaderInputPointType() != EtetUndefined;
+    return compiler->getMetadataFlags().bits();
 }
 
 GLenum GetGeometryShaderInputPrimitiveType(const ShHandle handle)

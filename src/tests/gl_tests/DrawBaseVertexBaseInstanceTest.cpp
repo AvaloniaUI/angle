@@ -235,18 +235,18 @@ void main()
                            fragmentShaderSource300().c_str());
         EXPECT_GL_NO_ERROR();
         ASSERT_TRUE(program.valid());
-        glUseProgram(program.get());
-        mPositionLoc = glGetAttribLocation(program.get(), "vPosition");
+        glUseProgram(program);
+        mPositionLoc = glGetAttribLocation(program, "vPosition");
         if (!useBaseInstanceBuiltin())
         {
-            mInstanceIDLoc      = glGetAttribLocation(program.get(), "vInstanceID");
-            mInstanceColorIDLoc = glGetAttribLocation(program.get(), "vInstanceColorID");
+            mInstanceIDLoc      = glGetAttribLocation(program, "vInstanceID");
+            mInstanceColorIDLoc = glGetAttribLocation(program, "vInstanceColorID");
         }
     }
 
     void setupNonIndexedBuffers(GLBuffer &vertexBuffer)
     {
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.get());
+        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
         glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * mNonIndexedVertices.size(),
                      mNonIndexedVertices.data(), getBufferDataUsage());
 
@@ -626,18 +626,18 @@ void main()
                            fragmentShaderSource300().c_str());
         EXPECT_GL_NO_ERROR();
         ASSERT_TRUE(program.valid());
-        glUseProgram(program.get());
-        mPositionLoc = glGetAttribLocation(program.get(), "vPosition");
+        glUseProgram(program);
+        mPositionLoc = glGetAttribLocation(program, "vPosition");
         if (!useBaseInstanceBuiltin())
         {
-            mInstanceIDLoc      = glGetAttribLocation(program.get(), "vInstanceID");
-            mInstanceColorIDLoc = glGetAttribLocation(program.get(), "vInstanceColorID");
+            mInstanceIDLoc      = glGetAttribLocation(program, "vInstanceID");
+            mInstanceColorIDLoc = glGetAttribLocation(program, "vInstanceColorID");
         }
     }
 
     void setupNonIndexedBuffers(GLBuffer &vertexBuffer)
     {
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.get());
+        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
         glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * mNonIndexedVertices.size(),
                      mNonIndexedVertices.data(), getBufferDataUsage());
 
@@ -928,6 +928,38 @@ TEST_P(DrawBaseVertexBaseInstanceTest, DrawArraysInstancedBaseInstance)
     checkDrawResult(false, true);
 }
 
+// Tests basic drawcount validation
+TEST_P(DrawBaseVertexBaseInstanceTest, MultiDrawValidation)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_base_vertex_base_instance"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_multi_draw"));
+
+    const GLint first           = 0;
+    const GLsizei count         = 0;
+    const GLsizei instanceCount = 0;
+    const GLint baseVertex      = 0;
+    const GLuint baseInstance   = 0;
+    const GLvoid *const indices[1]{nullptr};
+
+    glMultiDrawArraysInstancedBaseInstanceANGLE(GL_TRIANGLES, &first, &count, &instanceCount,
+                                                &baseInstance, -1);
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    glMultiDrawArraysInstancedBaseInstanceANGLE(GL_TRIANGLES, &first, &count, &instanceCount,
+                                                &baseInstance, 0);
+    EXPECT_GL_NO_ERROR();
+
+    glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, &count, GL_UNSIGNED_SHORT,
+                                                            indices, &instanceCount, &baseVertex,
+                                                            &baseInstance, -1);
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, &count, GL_UNSIGNED_SHORT,
+                                                            indices, &instanceCount, &baseVertex,
+                                                            &baseInstance, 0);
+    EXPECT_GL_NO_ERROR();
+}
+
 // Tests basic functionality of glMultiDrawArraysInstancedBaseInstance
 TEST_P(DrawBaseVertexBaseInstanceTest, MultiDrawArraysInstancedBaseInstance)
 {
@@ -1181,29 +1213,30 @@ TEST_P(DrawBaseInstanceTest, DrawElementsInstancedBaseVertexBaseInstance)
     checkDrawResult(true, true);
 }
 
-const angle::PlatformParameters platforms[] = {
-    ES3_D3D11(), ES3_METAL(), ES3_OPENGL(), ES3_OPENGLES(), ES3_VULKAN(),
-};
-
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(DrawBaseVertexBaseInstanceTest);
-INSTANTIATE_TEST_SUITE_P(
-    ,
-    DrawBaseVertexBaseInstanceTest,
-    testing::Combine(
-        testing::ValuesIn(::angle::FilterTestParams(platforms, ArraySize(platforms))),
-        testing::Values(BaseVertexOption::NoBaseVertex, BaseVertexOption::UseBaseVertex),
-        testing::Values(BaseInstanceOption::NoBaseInstance, BaseInstanceOption::UseBaseInstance),
-        testing::Values(BufferDataUsageOption::StaticDraw, BufferDataUsageOption::DynamicDraw)),
-    PrintToStringParamName());
 
-INSTANTIATE_TEST_SUITE_P(
-    ,
+#define ANGLE_ALL_BASEVERTEXBASEINTANCE_TEST_PLATFORMS_ES3                                 \
+    ES3_D3D11().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions),                  \
+        ES3_OPENGL().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions),             \
+        ES3_OPENGLES().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions),           \
+        ES3_VULKAN().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions),             \
+        ES3_VULKAN_SWIFTSHADER().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions), \
+        ES3_METAL().enable(Feature::AlwaysEnableEmulatedMultidrawExtensions)
+
+ANGLE_INSTANTIATE_TEST_COMBINE_3(
+    DrawBaseVertexBaseInstanceTest,
+    PrintToStringParamName(),
+    testing::Values(BaseVertexOption::NoBaseVertex, BaseVertexOption::UseBaseVertex),
+    testing::Values(BaseInstanceOption::NoBaseInstance, BaseInstanceOption::UseBaseInstance),
+    testing::Values(BufferDataUsageOption::StaticDraw, BufferDataUsageOption::DynamicDraw),
+    ANGLE_ALL_BASEVERTEXBASEINTANCE_TEST_PLATFORMS_ES3);
+
+ANGLE_INSTANTIATE_TEST_COMBINE_3(
     DrawBaseInstanceTest,
-    testing::Combine(
-        testing::ValuesIn(::angle::FilterTestParams(platforms, ArraySize(platforms))),
-        testing::Values(BaseVertexOption::NoBaseVertex, BaseVertexOption::UseBaseVertex),
-        testing::Values(BaseInstanceOption::NoBaseInstance, BaseInstanceOption::UseBaseInstance),
-        testing::Values(BufferDataUsageOption::StaticDraw, BufferDataUsageOption::DynamicDraw)),
-    PrintToStringParamName());
+    PrintToStringParamName(),
+    testing::Values(BaseVertexOption::NoBaseVertex, BaseVertexOption::UseBaseVertex),
+    testing::Values(BaseInstanceOption::NoBaseInstance, BaseInstanceOption::UseBaseInstance),
+    testing::Values(BufferDataUsageOption::StaticDraw, BufferDataUsageOption::DynamicDraw),
+    ANGLE_ALL_BASEVERTEXBASEINTANCE_TEST_PLATFORMS_ES3);
 
 }  // namespace

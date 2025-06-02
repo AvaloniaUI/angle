@@ -12,7 +12,9 @@
 #include "common/FixedVector.h"
 #include "common/PackedEnums.h"
 #include "common/bitset_utils.h"
+#include "common/hash_containers.h"
 #include "common/hash_utils.h"
+#include "common/span.h"
 #include "common/spirv/spirv_instruction_builder_autogen.h"
 #include "compiler/translator/Compiler.h"
 
@@ -95,7 +97,7 @@ struct SpirvType
     uint8_t primarySize   = 1;
     uint8_t secondarySize = 1;
 
-    TSpan<const unsigned int> arraySizes;
+    angle::Span<const unsigned int> arraySizes;
 
     // Only useful for image types.
     TLayoutImageInternalFormat imageInternalFormat = EiifUnspecified;
@@ -365,7 +367,6 @@ class SPIRVBuilder : angle::NonCopyable
     void addCapability(spv::Capability capability);
     void addExecutionMode(spv::ExecutionMode executionMode);
     void addExtension(SPIRVExtensions extension);
-    void addEntryPointInterfaceVariableId(spirv::IdRef id);
     void writePerVertexBuiltIns(const TType &type, spirv::IdRef typeId);
     void writeInterfaceVariableDecorations(const TType &type, spirv::IdRef variableId);
     void writeBranchConditional(spirv::IdRef conditionValue,
@@ -439,6 +440,8 @@ class SPIRVBuilder : angle::NonCopyable
     void writeMemberDecorations(const SpirvType &type, spirv::IdRef typeId);
     void writeInterpolationDecoration(TQualifier qualifier, spirv::IdRef id, uint32_t fieldIndex);
 
+    void addEntryPointInterfaceVariableId(spirv::IdRef id);
+
     // Helpers for type declaration.
     void getImageTypeParameters(TBasicType type,
                                 spirv::IdRef *sampledTypeOut,
@@ -484,6 +487,7 @@ class SPIRVBuilder : angle::NonCopyable
 
     // The list of interface variables populated as the instructions are generated.  Used for the
     // OpEntryPoint instruction.
+    // With SPIR-V 1.4, this list includes all global variables.
     spirv::IdRefList mEntryPointInterfaceList;
 
     // Id of imported instructions, if used.
@@ -525,7 +529,7 @@ class SPIRVBuilder : angle::NonCopyable
     std::vector<spirv::IdRef> mNullConstants;
 
     // List of type pointers that are already defined.
-    // TODO: if all users call getTypeData(), move to SpirvTypeData.  http://anglebug.com/4889
+    // TODO: if all users call getTypeData(), move to SpirvTypeData.  http://anglebug.com/40096715
     angle::HashMap<SpirvIdAndStorageClass, spirv::IdRef, SpirvIdAndStorageClassHash>
         mTypePointerIdMap;
 

@@ -1600,10 +1600,26 @@ void AtomicCounterBufferLinker::link(const std::map<int, unsigned int> &sizeMap)
 {
     for (auto &atomicCounterBuffer : *mAtomicCounterBuffersOut)
     {
-        auto bufferSize = sizeMap.find(atomicCounterBuffer.pod.binding);
+        auto bufferSize = sizeMap.find(atomicCounterBuffer.pod.inShaderBinding);
         ASSERT(bufferSize != sizeMap.end());
         atomicCounterBuffer.pod.dataSize = bufferSize->second;
     }
+}
+
+PixelLocalStorageLinker::PixelLocalStorageLinker() = default;
+
+PixelLocalStorageLinker::~PixelLocalStorageLinker() = default;
+
+void PixelLocalStorageLinker::init(
+    std::vector<ShPixelLocalStorageFormat> *pixelLocalStorageFormatsOut)
+{
+    mPixelLocalStorageFormatsOut = pixelLocalStorageFormatsOut;
+}
+
+void PixelLocalStorageLinker::link(
+    const std::vector<ShPixelLocalStorageFormat> &pixelLocalStorageFormats) const
+{
+    *mPixelLocalStorageFormatsOut = pixelLocalStorageFormats;
 }
 
 LinkingVariables::LinkingVariables()  = default;
@@ -1642,19 +1658,22 @@ void LinkingVariables::initForProgramPipeline(const ProgramPipelineState &state)
 ProgramLinkedResources::ProgramLinkedResources()  = default;
 ProgramLinkedResources::~ProgramLinkedResources() = default;
 
-void ProgramLinkedResources::init(std::vector<InterfaceBlock> *uniformBlocksOut,
-                                  std::vector<LinkedUniform> *uniformsOut,
-                                  std::vector<std::string> *uniformNamesOut,
-                                  std::vector<std::string> *uniformMappedNamesOut,
-                                  std::vector<InterfaceBlock> *shaderStorageBlocksOut,
-                                  std::vector<BufferVariable> *bufferVariablesOut,
-                                  std::vector<AtomicCounterBuffer> *atomicCounterBuffersOut)
+void ProgramLinkedResources::init(
+    std::vector<InterfaceBlock> *uniformBlocksOut,
+    std::vector<LinkedUniform> *uniformsOut,
+    std::vector<std::string> *uniformNamesOut,
+    std::vector<std::string> *uniformMappedNamesOut,
+    std::vector<InterfaceBlock> *shaderStorageBlocksOut,
+    std::vector<BufferVariable> *bufferVariablesOut,
+    std::vector<AtomicCounterBuffer> *atomicCounterBuffersOut,
+    std::vector<ShPixelLocalStorageFormat> *pixelLocalStorageFormatsOut)
 {
     uniformBlockLinker.init(uniformBlocksOut, uniformsOut, uniformNamesOut, uniformMappedNamesOut,
                             &unusedInterfaceBlocks);
     shaderStorageBlockLinker.init(shaderStorageBlocksOut, bufferVariablesOut,
                                   &unusedInterfaceBlocks);
     atomicCounterBufferLinker.init(atomicCounterBuffersOut);
+    pixelLocalStorageLinker.init(pixelLocalStorageFormatsOut);
 }
 
 void ProgramLinkedResourcesLinker::linkResources(const ProgramState &programState,
@@ -1715,6 +1734,13 @@ void ProgramLinkedResourcesLinker::linkResources(const ProgramState &programStat
     std::map<int, unsigned int> sizeMap;
     getAtomicCounterBufferSizeMap(programState.getExecutable(), sizeMap);
     resources.atomicCounterBufferLinker.link(sizeMap);
+
+    const gl::SharedCompiledShaderState &fragmentShader =
+        programState.getAttachedShader(gl::ShaderType::Fragment);
+    if (fragmentShader != nullptr)
+    {
+        resources.pixelLocalStorageLinker.link(fragmentShader->pixelLocalStorageFormats);
+    }
 }
 
 void ProgramLinkedResourcesLinker::getAtomicCounterBufferSizeMap(
@@ -1731,9 +1757,9 @@ void ProgramLinkedResourcesLinker::getAtomicCounterBufferSizeMap(
         // binding. The end of the uniform is calculated by finding the initial offset of the
         // uniform and adding size of the uniform. For arrays, the size is the number of elements
         // times the element size (should always by 4 for atomic_units).
-        unsigned dataOffset =
-            glUniform.getOffset() + static_cast<unsigned int>(glUniform.getBasicTypeElementCount() *
-                                                              glUniform.getElementSize());
+        unsigned dataOffset = glUniform.getBlockOffset() +
+                              static_cast<unsigned int>(glUniform.getBasicTypeElementCount() *
+                                                        glUniform.getElementSize());
         if (dataOffset > bufferDataSize)
         {
             bufferDataSize = dataOffset;
@@ -1950,7 +1976,7 @@ LinkMismatchError LinkValidateProgramVariables(const sh::ShaderVariable &variabl
         ASSERT(variable2IsArray);
         variable2IsArray = false;
     }
-    // TODO(anglebug.com/5557): Investigate interactions with arrays-of-arrays.
+    // TODO(anglebug.com/42264094): Investigate interactions with arrays-of-arrays.
     if (variable1IsArray != variable2IsArray)
     {
         return LinkMismatchError::ARRAYNESS_MISMATCH;
@@ -2143,10 +2169,11 @@ bool LinkValidateBuiltInVaryings(const std::vector<sh::ShaderVariable> &outputVa
         {
             if (sizeClipDistance != varying.getOutermostArraySize())
             {
-                infoLog << "If either shader redeclares the built-in arrays gl_ClipDistance[] the "
-                           "array must have the same size in both shaders. "
-                        << "Output size " << sizeClipDistance << ", input size "
-                        << varying.getOutermostArraySize() << ".";
+                infoLog
+                    << "If a fragment shader statically uses the gl_ClipDistance built-in array, "
+                       "the array must have the same size as in the previous shader stage. "
+                    << "Output size " << sizeClipDistance << ", input size "
+                    << varying.getOutermostArraySize() << ".";
                 return false;
             }
         }
@@ -2154,10 +2181,11 @@ bool LinkValidateBuiltInVaryings(const std::vector<sh::ShaderVariable> &outputVa
         {
             if (sizeCullDistance != varying.getOutermostArraySize())
             {
-                infoLog << "If either shader redeclares the built-in arrays gl_CullDistance[] the "
-                           "array must have the same size in both shaders. "
-                        << "Output size " << sizeCullDistance << ", input size "
-                        << varying.getOutermostArraySize() << ".";
+                infoLog
+                    << "If a fragment shader statically uses the gl_ClipDistance built-in array, "
+                       "the array must have the same size as in the previous shader stage. "
+                    << "Output size " << sizeCullDistance << ", input size "
+                    << varying.getOutermostArraySize() << ".";
 
                 return false;
             }

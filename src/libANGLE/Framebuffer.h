@@ -51,7 +51,7 @@ class TextureCapsMap;
 
 struct FramebufferStatus
 {
-    bool isComplete() const;
+    bool isComplete() const { return status == GL_FRAMEBUFFER_COMPLETE; }
 
     static FramebufferStatus Complete();
     static FramebufferStatus Incomplete(GLenum status, const char *reason);
@@ -111,21 +111,14 @@ class FramebufferState final : angle::NonCopyable
 
     bool hasDepth() const;
     bool hasStencil() const;
+    GLuint getStencilBitCount() const;
 
     bool hasExternalTextureAttachment() const;
     bool hasYUVAttachment() const;
 
     bool isMultiview() const;
 
-    ANGLE_INLINE GLsizei getNumViews() const
-    {
-        const FramebufferAttachment *attachment = getFirstNonNullAttachment();
-        if (attachment == nullptr)
-        {
-            return FramebufferAttachment::kDefaultNumViews;
-        }
-        return attachment->getNumViews();
-    }
+    GLsizei getNumViews() const;
 
     GLint getBaseViewIndex() const;
 
@@ -140,6 +133,10 @@ class FramebufferState final : angle::NonCopyable
     rx::UniqueSerial getFramebufferSerial() const { return mFramebufferSerial; }
 
     bool isBoundAsDrawFramebuffer(const Context *context) const;
+
+    bool isFoveationEnabled() const { return mFoveationState.isFoveated(); }
+
+    const FoveationState &getFoveationState() const { return mFoveationState; }
 
   private:
     const FramebufferAttachment *getWebGLDepthStencilAttachment() const;
@@ -190,6 +187,9 @@ class FramebufferState final : angle::NonCopyable
     SrgbWriteControlMode mSrgbWriteControlMode;
 
     Offset mSurfaceTextureOffset;
+
+    // GL_QCOM_framebuffer_foveated
+    FoveationState mFoveationState;
 };
 
 class Framebuffer final : public angle::ObserverInterface,
@@ -261,7 +261,7 @@ class Framebuffer final : public angle::ObserverInterface,
     const FramebufferAttachment *getAttachment(const Context *context, GLenum attachment) const;
     bool isMultiview() const;
     bool readDisallowedByMultiview() const;
-    GLsizei getNumViews() const;
+    ANGLE_INLINE GLsizei getNumViews() const { return mState.getNumViews(); }
     GLint getBaseViewIndex() const;
     Extents getExtents() const;
 
@@ -272,20 +272,19 @@ class Framebuffer final : public angle::ObserverInterface,
     const FramebufferAttachment *getDrawBuffer(size_t drawBuffer) const;
     ComponentType getDrawbufferWriteType(size_t drawBuffer) const;
     ComponentTypeMask getDrawBufferTypeMask() const;
-    DrawBufferMask getDrawBufferMask() const;
+    DrawBufferMask getDrawBufferMask() const { return mState.mEnabledDrawBuffers; }
     bool hasEnabledDrawBuffer() const;
 
     GLenum getReadBufferState() const;
     void setReadBuffer(GLenum buffer);
 
-    size_t getNumColorAttachments() const;
-    bool hasDepth() const;
-    bool hasStencil() const;
+    size_t getNumColorAttachments() const { return mState.mColorAttachments.size(); }
+    bool hasDepth() const { return mState.hasDepth(); }
+    bool hasStencil() const { return mState.hasStencil(); }
+    GLuint getStencilBitCount() const { return mState.getStencilBitCount(); }
 
-    bool hasExternalTextureAttachment() const;
-    bool hasYUVAttachment() const;
-
-    bool usingExtendedDrawBuffers() const;
+    bool hasExternalTextureAttachment() const { return mState.hasExternalTextureAttachment(); }
+    bool hasYUVAttachment() const { return mState.hasYUVAttachment(); }
 
     // This method calls checkStatus.
     int getSamples(const Context *context) const;
@@ -305,6 +304,25 @@ class Framebuffer final : public angle::ObserverInterface,
     void setDefaultFixedSampleLocations(const Context *context, bool defaultFixedSampleLocations);
     void setDefaultLayers(GLint defaultLayers);
     void setFlipY(bool flipY);
+
+    bool isFoveationEnabled() const
+    {
+        return (mState.mFoveationState.getFoveatedFeatureBits() & GL_FOVEATION_ENABLE_BIT_QCOM);
+    }
+    void setFoveatedFeatureBits(const GLuint features);
+    GLuint getFoveatedFeatureBits() const;
+    bool isFoveationConfigured() const;
+    void configureFoveation();
+    void setFocalPoint(uint32_t layer,
+                       uint32_t focalPointIndex,
+                       float focalX,
+                       float focalY,
+                       float gainX,
+                       float gainY,
+                       float foveaArea);
+    const FocalPoint &getFocalPoint(uint32_t layer, uint32_t focalPoint) const;
+    GLuint getSupportedFoveationFeatures() const;
+    bool hasAnyAttachmentChanged() const { return mAttachmentChangedAfterEnablingFoveation; }
 
     void invalidateCompletenessCache();
     ANGLE_INLINE bool cachedStatusValid() { return mCachedStatus.valid(); }
@@ -400,6 +418,7 @@ class Framebuffer final : public angle::ObserverInterface,
         DIRTY_BIT_DEFAULT_LAYERS,
         DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE,
         DIRTY_BIT_FLIP_Y,
+        DIRTY_BIT_FOVEATION,
         DIRTY_BIT_UNKNOWN,
         DIRTY_BIT_MAX = DIRTY_BIT_UNKNOWN
     };
@@ -451,6 +470,12 @@ class Framebuffer final : public angle::ObserverInterface,
     // Detaches the the pixel local storage object so the Context can call deleteContextObjects().
     std::unique_ptr<PixelLocalStorage> detachPixelLocalStorage();
 
+    void onSwapChainImageChanged()
+    {
+        mDirtyBits.set(DIRTY_BIT_COLOR_BUFFER_CONTENTS_0);
+        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+    }
+
     static const FramebufferID kDefaultDrawFramebufferHandle;
 
   private:
@@ -497,11 +522,7 @@ class Framebuffer final : public angle::ObserverInterface,
                           bool isMultiview,
                           GLsizei samples);
 
-    void markDrawAttachmentsInitialized(bool color, bool depth, bool stencil);
-    void markBufferInitialized(GLenum bufferType, GLint bufferIndex);
-    angle::Result ensureBufferInitialized(const Context *context,
-                                          GLenum bufferType,
-                                          GLint bufferIndex);
+    void markAttachmentsInitialized(const DrawBufferMask &color, bool depth, bool stencil);
 
     // Checks that we have a partially masked clear:
     // * some color channels are masked out
@@ -543,9 +564,63 @@ class Framebuffer final : public angle::ObserverInterface,
 
     // ANGLE_shader_pixel_local_storage
     std::unique_ptr<PixelLocalStorage> mPixelLocalStorage;
+
+    // QCOM_framebuffer_foveated
+    bool mAttachmentChangedAfterEnablingFoveation;
 };
 
+inline bool FramebufferState::isDefault() const
+{
+    return mId == Framebuffer::kDefaultDrawFramebufferHandle;
+}
+
 using UniqueFramebufferPointer = angle::UniqueObjectPointer<Framebuffer, Context>;
+
+ANGLE_INLINE const FramebufferAttachment *FramebufferState::getFirstNonNullAttachment() const
+{
+    auto *colorAttachment = getFirstColorAttachment();
+    if (colorAttachment)
+    {
+        return colorAttachment;
+    }
+    return getDepthOrStencilAttachment();
+}
+
+ANGLE_INLINE const FramebufferAttachment *FramebufferState::getFirstColorAttachment() const
+{
+    for (const FramebufferAttachment &colorAttachment : mColorAttachments)
+    {
+        if (colorAttachment.isAttached())
+        {
+            return &colorAttachment;
+        }
+    }
+
+    return nullptr;
+}
+
+ANGLE_INLINE const FramebufferAttachment *FramebufferState::getDepthOrStencilAttachment() const
+{
+    if (mDepthAttachment.isAttached())
+    {
+        return &mDepthAttachment;
+    }
+    if (mStencilAttachment.isAttached())
+    {
+        return &mStencilAttachment;
+    }
+    return nullptr;
+}
+
+ANGLE_INLINE GLsizei FramebufferState::getNumViews() const
+{
+    const FramebufferAttachment *attachment = getFirstNonNullAttachment();
+    if (attachment == nullptr)
+    {
+        return FramebufferAttachment::kDefaultNumViews;
+    }
+    return attachment->getNumViews();
+}
 
 }  // namespace gl
 

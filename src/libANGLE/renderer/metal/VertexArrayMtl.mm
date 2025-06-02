@@ -11,6 +11,7 @@
 
 #include <TargetConditionals.h>
 
+#include "libANGLE/ErrorStrings.h"
 #include "libANGLE/renderer/metal/BufferMtl.h"
 #include "libANGLE/renderer/metal/ContextMtl.h"
 #include "libANGLE/renderer/metal/DisplayMtl.h"
@@ -36,7 +37,7 @@ angle::Result StreamVertexData(ContextMtl *contextMtl,
                                SimpleWeakBufferHolderMtl *bufferHolder,
                                size_t *bufferOffsetOut)
 {
-    ANGLE_CHECK(contextMtl, vertexLoadFunction, "Unsupported format conversion", GL_INVALID_ENUM);
+    ANGLE_CHECK(contextMtl, vertexLoadFunction, gl::err::kInternalError, GL_INVALID_OPERATION);
     uint8_t *dst = nullptr;
     mtl::BufferRef newBuffer;
     ANGLE_TRY(dynamicBuffer->allocate(contextMtl, bytesToAllocate, &dst, &newBuffer,
@@ -182,15 +183,32 @@ inline void SetDefaultVertexBufferLayout(mtl::VertexBufferLayoutDesc *layout)
     layout->stride       = 0;
 }
 
+inline MTLVertexFormat GetCurrentAttribFormat(GLenum type)
+{
+    switch (type)
+    {
+        case GL_INT:
+        case GL_INT_VEC2:
+        case GL_INT_VEC3:
+        case GL_INT_VEC4:
+            return MTLVertexFormatInt4;
+        case GL_UNSIGNED_INT:
+        case GL_UNSIGNED_INT_VEC2:
+        case GL_UNSIGNED_INT_VEC3:
+        case GL_UNSIGNED_INT_VEC4:
+            return MTLVertexFormatUInt4;
+        default:
+            return MTLVertexFormatFloat4;
+    }
+}
+
 }  // namespace
 
 // VertexArrayMtl implementation
 VertexArrayMtl::VertexArrayMtl(const gl::VertexArrayState &state, ContextMtl *context)
     : VertexArrayImpl(state),
       mDefaultFloatVertexFormat(
-          context->getVertexFormat(angle::FormatID::R32G32B32A32_FLOAT, false)),
-      mDefaultIntVertexFormat(context->getVertexFormat(angle::FormatID::R32G32B32A32_SINT, false)),
-      mDefaultUIntVertexFormat(context->getVertexFormat(angle::FormatID::R32G32B32A32_UINT, false))
+          context->getVertexFormat(angle::FormatID::R32G32B32A32_FLOAT, false))
 {
     reset(context);
 
@@ -328,53 +346,6 @@ angle::Result VertexArrayMtl::syncState(const gl::Context *context,
     return angle::Result::Continue;
 }
 
-ANGLE_INLINE void VertexArrayMtl::getVertexAttribFormatAndArraySize(const gl::ProgramInput &var,
-                                                                    MTLVertexFormat *formatOut,
-                                                                    uint32_t *arraySizeOut)
-{
-    uint32_t arraySize = var.getArraySizeProduct();
-
-    MTLVertexFormat format;
-    switch (var.getType())
-    {
-        case GL_INT:
-        case GL_INT_VEC2:
-        case GL_INT_VEC3:
-        case GL_INT_VEC4:
-            format = mDefaultIntVertexFormat.metalFormat;
-            break;
-        case GL_UNSIGNED_INT:
-        case GL_UNSIGNED_INT_VEC2:
-        case GL_UNSIGNED_INT_VEC3:
-        case GL_UNSIGNED_INT_VEC4:
-            format = mDefaultUIntVertexFormat.metalFormat;
-            break;
-        case GL_FLOAT_MAT2:
-        case GL_FLOAT_MAT2x3:
-        case GL_FLOAT_MAT2x4:
-            arraySize *= 2;
-            format = mDefaultFloatVertexFormat.metalFormat;
-            break;
-        case GL_FLOAT_MAT3:
-        case GL_FLOAT_MAT3x2:
-        case GL_FLOAT_MAT3x4:
-            arraySize *= 3;
-            format = mDefaultFloatVertexFormat.metalFormat;
-            break;
-        case GL_FLOAT_MAT4:
-        case GL_FLOAT_MAT4x2:
-        case GL_FLOAT_MAT4x3:
-            arraySize *= 4;
-            format = mDefaultFloatVertexFormat.metalFormat;
-            break;
-        default:
-            format = mDefaultFloatVertexFormat.metalFormat;
-    }
-
-    *arraySizeOut = arraySize;
-    *formatOut    = format;
-}
-
 // vertexDescChanged is both input and output, the input value if is true, will force new
 // mtl::VertexDesc to be returned via vertexDescOut. This typically happens when active shader
 // program is changed.
@@ -411,6 +382,16 @@ angle::Result VertexArrayMtl::setupDraw(const gl::Context *glContext,
             SetDefaultVertexBufferLayout(&desc.layouts[b]);
         }
 
+        // Cache vertex shader input types
+        std::array<uint8_t, mtl::kMaxVertexAttribs> currentAttribFormats{};
+        for (auto &input : executable->getProgramInputs())
+        {
+            ASSERT(input.getLocation() != -1);
+            ASSERT(input.getLocation() < static_cast<int>(mtl::kMaxVertexAttribs));
+            currentAttribFormats[input.getLocation()] = GetCurrentAttribFormat(input.getType());
+        }
+        MTLVertexFormat currentAttribFormat = MTLVertexFormatInvalid;
+
         for (uint32_t v = 0; v < mtl::kMaxVertexAttribs; ++v)
         {
             if (!programActiveAttribsMask.test(v))
@@ -425,54 +406,41 @@ angle::Result VertexArrayMtl::setupDraw(const gl::Context *glContext,
             const gl::VertexBinding &binding = bindings[attrib.bindingIndex];
 
             bool attribEnabled = attrib.enabled;
-            if (attribEnabled && !mCurrentArrayBuffers[v] && !mCurrentArrayInlineDataPointers[v])
+            if (attribEnabled &&
+                !(mCurrentArrayBuffers[v] && mCurrentArrayBuffers[v]->getCurrentBuffer()) &&
+                !mCurrentArrayInlineDataPointers[v])
             {
                 // Disable it to avoid crash.
                 attribEnabled = false;
             }
 
+            if (currentAttribFormats[v] != MTLVertexFormatInvalid)
+            {
+                currentAttribFormat = static_cast<MTLVertexFormat>(currentAttribFormats[v]);
+            }
+            else
+            {
+                // This is a non-first matrix column
+                ASSERT(currentAttribFormat != MTLVertexFormatInvalid);
+            }
+
             if (!attribEnabled)
             {
                 // Use default attribute
-                // Need to find the attribute having the exact binding location = v in the program
-                // inputs list to retrieve its coresponding data type:
-                const std::vector<gl::ProgramInput> &programInputs = executable->getProgramInputs();
-                std::vector<gl::ProgramInput>::const_iterator attribInfoIte = std::find_if(
-                    begin(programInputs), end(programInputs), [v](const gl::ProgramInput &sv) {
-                        return static_cast<uint32_t>(sv.getLocation()) == v;
-                    });
-
-                if (attribInfoIte == end(programInputs))
-                {
-                    // Most likely this is array element with index > 0.
-                    // Already handled when encounter first element.
-                    continue;
-                }
-
-                uint32_t arraySize;
-                MTLVertexFormat format;
-
-                getVertexAttribFormatAndArraySize(*attribInfoIte, &format, &arraySize);
-
-                for (uint32_t vaIdx = v; vaIdx < v + arraySize; ++vaIdx)
-                {
-                    desc.attributes[vaIdx].bufferIndex = mtl::kDefaultAttribsBindingIndex;
-                    desc.attributes[vaIdx].offset      = vaIdx * mtl::kDefaultAttributeSize;
-                    desc.attributes[vaIdx].format      = format;
-                }
+                desc.attributes[v].bufferIndex = mtl::kDefaultAttribsBindingIndex;
+                desc.attributes[v].offset      = v * mtl::kDefaultAttributeSize;
+                desc.attributes[v].format      = currentAttribFormat;
             }
             else
             {
                 uint32_t bufferIdx    = mtl::kVboBindingIndexStart + v;
                 uint32_t bufferOffset = static_cast<uint32_t>(mCurrentArrayBufferOffsets[v]);
 
-                const angle::Format &angleFormat =
-                    mCurrentArrayBufferFormats[v]->actualAngleFormat();
                 desc.attributes[v].format = mCurrentArrayBufferFormats[v]->metalFormat;
 
                 desc.attributes[v].bufferIndex = bufferIdx;
                 desc.attributes[v].offset      = 0;
-                ASSERT((bufferOffset % angleFormat.pixelBytes) == 0);
+                ASSERT((bufferOffset % mtl::kVertexAttribBufferStrideAlignment) == 0);
 
                 ASSERT(bufferIdx < mtl::kMaxVertexAttribs);
                 if (binding.getDivisor() == 0)
@@ -486,7 +454,24 @@ angle::Result VertexArrayMtl::setupDraw(const gl::Context *glContext,
                     desc.layouts[bufferIdx].stepRate     = binding.getDivisor();
                 }
 
-                desc.layouts[bufferIdx].stride = mCurrentArrayBufferStrides[v];
+                // Metal does not allow the sum of the buffer binding
+                // offset and the vertex layout stride to be greater
+                // than the buffer length.
+                // In OpenGL, this is valid only when a draw call accesses just
+                // one vertex, so just replace the stride with the format size.
+                uint32_t stride = mCurrentArrayBufferStrides[v];
+                if (mCurrentArrayBuffers[v])
+                {
+                    const size_t length = mCurrentArrayBuffers[v]->getCurrentBuffer()->size();
+                    const size_t offset = mCurrentArrayBufferOffsets[v];
+                    ASSERT(offset < length);
+                    if (length - offset < stride)
+                    {
+                        stride = mCurrentArrayBufferFormats[v]->actualAngleFormat().pixelBytes;
+                        ASSERT(stride % mtl::kVertexAttribBufferStrideAlignment == 0);
+                    }
+                }
+                desc.layouts[bufferIdx].stride = stride;
             }
         }  // for (v)
     }
@@ -511,7 +496,7 @@ angle::Result VertexArrayMtl::setupDraw(const gl::Context *glContext,
                 cmdEncoder->setVertexBuffer(mCurrentArrayBuffers[v]->getCurrentBuffer(),
                                             bufferOffset, bufferIdx);
             }
-            else
+            else if (mCurrentArrayInlineDataPointers[v])
             {
                 // No buffer specified, use the client memory directly as inline constant data
                 ASSERT(mCurrentArrayInlineDataSizes[v] <= mInlineDataMaxSize);
@@ -662,6 +647,7 @@ angle::Result VertexArrayMtl::syncDirtyAttrib(const gl::Context *glContext,
 {
     ContextMtl *contextMtl = mtl::GetImpl(glContext);
     ASSERT(mtl::kMaxVertexAttribs > attribIndex);
+    mContentsObserverBindingsMask.reset(attrib.bindingIndex);
 
     if (attrib.enabled)
     {
@@ -674,10 +660,9 @@ angle::Result VertexArrayMtl::syncDirtyAttrib(const gl::Context *glContext,
             // https://bugs.webkit.org/show_bug.cgi?id=236733
             // even non-converted buffers need to be observed for potential
             // data rebinds.
-            mContentsObservers->enableForBuffer(bufferGL, static_cast<uint32_t>(attribIndex));
+            mContentsObserverBindingsMask.set(attrib.bindingIndex);
             bool needConversion =
                 format.actualFormatId != format.intendedFormatId ||
-                (binding.getOffset() % format.actualAngleFormat().pixelBytes) != 0 ||
                 (binding.getOffset() % mtl::kVertexAttribBufferStrideAlignment) != 0 ||
                 (binding.getStride() < format.actualAngleFormat().pixelBytes) ||
                 (binding.getStride() % mtl::kVertexAttribBufferStrideAlignment) != 0;
@@ -1020,14 +1005,6 @@ angle::Result VertexArrayMtl::convertVertexBuffer(const gl::Context *glContext,
 
     bool canExpandComponentsOnGPU = convertedFormat.actualSameGLType;
 
-    if (contextMtl->getRenderCommandEncoder() &&
-        !contextMtl->getDisplay()->getFeatures().hasCheapRenderPass.enabled &&
-        !contextMtl->getDisplay()->getFeatures().hasExplicitMemBarrier.enabled)
-    {
-        // Cannot use GPU to convert when we are in a middle of a render pass.
-        canConvertToFloatOnGPU = canExpandComponentsOnGPU = false;
-    }
-
     conversion->data.releaseInFlightBuffers(contextMtl);
     conversion->data.updateAlignment(contextMtl, convertedAngleFormat.pixelBytes);
 
@@ -1129,36 +1106,18 @@ angle::Result VertexArrayMtl::convertVertexBufferGPU(const gl::Context *glContex
 
     params.vertexCount = static_cast<uint32_t>(numVertices);
 
-    mtl::RenderUtils &utils                  = contextMtl->getDisplay()->getUtils();
-    mtl::RenderCommandEncoder *renderEncoder = contextMtl->getRenderCommandEncoder();
-    if (renderEncoder && contextMtl->getDisplay()->getFeatures().hasExplicitMemBarrier.enabled)
+    mtl::RenderUtils &utils = contextMtl->getDisplay()->getUtils();
+
+    // Compute based buffer conversion.
+    if (!isExpandingComponents)
     {
-        // If we are in the middle of a render pass, use vertex shader based buffer conversion to
-        // avoid breaking the render pass.
-        if (!isExpandingComponents)
-        {
-            ANGLE_TRY(utils.convertVertexFormatToFloatVS(
-                glContext, renderEncoder, convertedFormat.intendedAngleFormat(), params));
-        }
-        else
-        {
-            ANGLE_TRY(utils.expandVertexFormatComponentsVS(
-                glContext, renderEncoder, convertedFormat.intendedAngleFormat(), params));
-        }
+        ANGLE_TRY(utils.convertVertexFormatToFloatCS(
+            contextMtl, convertedFormat.intendedAngleFormat(), params));
     }
     else
     {
-        // Compute based buffer conversion.
-        if (!isExpandingComponents)
-        {
-            ANGLE_TRY(utils.convertVertexFormatToFloatCS(
-                contextMtl, convertedFormat.intendedAngleFormat(), params));
-        }
-        else
-        {
-            ANGLE_TRY(utils.expandVertexFormatComponentsCS(
-                contextMtl, convertedFormat.intendedAngleFormat(), params));
-        }
+        ANGLE_TRY(utils.expandVertexFormatComponentsCS(
+            contextMtl, convertedFormat.intendedAngleFormat(), params));
     }
 
     ANGLE_TRY(conversion->data.commit(contextMtl));

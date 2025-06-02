@@ -78,13 +78,9 @@ def diff_files(path, expected_path):
 
 def run_test(test_name, overwrite_expected):
     with temporary_dir() as temp_dir:
+        cmd = [angle_test_util.ExecutablePathInCurrentDir('angle_end2end_tests')]
         if angle_test_util.IsAndroid():
-            cmd = [
-                '../../src/tests/angle_android_test_runner.py', 'gtest',
-                '--suite=angle_end2end_tests', '--output-directory=.'
-            ]
-        else:
-            cmd = [angle_test_util.ExecutablePathInCurrentDir('angle_end2end_tests')]
+            cmd.append('--angle-test-runner')
 
         test_args = ['--gtest_filter=%s' % test_name, '--angle-per-test-capture-label']
         extra_env = {
@@ -96,6 +92,7 @@ def run_test(test_name, overwrite_expected):
         }
         subprocess.check_call(cmd + test_args, env={**os.environ.copy(), **extra_env})
         logging.info('Capture finished, comparing files')
+        logging.warning('OpenCL capturing is not included in the comparison.')
         files = sorted(fn for fn in os.listdir(temp_dir))
         expected_dir = os.path.join(SCRIPT_DIR, 'expected')
         expected_files = sorted(fn for fn in os.listdir(expected_dir) if not fn.startswith('.'))
@@ -114,7 +111,8 @@ def run_test(test_name, overwrite_expected):
 
         has_diffs = False
         for fn in files:
-            has_diffs |= diff_files(os.path.join(temp_dir, fn), os.path.join(expected_dir, fn))
+            if not fn.startswith('CapturedTestCL'):
+                has_diffs |= diff_files(os.path.join(temp_dir, fn), os.path.join(expected_dir, fn))
 
         return not has_diffs
 
@@ -131,7 +129,7 @@ def main():
 
     angle_test_util.Initialize('angle_end2end_tests')
 
-    test_name = 'CapturedTest.MultiFrame/ES3_Vulkan'
+    test_name = 'CapturedTest*/ES3_Vulkan'
     had_error = False
     try:
         if not run_test(test_name, args.overwrite_expected):

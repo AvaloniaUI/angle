@@ -85,7 +85,11 @@ class ProgramExecutableGL : public ProgramExecutableImpl
 
     void updateEnabledClipDistances(uint8_t enabledClipDistancesPacked) const;
 
+    void updateEmulatedClipOrigin(gl::ClipOrigin origin) const;
+
     void enableLayeredRenderingPath(int baseViewIndex) const;
+
+    void syncUniformBlockBindings();
 
     GLuint getProgramID() const { return mProgramID; }
 
@@ -101,6 +105,9 @@ class ProgramExecutableGL : public ProgramExecutableImpl
     // Helper function, makes it simpler to type.
     GLint uniLoc(GLint glLocation) const { return mUniformRealLocationMap[glLocation]; }
 
+    void setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding);
+    void reapplyUBOBindings();
+
     std::vector<GLint> mUniformRealLocationMap;
     std::vector<GLuint> mUniformBlockRealLocationMap;
 
@@ -108,7 +115,16 @@ class ProgramExecutableGL : public ProgramExecutableImpl
 
     GLint mClipDistanceEnabledUniformLocation;
 
+    GLint mClipOriginUniformLocation;
+
     GLint mMultiviewBaseViewLayerIndexUniformLocation;
+
+    // Indiciates which uniform blocks have had their bindings changed since last sync.  These
+    // changes are a result of calls to glUniformBlockBinding, and only the GL backend needs to
+    // directly act on them (which is why it's not tracked by the front-end, the other backends
+    // combine this info with the actual buffer bindings).
+    angle::BitSet<gl::IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS>
+        mDirtyUniformBlockBindings;
 
     // The program for which the executable was built
     GLuint mProgramID;

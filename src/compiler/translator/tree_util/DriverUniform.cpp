@@ -22,9 +22,6 @@ namespace sh
 
 namespace
 {
-constexpr ImmutableString kEmulatedDepthRangeParams = ImmutableString("ANGLEDepthRangeParams");
-constexpr ImmutableString kDriverUniformsBlockName  = ImmutableString("ANGLEUniformBlock");
-constexpr ImmutableString kDriverUniformsVarName    = ImmutableString("ANGLEUniforms");
 
 constexpr const char kAcbBufferOffsets[] = "acbBufferOffsets";
 constexpr const char kDepthRange[]       = "depthRange";
@@ -284,9 +281,8 @@ TIntermTyped *DriverUniform::getHalfRenderArea() const
 TIntermTyped *DriverUniform::getFlipXY(TSymbolTable *symbolTable, DriverUniformFlip stage) const
 {
     TIntermTyped *flipXY = createDriverUniformRef(kFlipXY);
-    TIntermTyped *values = CreateBuiltInUnaryFunctionCallNode(
-        "unpackSnorm4x8", flipXY, *symbolTable,
-        GetESSLOrGLSLVersion(symbolTable->getShaderSpec(), 310, 400));
+    TIntermTyped *values =
+        CreateBuiltInUnaryFunctionCallNode("unpackSnorm4x8", flipXY, *symbolTable, 310);
 
     if (stage == DriverUniformFlip::Fragment)
     {
@@ -381,6 +377,22 @@ TIntermTyped *DriverUniform::getAlphaToCoverage() const
 
     TIntermSequence args = {
         alphaToCoverage,
+    };
+    return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
+                                               &args);
+}
+
+TIntermTyped *DriverUniform::getLayeredFramebuffer() const
+{
+    TIntermTyped *miscRef            = createDriverUniformRef(kMisc);
+    TIntermTyped *layeredFramebuffer = new TIntermBinary(
+        EOpBitShiftRight, miscRef, CreateUIntNode(vk::kDriverUniformsMiscLayeredFramebufferOffset));
+    layeredFramebuffer =
+        new TIntermBinary(EOpBitwiseAnd, layeredFramebuffer,
+                          CreateUIntNode(vk::kDriverUniformsMiscLayeredFramebufferMask));
+
+    TIntermSequence args = {
+        layeredFramebuffer,
     };
     return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
                                                &args);

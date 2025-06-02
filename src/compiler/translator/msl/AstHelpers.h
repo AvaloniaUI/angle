@@ -11,22 +11,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/span.h"
+#include "compiler/translator/Name.h"
 #include "compiler/translator/msl/IdGen.h"
-#include "compiler/translator/msl/Name.h"
 #include "compiler/translator/msl/SymbolEnv.h"
 
 namespace sh
 {
-
-// Creates a variable for a struct type.
-const TVariable &CreateStructTypeVariable(TSymbolTable &symbolTable, const TStructure &structure);
-
-// Creates a variable for a struct instance.
-const TVariable &CreateInstanceVariable(TSymbolTable &symbolTable,
-                                        const TStructure &structure,
-                                        const Name &name,
-                                        TQualifier qualifier = TQualifier::EvqTemporary,
-                                        const TSpan<const unsigned int> *arraySizes = nullptr);
 
 // The input sequence should be discarded from AST after this is called.
 TIntermSequence &CloneSequenceAndPrepend(const TIntermSequence &seq, TIntermNode &node);
@@ -72,22 +63,6 @@ TIntermTyped &GetArg(const TIntermAggregate &call, size_t index);
 // Sets the argument of a function call at the given index.
 void SetArg(TIntermAggregate &call, size_t index, TIntermTyped &arg);
 
-// Returns the field index within the given struct for the given field name.
-// Returns -1 if the struct has no field with the given name.
-int GetFieldIndex(const TStructure &structure, const ImmutableString &fieldName);
-
-// Accesses a field for the given variable with the given field name.
-// The variable must be a struct instance.
-TIntermBinary &AccessField(const TVariable &structInstanceVar, const ImmutableString &fieldName);
-
-// Accesses a field for the given node with the given field name.
-// The node must be a struct instance.
-TIntermBinary &AccessField(TIntermTyped &object, const ImmutableString &fieldName);
-
-// Accesses a field for the given node by its field index.
-// The node must be a struct instance.
-TIntermBinary &AccessFieldByIndex(TIntermTyped &object, int index);
-
 // Accesses an element by index for the given node.
 // The node must be an array, vector, or matrix.
 TIntermBinary &AccessIndex(TIntermTyped &indexableNode, int index);
@@ -101,17 +76,17 @@ TIntermTyped &AccessIndex(TIntermTyped &node, const int *index);
 // This returns the original node if the slice is an identity for the node.
 TIntermTyped &SubVector(TIntermTyped &vectorNode, int begin, int end);
 
-// Matches scalar bool, int, uint32_t, float, double.
+// Matches scalar bool, int, uint32_t, float.
 bool IsScalarBasicType(const TType &type);
 
-// Matches vector bool, int, uint32_t, float, double.
+// Matches vector bool, int, uint32_t, float.
 bool IsVectorBasicType(const TType &type);
 
-// Matches bool, int, uint32_t, float, double.
+// Matches bool, int, uint32_t, float.
 // Type does not need to be a scalar.
 bool HasScalarBasicType(const TType &type);
 
-// Matches bool, int, uint32_t, float, double.
+// Matches bool, int, uint32_t, float.
 bool HasScalarBasicType(TBasicType type);
 
 // Clones a type.

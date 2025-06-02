@@ -28,12 +28,14 @@ ANGLE_REQUIRE_CONSTANT_INIT gl::Context *g_LastContext(nullptr);
 static_assert(std::is_trivially_destructible<decltype(g_LastContext)>::value,
               "global last context is not trivially destructible");
 
+bool g_EGLValidationEnabled = true;
+
 // Called only on Android platform
 [[maybe_unused]] void ThreadCleanupCallback(void *ptr)
 {
     egl::Thread *thread = static_cast<egl::Thread *>(ptr);
     ASSERT(thread);
-    ANGLE_SCOPED_GLOBAL_LOCK();
+    ANGLE_SCOPED_GLOBAL_EGL_AND_EGL_SYNC_LOCK();
     // ReleaseThread() and makeCurrent() inside will perform:
     // - destroy Context if it was already marked for destruction;
     // - invalidate Context if Display was already terminated by app;
@@ -175,27 +177,33 @@ ScopedSyncCurrentContextFromThread::~ScopedSyncCurrentContextFromThread()
     SetContextCurrent(mThread, mThread->getContext());
 }
 
+void SetEGLValidationEnabled(bool enabled)
+{
+    g_EGLValidationEnabled = enabled;
+}
+
+bool IsEGLValidationEnabled()
+{
+    return g_EGLValidationEnabled;
+}
+
 }  // namespace egl
 
 namespace gl
 {
-void GenerateContextLostErrorOnContext(Context *context)
-{
-    if (context && context->isContextLost())
-    {
-        context->getMutableErrorSetForValidation()->validationError(
-            angle::EntryPoint::Invalid, GL_CONTEXT_LOST, err::kContextLost);
-    }
-}
-
-void GenerateContextLostErrorOnCurrentGlobalContext()
+void GenerateContextLostErrorOnCurrentGlobalContext(angle::EntryPoint entryPoint)
 {
     // If the client starts issuing GL calls before ANGLE has had a chance to initialize,
     // GenerateContextLostErrorOnCurrentGlobalContext can be called before AllocateCurrentThread has
     // had a chance to run. Calling GetCurrentThread() ensures that TLS thread state is set up.
     egl::GetCurrentThread();
 
-    GenerateContextLostErrorOnContext(GetGlobalContext());
+    Context *context = GetGlobalContext();
+    if (context != nullptr && context->isContextLost())
+    {
+        context->getMutableErrorSetForValidation()->validationError(entryPoint, GL_CONTEXT_LOST,
+                                                                    err::kContextLost);
+    }
 }
 }  // namespace gl
 
@@ -286,7 +294,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
     switch (reason)
     {
         case DLL_PROCESS_ATTACH:
-            if (angle::GetEnvironmentVar("ANGLE_WAIT_FOR_DEBUGGER") == "1")
+            if (angle::GetBoolEnvironmentVar("ANGLE_WAIT_FOR_DEBUGGER"))
             {
                 WaitForDebugger(instance);
             }

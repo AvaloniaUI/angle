@@ -10,12 +10,13 @@
 #include "common/system_utils.h"
 #include "compiler/translator/BaseTypes.h"
 #include "compiler/translator/ImmutableStringBuilder.h"
+#include "compiler/translator/Name.h"
+#include "compiler/translator/OutputTree.h"
 #include "compiler/translator/SymbolTable.h"
 #include "compiler/translator/msl/AstHelpers.h"
 #include "compiler/translator/msl/DebugSink.h"
 #include "compiler/translator/msl/EmitMetal.h"
 #include "compiler/translator/msl/Layout.h"
-#include "compiler/translator/msl/Name.h"
 #include "compiler/translator/msl/ProgramPrelude.h"
 #include "compiler/translator/msl/RewritePipelines.h"
 #include "compiler/translator/msl/TranslatorMSL.h"
@@ -144,6 +145,8 @@ class GenMetalTraverser : public TIntermTraverser
                            const VarDecl &decl,
                            const TQualifier qualifier);
 
+    void emitLoopBody(TIntermBlock *bodyNode);
+
     struct FieldAnnotationIndices
     {
         size_t attribute = 0;
@@ -191,13 +194,14 @@ class GenMetalTraverser : public TIntermTraverser
     bool isTraversingVertexMain       = false;
     bool mTemporarilyDisableSemicolon = false;
     std::unordered_map<const TSymbol *, Name> mRenamedSymbols;
-    const FuncToName mFuncToName          = BuildFuncToName();
-    size_t mMainTextureIndex              = 0;
-    size_t mMainSamplerIndex              = 0;
-    size_t mMainUniformBufferIndex        = 0;
-    size_t mDriverUniformsBindingIndex    = 0;
-    size_t mUBOArgumentBufferBindingIndex = 0;
-    bool mRasterOrderGroupsSupported      = false;
+    const FuncToName mFuncToName           = BuildFuncToName();
+    size_t mMainTextureIndex               = 0;
+    size_t mMainSamplerIndex               = 0;
+    size_t mMainUniformBufferIndex         = 0;
+    size_t mDriverUniformsBindingIndex     = 0;
+    size_t mUBOArgumentBufferBindingIndex  = 0;
+    bool mRasterOrderGroupsSupported       = false;
+    bool mInjectAsmStatementIntoLoopBodies = false;
 };
 }  // anonymous namespace
 
@@ -224,7 +228,8 @@ GenMetalTraverser::GenMetalTraverser(const TCompiler &compiler,
       mDriverUniformsBindingIndex(compileOptions.metal.driverUniformsBindingIndex),
       mUBOArgumentBufferBindingIndex(compileOptions.metal.UBOArgumentBufferBindingIndex),
       mRasterOrderGroupsSupported(compileOptions.pls.fragmentSyncType ==
-                                  ShFragmentSynchronizationType::RasterOrderGroups_Metal)
+                                  ShFragmentSynchronizationType::RasterOrderGroups_Metal),
+      mInjectAsmStatementIntoLoopBodies(compileOptions.metal.injectAsmStatementIntoLoopBodies)
 {}
 
 void GenMetalTraverser::emitIndentation()
@@ -274,9 +279,9 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpInitialize:
             return "=";
         case TOperator::EOpAddAssign:
-            return "+=";
+            return resultType.isSignedInt() ? "ANGLE_addAssignInt" : "+=";
         case TOperator::EOpSubAssign:
-            return "-=";
+            return resultType.isSignedInt() ? "ANGLE_subAssignInt" : "-=";
         case TOperator::EOpMulAssign:
             return "*=";
         case TOperator::EOpDivAssign:
@@ -294,9 +299,9 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpBitwiseOrAssign:
             return "|=";
         case TOperator::EOpAdd:
-            return "+";
+            return resultType.isSignedInt() ? "ANGLE_addInt" : "+";
         case TOperator::EOpSub:
-            return "-";
+            return resultType.isSignedInt() ? "ANGLE_subInt" : "-";
         case TOperator::EOpMul:
             return "*";
         case TOperator::EOpDiv:
@@ -351,13 +356,13 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpBitwiseNot:
             return "~";
         case TOperator::EOpPostIncrement:
-            return "++";
+            return resultType.isSignedInt() ? "ANGLE_postIncrementInt" : "++";
         case TOperator::EOpPostDecrement:
-            return "--";
+            return resultType.isSignedInt() ? "ANGLE_postDecrementInt" : "--";
         case TOperator::EOpPreIncrement:
-            return "++";
+            return resultType.isSignedInt() ? "ANGLE_preIncrementInt" : "++";
         case TOperator::EOpPreDecrement:
-            return "--";
+            return resultType.isSignedInt() ? "ANGLE_preDecrementInt" : "--";
         case TOperator::EOpVectorTimesScalarAssign:
             return "*=";
         case TOperator::EOpVectorTimesMatrixAssign:
@@ -433,29 +438,29 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpDegrees:
             return "ANGLE_degrees";
         case TOperator::EOpAtan:
-            return "ANGLE_atan";
+            return argType1 == nullptr ? "metal::atan" : "metal::atan2";
         case TOperator::EOpMod:
             return "ANGLE_mod";  // differs from metal::mod
         case TOperator::EOpRefract:
-            return "ANGLE_refract";
+            return argType0->isVector() ? "metal::refract" : "ANGLE_refract_scalar";
         case TOperator::EOpDistance:
-            return "ANGLE_distance";
+            return argType0->isVector() ? "metal::distance" : "ANGLE_distance_scalar";
         case TOperator::EOpLength:
-            return "ANGLE_length";
+            return argType0->isVector() ? "metal::length" : "metal::abs";
         case TOperator::EOpDot:
-            return "ANGLE_dot";
+            return argType0->isVector() ? "metal::dot" : "*";
         case TOperator::EOpNormalize:
-            return "ANGLE_normalize";
+            return argType0->isVector() ? "metal::fast::normalize" : "metal::sign";
         case TOperator::EOpFaceforward:
-            return "ANGLE_faceforward";
+            return argType0->isVector() ? "metal::faceforward" : "ANGLE_faceforward_scalar";
         case TOperator::EOpReflect:
-            return "ANGLE_reflect";
+            return argType0->isVector() ? "metal::reflect" : "ANGLE_reflect_scalar";
         case TOperator::EOpMatrixCompMult:
             return "ANGLE_componentWiseMultiply";
         case TOperator::EOpOuterProduct:
             return "ANGLE_outerProduct";
         case TOperator::EOpSign:
-            return "ANGLE_sign";
+            return argType0->getBasicType() == EbtFloat ? "metal::sign" : "ANGLE_sign_int";
 
         case TOperator::EOpAbs:
             return "metal::abs";
@@ -478,7 +483,8 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpCosh:
             return "metal::cosh";
         case TOperator::EOpTanh:
-            return "metal::tanh";
+            return resultType.getPrecision() == TPrecision::EbpHigh ? "metal::precise::tanh"
+                                                                    : "metal::tanh";
         case TOperator::EOpAsinh:
             return "metal::asinh";
         case TOperator::EOpAcosh:
@@ -520,8 +526,10 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpSaturate:
             return "metal::saturate";  // TODO fast vs precise namespace
         case TOperator::EOpMix:
-            if (argType2 && argType2->getBasicType() == EbtBool)
+            if (!argType1->isScalar() && argType2 && argType2->getBasicType() == EbtBool)
+            {
                 return "ANGLE_mix_bool";
+            }
             return "metal::mix";
         case TOperator::EOpStep:
             return "metal::step";
@@ -686,9 +694,6 @@ static const char *GetOperatorString(TOperator op,
         case TOperator::EOpAtomicCompSwap:
         case TOperator::EOpEmitVertex:
         case TOperator::EOpEndPrimitive:
-        case TOperator::EOpFtransform:
-        case TOperator::EOpPackDouble2x32:
-        case TOperator::EOpUnpackDouble2x32:
         case TOperator::EOpArrayLength:
             UNIMPLEMENTED();
             return "TOperator_TODO";
@@ -875,6 +880,24 @@ void GenMetalTraverser::emitPostQualifier(const EmitVariableDeclarationConfig &e
     }
 }
 
+void GenMetalTraverser::emitLoopBody(TIntermBlock *bodyNode)
+{
+    if (mInjectAsmStatementIntoLoopBodies)
+    {
+        emitOpenBrace();
+
+        emitIndentation();
+        mOut << "__asm__(\"\");\n";
+    }
+
+    bodyNode->traverse(this);
+
+    if (mInjectAsmStatementIntoLoopBodies)
+    {
+        emitCloseBrace();
+    }
+}
+
 static void EmitName(Sink &out, const Name &name)
 {
 #if defined(ANGLE_ENABLE_ASSERTS)
@@ -1012,7 +1035,7 @@ void GenMetalTraverser::emitType(const TType &type, const EmitTypeConfig &etConf
         {
             if (type.isArray())
             {
-                mOut << "ANGLE_tensor<";
+                mOut << "metal::array<";
             }
         }
         if (evdConfig.isPointer)
@@ -1031,7 +1054,7 @@ void GenMetalTraverser::emitType(const TType &type, const EmitTypeConfig &etConf
     {
         if (type.isArray())
         {
-            mOut << "ANGLE_tensor<";
+            mOut << "metal::array<";
         }
     }
 
@@ -1191,7 +1214,8 @@ void GenMetalTraverser::emitFieldDeclaration(const TField &field,
         case TQualifier::EvqFragmentOut:
         case TQualifier::EvqFragmentInOut:
         case TQualifier::EvqFragData:
-            if (mPipelineStructs.fragmentOut.external == &parent)
+            if (mPipelineStructs.fragmentOut.external == &parent ||
+                mPipelineStructs.fragmentOut.externalExtra == &parent)
             {
                 if ((type.isVector() &&
                      (basic == TBasicType::EbtInt || basic == TBasicType::EbtUInt ||
@@ -1228,8 +1252,8 @@ void GenMetalTraverser::emitFieldDeclaration(const TField &field,
                         // Put fragment inouts in their own raster order group for better
                         // parallelism.
                         // NOTE: this is not required for the reads to be ordered and coherent.
-                        // TODO(anglebug.com/7279): Consider making raster order groups a PLS layout
-                        // qualifier?
+                        // TODO(anglebug.com/40096838): Consider making raster order groups a PLS
+                        // layout qualifier?
                         mOut << ", raster_order_group(0)";
                     }
                     mOut << "]]";
@@ -1258,7 +1282,7 @@ void GenMetalTraverser::emitFieldDeclaration(const TField &field,
             if (field.symbolType() == SymbolType::AngleInternal)
             {
                 mOut << " [[sample_mask, function_constant("
-                     << sh::mtl::kMultisampledRenderingConstName << ")]]";
+                     << sh::mtl::kSampleMaskWriteEnabledConstName << ")]]";
             }
             break;
 
@@ -1407,6 +1431,15 @@ void GenMetalTraverser::emitStructDeclaration(const TType &type)
 
     if (hasAttributeIndices)
     {
+        // When attribute aliasing is supported, external attribute struct is filled post-link.
+        if (mCompiler.supportsAttributeAliasing())
+        {
+            mtl::getTranslatorMetalReflection(&mCompiler)->hasAttributeAliasing = true;
+            mOut << "@@Attrib-Bindings@@\n";
+            emitCloseBrace();
+            return;
+        }
+
         fieldToAttributeIndex =
             BuildExternalAttributeIndexMap(mCompiler, mPipelineStructs.vertexIn);
     }
@@ -1740,6 +1773,18 @@ bool GenMetalTraverser::visitBinary(Visit, TIntermBinary *binaryNode)
             TType leftType = leftNode.getType();
             groupedTraverse(leftNode);
             mOut << "[";
+            const TConstantUnion *constIndex = rightNode.getConstantValue();
+            // TODO(anglebug.com/42266914): Convert type and bound checks to
+            // assertions after AST validation is enabled for MSL translation.
+            if (!leftType.isUnsizedArray() && constIndex != nullptr &&
+                constIndex->getType() == EbtInt && constIndex->getIConst() >= 0 &&
+                constIndex->getIConst() < static_cast<int>(leftType.isArray()
+                                                               ? leftType.getOutermostArraySize()
+                                                               : leftType.getNominalSize()))
+            {
+                emitSingleConstant(constIndex);
+            }
+            else
             {
                 mOut << "ANGLE_int_clamp(";
                 groupedTraverse(rightNode);
@@ -1823,6 +1868,11 @@ bool GenMetalTraverser::visitUnary(Visit, TIntermUnary *unaryNode)
 
     TIntermTyped &arg    = *unaryNode->getOperand();
     const TType &argType = arg.getType();
+
+    if (op == TOperator::EOpIsnan || op == TOperator::EOpIsinf)
+    {
+        mtl::getTranslatorMetalReflection(&mCompiler)->hasIsnanOrIsinf = true;
+    }
 
     const char *name = GetOperatorString(op, resultType, &argType, nullptr, nullptr);
 
@@ -2113,9 +2163,6 @@ GenMetalTraverser::FuncToName GenMetalTraverser::BuildFuncToName()
     putAngle("texelFetch");
     putAngle("texelFetchOffset");
     putAngle("texture");
-    putAngle("texture1D");
-    putAngle("texture1DLod");
-    putAngle("texture1DProjLod");
     putAngle("texture2D");
     putAngle("texture2DGradEXT");
     putAngle("texture2DLod");
@@ -2124,16 +2171,14 @@ GenMetalTraverser::FuncToName GenMetalTraverser::BuildFuncToName()
     putAngle("texture2DProjGradEXT");
     putAngle("texture2DProjLod");
     putAngle("texture2DProjLodEXT");
-    putAngle("texture2DRect");
-    putAngle("texture2DRectProj");
     putAngle("texture3D");
     putAngle("texture3DLod");
+    putAngle("texture3DProj");
     putAngle("texture3DProjLod");
     putAngle("textureCube");
     putAngle("textureCubeGradEXT");
     putAngle("textureCubeLod");
     putAngle("textureCubeLodEXT");
-    putAngle("textureCubeProjLod");
     putAngle("textureGrad");
     putAngle("textureGradOffset");
     putAngle("textureLod");
@@ -2460,6 +2505,15 @@ bool GenMetalTraverser::visitDeclaration(Visit, TIntermDeclaration *declNode)
     {
         const TVariable &var = symbolNode->variable();
         emitVariableDeclaration(VarDecl(var), evdConfig);
+        if (var.getType().isArray() && var.getType().getQualifier() == EvqTemporary)
+        {
+            // The translator frontend injects a loop-based init for user arrays when the source
+            // shader is using ESSL 1.00. Some Metal drivers may fail to access elements of such
+            // arrays at runtime depending on the array size. An empty literal initializer added
+            // to the generated MSL bypasses the issue. The frontend may be further optimized to
+            // skip the loop-based init when targeting MSL.
+            mOut << "{}";
+        }
     }
     else if (TIntermBinary *initNode = node.getAsBinaryNode())
     {
@@ -2520,8 +2574,6 @@ bool GenMetalTraverser::visitForLoop(TIntermLoop *loopNode)
     TIntermNode *initNode  = loopNode->getInit();
     TIntermTyped *condNode = loopNode->getCondition();
     TIntermTyped *exprNode = loopNode->getExpression();
-    TIntermBlock *bodyNode = loopNode->getBody();
-    ASSERT(bodyNode);
 
     mOut << "for (";
 
@@ -2550,7 +2602,7 @@ bool GenMetalTraverser::visitForLoop(TIntermLoop *loopNode)
 
     mOut << ")\n";
 
-    bodyNode->traverse(this);
+    emitLoopBody(loopNode->getBody());
 
     return false;
 }
@@ -2562,15 +2614,14 @@ bool GenMetalTraverser::visitWhileLoop(TIntermLoop *loopNode)
     TIntermNode *initNode  = loopNode->getInit();
     TIntermTyped *condNode = loopNode->getCondition();
     TIntermTyped *exprNode = loopNode->getExpression();
-    TIntermBlock *bodyNode = loopNode->getBody();
-    ASSERT(condNode && bodyNode);
+    ASSERT(condNode);
     ASSERT(!initNode && !exprNode);
 
     emitIndentation();
     mOut << "while (";
     condNode->traverse(this);
     mOut << ")\n";
-    bodyNode->traverse(this);
+    emitLoopBody(loopNode->getBody());
 
     return false;
 }
@@ -2582,13 +2633,12 @@ bool GenMetalTraverser::visitDoWhileLoop(TIntermLoop *loopNode)
     TIntermNode *initNode  = loopNode->getInit();
     TIntermTyped *condNode = loopNode->getCondition();
     TIntermTyped *exprNode = loopNode->getExpression();
-    TIntermBlock *bodyNode = loopNode->getBody();
-    ASSERT(condNode && bodyNode);
+    ASSERT(condNode);
     ASSERT(!initNode && !exprNode);
 
     emitIndentation();
     mOut << "do\n";
-    bodyNode->traverse(this);
+    emitLoopBody(loopNode->getBody());
     mOut << "\n";
     emitIndentation();
     mOut << "while (";

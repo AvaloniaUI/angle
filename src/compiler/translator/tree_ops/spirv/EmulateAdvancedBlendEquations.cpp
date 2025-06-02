@@ -34,13 +34,13 @@ class Builder
   public:
     Builder(TCompiler *compiler,
             TSymbolTable *symbolTable,
+            const AdvancedBlendEquations &advancedBlendEquations,
             const DriverUniform *driverUniforms,
-            std::vector<ShaderVariable> *uniforms,
-            const AdvancedBlendEquations &advancedBlendEquations)
+            InputAttachmentMap *inputAttachmentMap)
         : mCompiler(compiler),
           mSymbolTable(symbolTable),
           mDriverUniforms(driverUniforms),
-          mUniforms(uniforms),
+          mInputAttachmentMap(inputAttachmentMap),
           mAdvancedBlendEquations(advancedBlendEquations)
     {}
 
@@ -60,7 +60,7 @@ class Builder
     TCompiler *mCompiler;
     TSymbolTable *mSymbolTable;
     const DriverUniform *mDriverUniforms;
-    std::vector<ShaderVariable> *mUniforms;
+    InputAttachmentMap *mInputAttachmentMap;
     const AdvancedBlendEquations &mAdvancedBlendEquations;
 
     // The color input and output.  Output is the blend source, and input is the destination.
@@ -93,7 +93,7 @@ class Builder
 bool Builder::build(TIntermBlock *root)
 {
     // Find the output variable for which advanced blend is specified.  Note that advanced blend can
-    // only used when rendering is done to a single color attachment.
+    // only be used when rendering is done to a single color attachment.
     findColorOutput(root);
     if (mSubpassInputVar == nullptr)
     {
@@ -164,7 +164,9 @@ void Builder::findColorOutput(TIntermBlock *root)
             }
         }
 
-        if (IsSubpassInputType(type.getBasicType()))
+        if (IsSubpassInputType(type.getBasicType()) &&
+            symbol->getName() != "ANGLEDepthInputAttachment" &&
+            symbol->getName() != "ANGLEStencilInputAttachment")
         {
             // There can only be one output with advanced blend, so there can only be a maximum of
             // one subpass input already defined (by framebuffer fetch emulation).
@@ -212,15 +214,7 @@ void Builder::createSubpassInputVar(TIntermBlock *root)
     subpassInputDecl->appendDeclarator(subpassInputSymbol);
     root->insertStatement(0, subpassInputDecl);
 
-    // Add the new subpass input to the list of uniforms.
-    ShaderVariable subpassInputUniform;
-    subpassInputUniform.active    = true;
-    subpassInputUniform.staticUse = true;
-    subpassInputUniform.name.assign(kSubpassInputName);
-    subpassInputUniform.mappedName.assign(kSubpassInputName);
-    subpassInputUniform.isFragmentInOut = true;
-    subpassInputUniform.location        = inputAttachmentIndex;
-    mUniforms->push_back(subpassInputUniform);
+    mInputAttachmentMap->color[inputAttachmentIndex] = mSubpassInputVar;
 }
 
 TIntermTyped *Float(float f)
@@ -1049,7 +1043,7 @@ TIntermSymbol *Builder::premultiplyAlpha(TIntermBlock *blendBlock,
     constexpr int kColorChannels = 3;
     // For each component:
     // symbol.x = (var.x == var.w) ? 1.0 : var.x / var.w
-    for (int index = 0; index < kColorChannels; index++)
+    for (uint32_t index = 0; index < kColorChannels; index++)
     {
         TIntermTyped *divideNode        = divideFloatNode(new TIntermSwizzle(var, {index}), alpha);
         TIntermBinary *assignDivideNode = new TIntermBinary(
@@ -1083,10 +1077,6 @@ void Builder::generatePreamble(TIntermBlock *blendBlock)
     TIntermSymbol *subpassInputData = MakeVariable(mSymbolTable, "ANGLELastFragData", vec4Type);
 
     // Initialize it with subpassLoad() result.
-
-    // TODO: support interaction with multisampled framebuffers.  For example, the sample ID needs
-    // to be provided to the built-in call here.  http://anglebug.com/6195
-
     TIntermSequence subpassArguments  = {new TIntermSymbol(mSubpassInputVar)};
     TIntermTyped *subpassLoadFuncCall = CreateBuiltInFunctionCallNode(
         "subpassLoad", &subpassArguments, *mSymbolTable, kESSLInternalBackendBuiltIns);
@@ -1178,7 +1168,7 @@ void Builder::generateEquationSwitch(TIntermBlock *blendBlock)
         if (equation < gl::BlendEquationType::HslHue)
         {
             TIntermSequence constructorArgs;
-            for (int channel = 0; channel < 3; ++channel)
+            for (uint32_t channel = 0; channel < 3; ++channel)
             {
                 TIntermTyped *srcChannel = new TIntermSwizzle(mSrc->deepCopy(), {channel});
                 TIntermTyped *dstChannel = new TIntermSwizzle(mDst->deepCopy(), {channel});
@@ -1236,7 +1226,7 @@ void Builder::generateEquationSwitch(TIntermBlock *blendBlock)
     uint32_t vecSize = mOutputVar->getType().getNominalSize();
     if (vecSize < 4)
     {
-        TVector<int> swizzle = {0, 1, 2, 3};
+        TVector<uint32_t> swizzle = {0, 1, 2, 3};
         swizzle.resize(vecSize);
         blendResult = new TIntermSwizzle(blendResult, swizzle);
     }
@@ -1250,11 +1240,12 @@ void Builder::generateEquationSwitch(TIntermBlock *blendBlock)
 bool EmulateAdvancedBlendEquations(TCompiler *compiler,
                                    TIntermBlock *root,
                                    TSymbolTable *symbolTable,
+                                   const AdvancedBlendEquations &advancedBlendEquations,
                                    const DriverUniform *driverUniforms,
-                                   std::vector<ShaderVariable> *uniforms,
-                                   const AdvancedBlendEquations &advancedBlendEquations)
+                                   InputAttachmentMap *inputAttachmentMapOut)
 {
-    Builder builder(compiler, symbolTable, driverUniforms, uniforms, advancedBlendEquations);
+    Builder builder(compiler, symbolTable, advancedBlendEquations, driverUniforms,
+                    inputAttachmentMapOut);
     return builder.build(root);
 }  // namespace
 

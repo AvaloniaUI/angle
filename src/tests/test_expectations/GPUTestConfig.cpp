@@ -188,7 +188,7 @@ inline bool GetGPUTestSystemInfo(SystemInfo **sysInfo)
             // high-performance GPU for tests.
             // We can call the generic GPU info collector which selects the
             // non-Intel GPU as the active one on dual-GPU machines.
-            // See https://anglebug.com/3701.
+            // See https://anglebug.com/40096612.
             if (IsMac())
             {
                 GetDualGPUInfo(sSystemInfo);
@@ -275,6 +275,12 @@ inline bool IsVMWare()
 inline bool IsAppleGPU()
 {
     return angle::IsAppleGPU(GetActiveGPUVendorID());
+}
+
+// Check whether the active GPU is Qualcomm.
+inline bool IsQualcomm()
+{
+    return angle::IsQualcomm(GetActiveGPUVendorID());
 }
 
 // Check whether this is a debug build.
@@ -372,19 +378,34 @@ inline bool IsGalaxyA54()
     return IsAndroidDevice("SM-A546E");
 }
 
+inline bool IsGalaxyS22()
+{
+    return IsAndroidDevice("SM-S901B");
+}
+
 inline bool IsGalaxyS23()
 {
     return IsAndroidDevice("SM-S911U1");
 }
 
-inline bool IsGalaxyQualcomm()
+inline bool IsGalaxyS24Exynos()
 {
-    return IsGalaxyA23() || IsGalaxyS23();
+    return IsAndroidDevice("SM-S926B");
+}
+
+inline bool IsGalaxyS24Qualcomm()
+{
+    return IsAndroidDevice("SM-S928B");
 }
 
 inline bool IsFindX6()
 {
     return IsAndroidDevice("PGFM10");
+}
+
+inline bool IsPineapple()
+{
+    return IsAndroidDevice("Pineapple for arm64");
 }
 
 // Check whether the active GPU is a specific device based on the string device ID.
@@ -441,6 +462,12 @@ inline bool IsVulkan(const GPUTestConfig::API &api)
     return (api == GPUTestConfig::kAPIVulkan) || (api == GPUTestConfig::kAPISwiftShader);
 }
 
+// Check whether the backend API has been set to ANGLE Native in the constructor
+inline bool IsNative(const GPUTestConfig::API &api)
+{
+    return (api == GPUTestConfig::kAPINative);
+}
+
 inline bool IsSwiftShader(const GPUTestConfig::API &api)
 {
     return (api == GPUTestConfig::kAPISwiftShader);
@@ -450,6 +477,11 @@ inline bool IsSwiftShader(const GPUTestConfig::API &api)
 inline bool IsMetal(const GPUTestConfig::API &api)
 {
     return (api == GPUTestConfig::kAPIMetal);
+}
+
+inline bool IsWgpu(const GPUTestConfig::API &api)
+{
+    return (api == GPUTestConfig::kAPIWgpu);
 }
 
 }  // anonymous namespace
@@ -486,6 +518,7 @@ GPUTestConfig::GPUTestConfig(bool isSwiftShader)
     mConditions[kConditionIntel]       = !isSwiftShader && IsIntel();
     mConditions[kConditionVMWare]      = !isSwiftShader && IsVMWare();
     mConditions[kConditionApple]       = !isSwiftShader && IsAppleGPU();
+    mConditions[kConditionQualcomm]    = !isSwiftShader && IsQualcomm();
     mConditions[kConditionSwiftShader] = isSwiftShader;
 
     mConditions[kConditionRelease] = IsRelease();
@@ -497,6 +530,8 @@ GPUTestConfig::GPUTestConfig(bool isSwiftShader)
     mConditions[kConditionGLES]      = true;
     mConditions[kConditionVulkan]    = true;
     mConditions[kConditionMetal]     = true;
+    mConditions[kConditionWgpu]      = true;
+    mConditions[kConditionNative]    = true;
 
     // Devices are irrelevant if we are running on SW
     mConditions[kConditionNexus5X]          = !isSwiftShader && IsNexus5X();
@@ -509,9 +544,12 @@ GPUTestConfig::GPUTestConfig(bool isSwiftShader)
     mConditions[kConditionGalaxyA23]        = !isSwiftShader && (IsGalaxyA23());
     mConditions[kConditionGalaxyA34]        = !isSwiftShader && (IsGalaxyA34());
     mConditions[kConditionGalaxyA54]        = !isSwiftShader && (IsGalaxyA54());
+    mConditions[kConditionGalaxyS22]        = !isSwiftShader && (IsGalaxyS22());
     mConditions[kConditionGalaxyS23]        = !isSwiftShader && (IsGalaxyS23());
-    mConditions[kConditionGalaxyQualcomm]   = !isSwiftShader && (IsGalaxyQualcomm());
+    mConditions[kConditionGalaxyS24Exynos]   = !isSwiftShader && (IsGalaxyS24Exynos());
+    mConditions[kConditionGalaxyS24Qualcomm] = !isSwiftShader && (IsGalaxyS24Qualcomm());
     mConditions[kConditionFindX6]           = !isSwiftShader && (IsFindX6());
+    mConditions[kConditionPineapple]        = !isSwiftShader && IsPineapple();
     mConditions[kConditionNVIDIAQuadroP400] = !isSwiftShader && IsNVIDIAQuadroP400();
     mConditions[kConditionNVIDIAGTX1660]    = !isSwiftShader && IsNVIDIAGTX1660();
 
@@ -536,6 +574,8 @@ GPUTestConfig::GPUTestConfig(const API &api, uint32_t preRotation)
     mConditions[kConditionGLES]      = IsGLES(api);
     mConditions[kConditionVulkan]    = IsVulkan(api);
     mConditions[kConditionMetal]     = IsMetal(api);
+    mConditions[kConditionWgpu]      = IsWgpu(api);
+    mConditions[kConditionNative]    = IsNative(api);
 
     switch (preRotation)
     {

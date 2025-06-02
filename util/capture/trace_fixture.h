@@ -27,7 +27,7 @@
 #    include <unordered_map>
 #    include <vector>
 
-// TODO(jmadill): Consolidate. http://anglebug.com/7753
+// TODO(jmadill): Consolidate. http://anglebug.com/42266223
 using BlockIndexesMap = std::unordered_map<GLuint, std::unordered_map<GLuint, GLuint>>;
 extern BlockIndexesMap gUniformBlockIndexes;
 using BufferHandleMap = std::unordered_map<GLuint, void *>;
@@ -57,6 +57,7 @@ extern "C" {
 /* not exported */ void ReplayFrame(uint32_t frameIndex);
 /* not exported */ void ResetReplay();
 /* not exported */ void FinishReplay();
+/* not exported */ void SetupFirstFrame();
 
 ANGLE_REPLAY_EXPORT void SetValidateSerializedStateCallback(
     ValidateSerializedStateCallback callback);
@@ -88,6 +89,7 @@ extern GLuint *gResourceIDBuffer;
 extern GLuint *gBufferMap;
 extern GLuint *gFenceNVMap;
 extern GLuint *gFramebufferMap;
+extern GLuint **gFramebufferMapPerContext;
 extern GLuint *gMemoryObjectMap;
 extern GLuint *gProgramPipelineMap;
 extern GLuint *gQueryMap;
@@ -99,7 +101,7 @@ extern GLuint *gTextureMap;
 extern GLuint *gTransformFeedbackMap;
 extern GLuint *gVertexArrayMap;
 
-// TODO(jmadill): Consolidate. http://anglebug.com/7753
+// TODO(jmadill): Consolidate. http://anglebug.com/42266223
 extern GLeglImageOES *gEGLImageMap2;
 extern EGLSurface *gSurfaceMap2;
 extern EGLContext *gContextMap2;
@@ -203,6 +205,7 @@ void UpdateResourceIDBuffer(int resourceIndex, GLuint id);
 void UpdateBufferID(GLuint id, GLsizei readBufferOffset);
 void UpdateFenceNVID(GLuint id, GLsizei readBufferOffset);
 void UpdateFramebufferID(GLuint id, GLsizei readBufferOffset);
+void UpdateFramebufferID2(GLuint contextId, GLuint id, GLsizei readBufferOffset);
 void UpdateMemoryObjectID(GLuint id, GLsizei readBufferOffset);
 void UpdateProgramPipelineID(GLuint id, GLsizei readBufferOffset);
 void UpdateQueryID(GLuint id, GLsizei readBufferOffset);
@@ -217,6 +220,7 @@ void UpdateVertexArrayID(GLuint id, GLsizei readBufferOffset);
 void SetCurrentContextID(GLuint id);
 
 void SetFramebufferID(GLuint id);
+void SetFramebufferID2(GLuint contextID, GLuint id);
 void SetBufferID(GLuint id);
 void SetRenderbufferID(GLuint id);
 void SetTextureID(GLuint id);
@@ -247,13 +251,19 @@ void CreateEGLImage(EGLDisplay dpy,
                     EGLenum target,
                     uintptr_t buffer,
                     const EGLAttrib *attrib_list,
+                    GLsizei width,
+                    GLsizei height,
                     GLuint imageID);
 void CreateEGLImageKHR(EGLDisplay dpy,
                        EGLContext ctx,
                        EGLenum target,
                        uintptr_t buffer,
                        const EGLint *attrib_list,
+                       GLsizei width,
+                       GLsizei height,
                        GLuint imageID);
+void DestroyEGLImage(EGLDisplay dpy, EGLImage image, GLuint imageID);
+void DestroyEGLImageKHR(EGLDisplay dpy, EGLImageKHR image, GLuint imageID);
 void CreateEGLSyncKHR(EGLDisplay dpy, EGLenum type, const EGLint *attrib_list, GLuint syncID);
 void CreateEGLSync(EGLDisplay dpy, EGLenum type, const EGLAttrib *attrib_list, GLuint syncID);
 void CreatePbufferSurface(EGLDisplay dpy,
@@ -264,6 +274,7 @@ void CreateNativeClientBufferANDROID(const EGLint *attrib_list, uintptr_t client
 void CreateContext(GLuint contextID);
 
 void ValidateSerializedState(const char *serializedState, const char *fileName, uint32_t line);
+
 #define VALIDATE_CHECKPOINT(STATE) ValidateSerializedState(STATE, __FILE__, __LINE__)
 
 #if defined(__cplusplus)

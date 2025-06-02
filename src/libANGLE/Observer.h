@@ -15,6 +15,7 @@
 
 #include "common/FastVector.h"
 #include "common/angleutils.h"
+#include "libANGLE/Constants.h"
 
 namespace angle
 {
@@ -57,9 +58,6 @@ enum class SubjectMessage
 
     // Indicates an external change to the default framebuffer.
     SurfaceChanged,
-    // Indicates the system framebuffer's swapchain changed, i.e. color buffer changed but no
-    // depth/stencil buffer change.
-    SwapchainImageChanged,
 
     // Indicates a separable program's textures or images changed in the ProgramExecutable.
     ProgramTextureOrImageBindingChanged,
@@ -70,8 +68,11 @@ enum class SubjectMessage
     ProgramRelinked,
     // Indicates a separable program's sampler uniforms were updated.
     SamplerUniformsUpdated,
-    // Other types of uniform change.
-    ProgramUniformUpdated,
+    // Indicates a program's uniform block binding has changed (one message per binding)
+    ProgramUniformBlockBindingZeroUpdated,
+    ProgramUniformBlockBindingLastUpdated = ProgramUniformBlockBindingZeroUpdated +
+                                            gl::IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS -
+                                            1,
 
     // Indicates a Storage of back-end in gl::Texture has been released.
     StorageReleased,
@@ -83,7 +84,26 @@ enum class SubjectMessage
 
     // Indicates that all pending updates are complete in the subject.
     InitializationComplete,
+
+    // Indicates a change in foveated rendering state in the subject.
+    FoveatedRenderingStateChanged,
 };
+
+inline bool IsProgramUniformBlockBindingUpdatedMessage(SubjectMessage message)
+{
+    return message >= SubjectMessage::ProgramUniformBlockBindingZeroUpdated &&
+           message <= SubjectMessage::ProgramUniformBlockBindingLastUpdated;
+}
+inline SubjectMessage ProgramUniformBlockBindingUpdatedMessageFromIndex(uint32_t blockIndex)
+{
+    return static_cast<SubjectMessage>(
+        static_cast<uint32_t>(SubjectMessage::ProgramUniformBlockBindingZeroUpdated) + blockIndex);
+}
+inline uint32_t ProgramUniformBlockBindingUpdatedMessageToIndex(SubjectMessage message)
+{
+    return static_cast<uint32_t>(message) -
+           static_cast<uint32_t>(SubjectMessage::ProgramUniformBlockBindingZeroUpdated);
+}
 
 // The observing class inherits from this interface class.
 class ObserverInterface

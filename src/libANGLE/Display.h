@@ -14,7 +14,9 @@
 #include <mutex>
 #include <vector>
 
+#include "common/SimpleMutex.h"
 #include "common/WorkerThread.h"
+#include "common/platform.h"
 #include "libANGLE/AttributeMap.h"
 #include "libANGLE/BlobCache.h"
 #include "libANGLE/Caps.h"
@@ -30,6 +32,16 @@
 #include "libANGLE/Version.h"
 #include "platform/Feature.h"
 #include "platform/autogen/FrontendFeatures_autogen.h"
+
+// Only DisplayCGL needs to be notified about an EGL call about to be made to prepare
+// per-thread data. Disable Display::prepareForCall on other platforms for performance.
+#if !defined(ANGLE_USE_DISPLAY_PREPARE_FOR_CALL)
+#    if ANGLE_ENABLE_CGL
+#        define ANGLE_USE_DISPLAY_PREPARE_FOR_CALL 1
+#    else
+#        define ANGLE_USE_DISPLAY_PREPARE_FOR_CALL 0
+#    endif
+#endif
 
 namespace angle
 {
@@ -66,13 +78,21 @@ struct DisplayState final : private angle::NonCopyable
     DisplayState(EGLNativeDisplayType nativeDisplayId);
     ~DisplayState();
 
+    void notifyDeviceLost() const;
+
     EGLLabelKHR label;
     ContextMap contextMap;
+    mutable angle::SimpleMutex contextMapMutex;
     SurfaceMap surfaceMap;
-    std::vector<std::string> featureOverridesEnabled;
-    std::vector<std::string> featureOverridesDisabled;
-    bool featuresAllDisabled;
+    angle::FeatureOverrides featureOverrides;
     EGLNativeDisplayType displayId;
+
+    // Single-threaded and multithread pools for use by various parts of ANGLE, such as shader
+    // compilation.  These pools are internally synchronized.
+    std::shared_ptr<angle::WorkerThreadPool> singleThreadPool;
+    std::shared_ptr<angle::WorkerThreadPool> multiThreadPool;
+
+    mutable bool deviceLost;
 };
 
 // Constant coded here as a reasonable limit.
@@ -80,7 +100,7 @@ constexpr EGLAttrib kProgramCacheSizeAbsoluteMax = 0x4000000;
 
 using ImageMap  = angle::HashMap<GLuint, Image *>;
 using StreamSet = angle::HashSet<Stream *>;
-using SyncMap   = angle::HashMap<GLuint, Sync *>;
+using SyncMap   = angle::HashMap<GLuint, std::unique_ptr<Sync>>;
 
 class Display final : public LabeledObject,
                       public angle::ObserverInterface,
@@ -106,10 +126,14 @@ class Display final : public LabeledObject,
         EnumCount = InvalidEnum,
     };
     Error terminate(Thread *thread, TerminateReason terminateReason);
+
+#if ANGLE_USE_DISPLAY_PREPARE_FOR_CALL
     // Called before all display state dependent EGL functions. Backends can set up, for example,
     // thread-specific backend state through this function. Not called for functions that do not
     // need the state.
     Error prepareForCall();
+#endif
+
     // Called on eglReleaseThread. Backends can tear down thread-specific backend state through
     // this function.
     Error releaseThread();
@@ -121,7 +145,6 @@ class Display final : public LabeledObject,
     static Display *GetExistingDisplayFromNativeDisplay(EGLNativeDisplayType nativeDisplay);
 
     using EglDisplaySet = angle::HashSet<Display *>;
-    static EglDisplaySet GetEglDisplaySet();
 
     static const ClientExtensions &GetClientExtensions();
     static const std::string &GetClientExtensionString();
@@ -156,7 +179,6 @@ class Display final : public LabeledObject,
 
     Error createContext(const Config *configuration,
                         gl::Context *shareContext,
-                        const EGLenum clientType,
                         const AttributeMap &attribs,
                         gl::Context **outContext);
 
@@ -274,8 +296,11 @@ class Display final : public LabeledObject,
 
     egl::Error waitUntilWorkScheduled();
 
-    std::mutex &getDisplayGlobalMutex() { return mDisplayGlobalMutex; }
-    std::mutex &getProgramCacheMutex() { return mProgramCacheMutex; }
+    angle::SimpleMutex &getDisplayGlobalMutex() { return mDisplayGlobalMutex; }
+    angle::SimpleMutex &getProgramCacheMutex() { return mProgramCacheMutex; }
+
+    void lockVulkanQueue();
+    void unlockVulkanQueue();
 
     gl::MemoryShaderCache *getMemoryShaderCache() { return &mMemoryShaderCache; }
 
@@ -291,11 +316,20 @@ class Display final : public LabeledObject,
                                EGLBoolean *external_only,
                                EGLint *num_modifiers);
 
+    Error querySupportedCompressionRates(const Config *configuration,
+                                         const AttributeMap &attributes,
+                                         EGLint *rates,
+                                         EGLint rate_size,
+                                         EGLint *num_rates) const;
+
     std::shared_ptr<angle::WorkerThreadPool> getSingleThreadPool() const
     {
-        return mSingleThreadPool;
+        return mState.singleThreadPool;
     }
-    std::shared_ptr<angle::WorkerThreadPool> getMultiThreadPool() const { return mMultiThreadPool; }
+    std::shared_ptr<angle::WorkerThreadPool> getMultiThreadPool() const
+    {
+        return mState.multiThreadPool;
+    }
 
     angle::ImageLoadContext getImageLoadContext() const;
 
@@ -309,6 +343,7 @@ class Display final : public LabeledObject,
     egl::Sync *getSync(egl::SyncID syncID);
 
     const SyncMap &getSyncsForCapture() const { return mSyncMap; }
+    const ImageMap &getImagesForCapture() const { return mImageMap; }
 
     // Initialize thread-local variables used by the Display and its backing implementations.  This
     // includes:
@@ -329,7 +364,8 @@ class Display final : public LabeledObject,
 
     Error restoreLostDevice();
     Error releaseContext(gl::Context *context, Thread *thread);
-    Error releaseContextImpl(gl::Context *context, ContextMap *contexts);
+    Error releaseContextImpl(std::unique_ptr<gl::Context> &&context);
+    std::unique_ptr<gl::Context> eraseContextImpl(gl::Context *context, ContextMap *contexts);
 
     void initDisplayExtensions();
     void initVendorString();
@@ -353,12 +389,17 @@ class Display final : public LabeledObject,
 
     ImageMap mImageMap;
     StreamSet mStreamSet;
+
     SyncMap mSyncMap;
+
+    static constexpr size_t kMaxSyncPoolSizePerType = 32;
+    using SyncPool = angle::FixedVector<std::unique_ptr<Sync>, kMaxSyncPoolSizePerType>;
+    std::map<EGLenum, SyncPool> mSyncPools;
 
     void destroyImageImpl(Image *image, ImageMap *images);
     void destroyStreamImpl(Stream *stream, StreamSet *streams);
     Error destroySurfaceImpl(Surface *surface, SurfaceMap *surfaces);
-    void destroySyncImpl(Sync *sync, SyncMap *syncs);
+    void destroySyncImpl(SyncID syncId, SyncMap *syncs);
 
     ContextMap mInvalidContextMap;
     ImageMap mInvalidImageMap;
@@ -367,7 +408,6 @@ class Display final : public LabeledObject,
     SyncMap mInvalidSyncMap;
 
     bool mInitialized;
-    bool mDeviceLost;
 
     Caps mCaps;
 
@@ -402,19 +442,14 @@ class Display final : public LabeledObject,
 
     angle::FeatureList mFeatures;
 
-    std::mutex mScratchBufferMutex;
+    angle::SimpleMutex mScratchBufferMutex;
     std::vector<angle::ScratchBuffer> mScratchBuffers;
     std::vector<angle::ScratchBuffer> mZeroFilledBuffers;
 
-    std::mutex mDisplayGlobalMutex;
-    std::mutex mProgramCacheMutex;
+    angle::SimpleMutex mDisplayGlobalMutex;
+    angle::SimpleMutex mProgramCacheMutex;
 
     bool mTerminatedByApi;
-
-    // Single-threaded and multithread pools for use by various parts of ANGLE, such as shader
-    // compilation.  These pools are internally synchronized.
-    std::shared_ptr<angle::WorkerThreadPool> mSingleThreadPool;
-    std::shared_ptr<angle::WorkerThreadPool> mMultiThreadPool;
 };
 
 }  // namespace egl

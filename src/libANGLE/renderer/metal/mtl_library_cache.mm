@@ -20,9 +20,7 @@
 #include "common/string_utils.h"
 #include "common/system_utils.h"
 #include "libANGLE/histogram_macros.h"
-#include "libANGLE/renderer/metal/ContextMtl.h"
-#include "libANGLE/renderer/metal/mtl_context_device.h"
-#include "libANGLE/renderer/metal/process.h"
+#include "libANGLE/renderer/metal/DisplayMtl.h"
 #include "platform/PlatformMethods.h"
 
 namespace rx
@@ -32,10 +30,10 @@ namespace mtl
 
 LibraryCache::LibraryCache() : mCache(kMaxCachedLibraries) {}
 
-AutoObjCPtr<id<MTLLibrary>> LibraryCache::get(const std::shared_ptr<const std::string> &source,
-                                              const std::map<std::string, std::string> &macros,
-                                              bool disableFastMath,
-                                              bool usesInvariance)
+angle::ObjCPtr<id<MTLLibrary>> LibraryCache::get(const std::shared_ptr<const std::string> &source,
+                                                 const std::map<std::string, std::string> &macros,
+                                                 bool disableFastMath,
+                                                 bool usesInvariance)
 {
     ASSERT(source != nullptr);
     LibraryCache::LibraryCacheEntry &entry =
@@ -54,82 +52,20 @@ AutoObjCPtr<id<MTLLibrary>> LibraryCache::get(const std::shared_ptr<const std::s
     }
 }
 
-namespace
-{
-
-// Reads a metallib file at the specified path.
-angle::MemoryBuffer ReadMetallibFromFile(const std::string &path)
-{
-    // TODO: optimize this to avoid the unnecessary strings.
-    std::string metallib;
-    if (!angle::ReadFileToString(path, &metallib))
-    {
-        FATAL() << "Failed reading back metallib";
-    }
-
-    angle::MemoryBuffer buffer;
-    if (!buffer.resize(metallib.size()))
-    {
-        FATAL() << "Failed to resize metallib buffer";
-    }
-    memcpy(buffer.data(), metallib.data(), metallib.size());
-    return buffer;
-}
-
-// Generates a key for the BlobCache based on the specified params.
-egl::BlobCacheKey GenerateBlobCacheKeyForShaderLibrary(
-    const std::shared_ptr<const std::string> &source,
-    const std::map<std::string, std::string> &macros,
-    bool disableFastMath,
-    bool usesInvariance)
-{
-    angle::base::SecureHashAlgorithm sha1;
-    sha1.Update(source->c_str(), source->size());
-    const size_t macro_count = macros.size();
-    sha1.Update(&macro_count, sizeof(size_t));
-    for (const auto &macro : macros)
-    {
-        sha1.Update(macro.first.c_str(), macro.first.size());
-        sha1.Update(macro.second.c_str(), macro.second.size());
-    }
-    sha1.Update(&disableFastMath, sizeof(bool));
-    sha1.Update(&usesInvariance, sizeof(bool));
-    sha1.Final();
-    return sha1.DigestAsArray();
-}
-
-// Returns a new MTLLibrary from the specified data.
-AutoObjCPtr<id<MTLLibrary>> NewMetalLibraryFromMetallib(ContextMtl *context,
-                                                        const uint8_t *data,
-                                                        size_t size)
-{
-    ANGLE_MTL_OBJC_SCOPE
-    {
-        // Copy the data as the life of the BlobCache is not necessarily the same as that of the
-        // metallibrary.
-        auto mtl_data = dispatch_data_create(data, size, dispatch_get_main_queue(),
-                                             DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-
-        NSError *nsError = nil;
-        return context->getMetalDevice().newLibraryWithData(mtl_data, &nsError);
-    }
-}
-
-}  // namespace
-
-AutoObjCPtr<id<MTLLibrary>> LibraryCache::getOrCompileShaderLibrary(
-    ContextMtl *context,
+angle::ObjCPtr<id<MTLLibrary>> LibraryCache::getOrCompileShaderLibrary(
+    DisplayMtl *displayMtl,
     const std::shared_ptr<const std::string> &source,
     const std::map<std::string, std::string> &macros,
     bool disableFastMath,
     bool usesInvariance,
-    AutoObjCPtr<NSError *> *errorOut)
+    angle::ObjCPtr<NSError> *errorOut)
 {
-    const angle::FeaturesMtl &features = context->getDisplay()->getFeatures();
+    id<MTLDevice> metalDevice          = displayMtl->getMetalDevice();
+    const angle::FeaturesMtl &features = displayMtl->getFeatures();
     if (!features.enableInMemoryMtlLibraryCache.enabled)
     {
-        return CreateShaderLibrary(context->getMetalDevice(), *source, macros, disableFastMath,
-                                   usesInvariance, errorOut);
+        return CreateShaderLibrary(metalDevice, *source, macros, disableFastMath, usesInvariance,
+                                   errorOut);
     }
 
     ASSERT(source != nullptr);
@@ -144,57 +80,7 @@ AutoObjCPtr<id<MTLLibrary>> LibraryCache::getOrCompileShaderLibrary(
         return entry.library;
     }
 
-    if (features.printMetalShaders.enabled)
-    {
-        auto cache_key =
-            GenerateBlobCacheKeyForShaderLibrary(source, macros, disableFastMath, usesInvariance);
-        NSLog(@"Loading metal shader, key=%@ source=%s",
-              [NSData dataWithBytes:cache_key.data() length:cache_key.size()], source -> c_str());
-    }
-
-    if (features.compileMetalShaders.enabled)
-    {
-        if (features.enableParallelMtlLibraryCompilation.enabled)
-        {
-            // When enableParallelMtlLibraryCompilation is enabled, compilation happens in the
-            // background. Chrome's ProgramCache only saves to disk when called at certain points,
-            // which are not present when compiling in the background.
-            FATAL() << "EnableParallelMtlLibraryCompilation is not compatible with "
-                       "compileMetalShdaders";
-        }
-        // Note: there does not seem to be a
-        std::string metallib_filename =
-            CompileShaderLibraryToFile(*source, macros, disableFastMath, usesInvariance);
-        angle::MemoryBuffer memory_buffer = ReadMetallibFromFile(metallib_filename);
-        entry.library =
-            NewMetalLibraryFromMetallib(context, memory_buffer.data(), memory_buffer.size());
-        auto cache_key =
-            GenerateBlobCacheKeyForShaderLibrary(source, macros, disableFastMath, usesInvariance);
-        context->getDisplay()->getBlobCache()->put(cache_key, std::move(memory_buffer));
-        return entry.library;
-    }
-
-    if (features.loadMetalShadersFromBlobCache.enabled)
-    {
-        auto cache_key =
-            GenerateBlobCacheKeyForShaderLibrary(source, macros, disableFastMath, usesInvariance);
-        egl::BlobCache::Value value;
-        size_t buffer_size;
-        angle::ScratchBuffer scratch_buffer;
-        if (context->getDisplay()->getBlobCache()->get(&scratch_buffer, cache_key, &value,
-                                                       &buffer_size))
-        {
-            entry.library = NewMetalLibraryFromMetallib(context, value.data(), value.size());
-        }
-        ANGLE_HISTOGRAM_BOOLEAN("GPU.ANGLE.MetalShaderInBlobCache", entry.library);
-        ANGLEPlatformCurrent()->recordShaderCacheUse(entry.library);
-        if (entry.library)
-        {
-            return entry.library;
-        }
-    }
-
-    entry.library = CreateShaderLibrary(context->getMetalDevice(), *source, macros, disableFastMath,
+    entry.library = CreateShaderLibrary(metalDevice, *source, macros, disableFastMath,
                                         usesInvariance, errorOut);
     return entry.library;
 }

@@ -50,39 +50,36 @@ using IORegistryGPUID = uint64_t;
 static std::optional<GLint> GetVirtualScreenByRegistryID(CGLPixelFormatObj pixelFormatObj,
                                                          IORegistryGPUID gpuID)
 {
-    if (@available(macOS 10.13, *))
-    {
-        // When a process does not have access to the WindowServer (as with Chromium's GPU process
-        // and WebKit's WebProcess), there is no way for OpenGL to tell which GPU is connected to a
-        // display. On 10.13+, find the virtual screen that corresponds to the preferred GPU by its
-        // registryID. CGLSetVirtualScreen can then be used to tell OpenGL which GPU it should be
-        // using.
+    // When a process does not have access to the WindowServer (as with Chromium's GPU process
+    // and WebKit's WebProcess), there is no way for OpenGL to tell which GPU is connected to a
+    // display. On 10.13+, find the virtual screen that corresponds to the preferred GPU by its
+    // registryID. CGLSetVirtualScreen can then be used to tell OpenGL which GPU it should be
+    // using.
 
-        GLint virtualScreenCount = 0;
-        CGLError error = CGLDescribePixelFormat(pixelFormatObj, 0, kCGLPFAVirtualScreenCount,
-                                                &virtualScreenCount);
+    GLint virtualScreenCount = 0;
+    CGLError error =
+        CGLDescribePixelFormat(pixelFormatObj, 0, kCGLPFAVirtualScreenCount, &virtualScreenCount);
+    if (error != kCGLNoError)
+    {
+        NOTREACHED();
+        return std::nullopt;
+    }
+
+    for (GLint virtualScreen = 0; virtualScreen < virtualScreenCount; ++virtualScreen)
+    {
+        GLint displayMask = 0;
+        error =
+            CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFADisplayMask, &displayMask);
         if (error != kCGLNoError)
         {
             NOTREACHED();
             return std::nullopt;
         }
 
-        for (GLint virtualScreen = 0; virtualScreen < virtualScreenCount; ++virtualScreen)
+        auto virtualScreenGPUID = angle::GetGpuIDFromOpenGLDisplayMask(displayMask);
+        if (virtualScreenGPUID == gpuID)
         {
-            GLint displayMask = 0;
-            error = CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFADisplayMask,
-                                           &displayMask);
-            if (error != kCGLNoError)
-            {
-                NOTREACHED();
-                return std::nullopt;
-            }
-
-            auto virtualScreenGPUID = angle::GetGpuIDFromOpenGLDisplayMask(displayMask);
-            if (virtualScreenGPUID == gpuID)
-            {
-                return virtualScreen;
-            }
+            return virtualScreen;
         }
     }
     return std::nullopt;
@@ -90,30 +87,27 @@ static std::optional<GLint> GetVirtualScreenByRegistryID(CGLPixelFormatObj pixel
 
 static std::optional<GLint> GetFirstAcceleratedVirtualScreen(CGLPixelFormatObj pixelFormatObj)
 {
-    if (@available(macOS 10.13, *))
+    GLint virtualScreenCount = 0;
+    CGLError error =
+        CGLDescribePixelFormat(pixelFormatObj, 0, kCGLPFAVirtualScreenCount, &virtualScreenCount);
+    if (error != kCGLNoError)
     {
-        GLint virtualScreenCount = 0;
-        CGLError error = CGLDescribePixelFormat(pixelFormatObj, 0, kCGLPFAVirtualScreenCount,
-                                                &virtualScreenCount);
+        NOTREACHED();
+        return std::nullopt;
+    }
+    for (GLint virtualScreen = 0; virtualScreen < virtualScreenCount; ++virtualScreen)
+    {
+        GLint isAccelerated = 0;
+        error = CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFAAccelerated,
+                                       &isAccelerated);
         if (error != kCGLNoError)
         {
             NOTREACHED();
             return std::nullopt;
         }
-        for (GLint virtualScreen = 0; virtualScreen < virtualScreenCount; ++virtualScreen)
+        if (isAccelerated)
         {
-            GLint isAccelerated = 0;
-            error = CGLDescribePixelFormat(pixelFormatObj, virtualScreen, kCGLPFAAccelerated,
-                                           &isAccelerated);
-            if (error != kCGLNoError)
-            {
-                NOTREACHED();
-                return std::nullopt;
-            }
-            if (isAccelerated)
-            {
-                return virtualScreen;
-            }
+            return virtualScreen;
         }
     }
     return std::nullopt;
@@ -194,14 +188,14 @@ egl::Error DisplayCGL::initialize(egl::Display *display)
 
         if (mPixelFormat == nullptr)
         {
-            return egl::EglNotInitialized() << "Could not create the context's pixel format.";
+            return egl::Error(EGL_NOT_INITIALIZED, "Could not create the context's pixel format.");
         }
     }
 
     CGLCreateContext(mPixelFormat, nullptr, &mContext);
     if (mContext == nullptr)
     {
-        return egl::EglNotInitialized() << "Could not create the CGL context.";
+        return egl::Error(EGL_NOT_INITIALIZED, "Could not create the CGL context.");
     }
 
     if (mSupportsGPUSwitching)
@@ -230,7 +224,7 @@ egl::Error DisplayCGL::initialize(egl::Display *display)
 
     if (CGLSetCurrentContext(mContext) != kCGLNoError)
     {
-        return egl::EglNotInitialized() << "Could not make the CGL context current.";
+        return egl::Error(EGL_NOT_INITIALIZED, "Could not make the CGL context current.");
     }
     mThreadsWithCurrentContext.insert(angle::GetCurrentThreadUniqueId());
 
@@ -242,7 +236,7 @@ egl::Error DisplayCGL::initialize(egl::Display *display)
     }
     if (!handle)
     {
-        return egl::EglNotInitialized() << "Could not open the OpenGL Framework.";
+        return egl::Error(EGL_NOT_INITIALIZED, "Could not open the OpenGL Framework.");
     }
 
     std::unique_ptr<FunctionsGL> functionsGL(new FunctionsGLCGL(handle));
@@ -253,7 +247,7 @@ egl::Error DisplayCGL::initialize(egl::Display *display)
     const gl::Version &maxVersion = mRenderer->getMaxSupportedESVersion();
     if (maxVersion < gl::Version(2, 0))
     {
-        return egl::EglNotInitialized() << "OpenGL ES 2.0 is not supportable.";
+        return egl::Error(EGL_NOT_INITIALIZED, "OpenGL ES 2.0 is not supportable.");
     }
 
     auto &attributes = display->getAttributeMap();
@@ -292,7 +286,7 @@ egl::Error DisplayCGL::prepareForCall()
 {
     if (!mContext)
     {
-        return egl::EglNotInitialized() << "Context not allocated.";
+        return egl::Error(EGL_NOT_INITIALIZED, "Context not allocated.");
     }
     auto threadId = angle::GetCurrentThreadUniqueId();
     if (mDeviceContextIsVolatile ||
@@ -300,7 +294,7 @@ egl::Error DisplayCGL::prepareForCall()
     {
         if (CGLSetCurrentContext(mContext) != kCGLNoError)
         {
-            return egl::EglBadAlloc() << "Could not make device CGL context current.";
+            return egl::Error(EGL_BAD_ALLOC, "Could not make device CGL context current.");
         }
         mThreadsWithCurrentContext.insert(threadId);
     }
@@ -315,7 +309,7 @@ egl::Error DisplayCGL::releaseThread()
     {
         if (CGLSetCurrentContext(nullptr) != kCGLNoError)
         {
-            return egl::EglBadAlloc() << "Could not release device CGL context.";
+            return egl::Error(EGL_BAD_ALLOC, "Could not release device CGL context.");
         }
         mThreadsWithCurrentContext.erase(threadId);
     }
@@ -464,7 +458,7 @@ bool DisplayCGL::testDeviceLost()
 egl::Error DisplayCGL::restoreLostDevice(const egl::Display *display)
 {
     UNIMPLEMENTED();
-    return egl::EglBadDisplay();
+    return egl::Error(EGL_BAD_DISPLAY);
 }
 
 bool DisplayCGL::isValidNativeWindow(EGLNativeWindowType window) const
@@ -482,7 +476,7 @@ egl::Error DisplayCGL::validateClientBuffer(const egl::Config *configuration,
 
     if (!IOSurfaceSurfaceCGL::validateAttributes(clientBuffer, attribs))
     {
-        return egl::EglBadAttribute();
+        return egl::Error(EGL_BAD_ATTRIBUTE);
     }
 
     return egl::NoError();
@@ -587,7 +581,7 @@ egl::Error DisplayCGL::referenceDiscreteGPU()
         if (CGLChoosePixelFormat(discreteAttribs, &mDiscreteGPUPixelFormat, &numPixelFormats) !=
             kCGLNoError)
         {
-            return egl::EglBadAlloc() << "Error choosing discrete pixel format.";
+            return egl::Error(EGL_BAD_ALLOC, "Error choosing discrete pixel format.");
         }
     }
     ++mDiscreteGPURefs;

@@ -154,18 +154,23 @@ struct Attrib
         if (mPureInteger)
         {
             glVertexAttribIPointer(index, mData.getDimension(), mGLType, mStride,
-                                   mContainer->getAddress() + mOffset);
+                                   getContainerOffset());
         }
         else
         {
             glVertexAttribPointer(index, mData.getDimension(), mGLType, mNormalized, mStride,
-                                  mContainer->getAddress() + mOffset);
+                                  getContainerOffset());
         }
         EXPECT_GL_NO_ERROR();
         glEnableVertexAttribArray(index);
     }
 
-    bool inClientMemory(void) const { return mContainer->getAddress() != nullptr; }
+    bool inClientMemory() const { return mContainer->getAddress() != nullptr; }
+    const char *getContainerOffset() const
+    {
+        return inClientMemory() ? mContainer->getAddress() + mOffset
+                                : reinterpret_cast<const char *>(mOffset);
+    }
 
     std::shared_ptr<Container> mContainer;
     unsigned mOffset;
@@ -450,7 +455,7 @@ void AttributeLayoutTest::GetTestCases(void)
     if (es3)
     {
         mTestCases.push_back({SInt(M0, 0, 40, mCoord), UInt(M0, 16, 40, mColor)});
-        // Fails on Nexus devices (anglebug.com/2641)
+        // Fails on Nexus devices (anglebug.com/42261348)
         if (!IsNexus5X())
             mTestCases.push_back({NormSInt(M0, 0, 40, mCoord), NormUInt(M0, 16, 40, mColor)});
     }

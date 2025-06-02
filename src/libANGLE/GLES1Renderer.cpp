@@ -20,7 +20,7 @@
 #include "libANGLE/ResourceManager.h"
 #include "libANGLE/Shader.h"
 #include "libANGLE/State.h"
-#include "libANGLE/context_private_call_gles_autogen.h"
+#include "libANGLE/context_private_call.inl.h"
 #include "libANGLE/renderer/ContextImpl.h"
 
 namespace
@@ -143,6 +143,20 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
         {
             texCubeEnables[i] = curr2DTexture->isMipmapComplete();
         }
+    }
+
+    // If texture has been disabled on the active sampler, texture coordinate data should not be
+    // used. However, according to the spec, a rasterized fragment is passed on unaltered to the
+    // next stage.
+    if (gles1State->isDirty(GLES1State::DIRTY_GLES1_TEXTURE_UNIT_ENABLE))
+    {
+        unsigned int clientActiveTexture = gles1State->getClientTextureUnit();
+        bool isTextureEnabled =
+            tex2DEnables[clientActiveTexture] || texCubeEnables[clientActiveTexture];
+        glState->setEnableVertexAttribArray(
+            TexCoordArrayIndex(clientActiveTexture),
+            isTextureEnabled && gles1State->isTexCoordArrayEnabled(clientActiveTexture));
+        context->getStateCache().onGLES1TextureStateChange(context);
     }
 
     GLES1ShaderState::UintTexArray &texEnvModes          = mShaderState.texEnvModes;
@@ -640,7 +654,7 @@ angle::Result GLES1Renderer::compileShader(Context *context,
     ANGLE_CHECK(context, shaderObject, "Missing shader object", GL_INVALID_OPERATION);
 
     shaderObject->setSource(context, 1, &src, nullptr);
-    shaderObject->compile(context);
+    shaderObject->compile(context, angle::JobResultExpectancy::Immediate);
 
     *shaderOut = shader;
 
@@ -680,10 +694,10 @@ angle::Result GLES1Renderer::linkProgram(Context *context,
     {
         GLint index             = it.first;
         const std::string &name = it.second;
-        programObject->bindAttributeLocation(index, name.c_str());
+        programObject->bindAttributeLocation(context, index, name.c_str());
     }
 
-    ANGLE_TRY(programObject->link(context));
+    ANGLE_TRY(programObject->link(context, angle::JobResultExpectancy::Immediate));
     programObject->resolveLink(context);
 
     ANGLE_TRY(glState->setProgram(context, programObject));
@@ -926,9 +940,9 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context,
     ShaderProgramID vertexShader;
     ShaderProgramID fragmentShader;
 
-    // Set the count of texture units to a minimum (at least one for simplicity), to avoid requiring
-    // unnecessary vertex attributes and take up varying slots.
-    uint32_t maxTexUnitsEnabled = 1;
+    // Set the count of texture units to a minimum to avoid requiring unnecessary vertex attributes
+    // and take up varying slots.
+    uint32_t maxTexUnitsEnabled = 0;
     for (int i = 0; i < kTexUnitCount; i++)
     {
         if (mShaderState.texCubeEnables[i] || mShaderState.tex2DEnables[i])
@@ -1091,7 +1105,6 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context,
         setUniform1i(context, &executable, programState.tex2DSamplerLocs[i], i);
         setUniform1i(context, &executable, programState.texCubeSamplerLocs[i], i + kTexUnitCount);
     }
-    glState->setObjectDirty(GL_PROGRAM);
 
     // We just created a new program, we need to sync everything
     gles1State->setAllDirty();

@@ -48,17 +48,17 @@ class Std140BlockLayoutEncoderFactory : public gl::CustomBlockLayoutEncoderFacto
     sh::BlockLayoutEncoder *makeEncoder() override { return new sh::Std140BlockEncoder(); }
 };
 
-class LinkTaskVk final : public vk::Context, public LinkTask
+class LinkTaskVk final : public vk::ErrorContext, public LinkTask
 {
   public:
-    LinkTaskVk(RendererVk *renderer,
+    LinkTaskVk(vk::Renderer *renderer,
                PipelineLayoutCache &pipelineLayoutCache,
                DescriptorSetLayoutCache &descriptorSetLayoutCache,
                const gl::ProgramState &state,
                bool isGLES1,
                vk::PipelineRobustness pipelineRobustness,
                vk::PipelineProtectedAccess pipelineProtectedAccess)
-        : vk::Context(renderer),
+        : vk::ErrorContext(renderer),
           mState(state),
           mExecutable(&mState.getExecutable()),
           mIsGLES1(isGLES1),
@@ -69,14 +69,19 @@ class LinkTaskVk final : public vk::Context, public LinkTask
     {}
     ~LinkTaskVk() override = default;
 
-    std::vector<std::shared_ptr<LinkSubTask>> link(
-        const gl::ProgramLinkedResources &resources,
-        const gl::ProgramMergedVaryings &mergedVaryings) override
+    void link(const gl::ProgramLinkedResources &resources,
+              const gl::ProgramMergedVaryings &mergedVaryings,
+              std::vector<std::shared_ptr<LinkSubTask>> *linkSubTasksOut,
+              std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut) override
     {
-        angle::Result result = linkImpl(resources, mergedVaryings);
-        ASSERT((result == angle::Result::Continue) == (mErrorCode == VK_SUCCESS));
+        ASSERT(linkSubTasksOut && linkSubTasksOut->empty());
+        ASSERT(postLinkSubTasksOut && postLinkSubTasksOut->empty());
 
-        return {};
+        // In the Vulkan backend, the only subtasks are pipeline warm up, which is not required for
+        // link.  Running as a post-link task, the expensive warm up is run in a thread without
+        // holding up the link results.
+        angle::Result result = linkImpl(resources, mergedVaryings, postLinkSubTasksOut);
+        ASSERT((result == angle::Result::Continue) == (mErrorCode == VK_SUCCESS));
     }
 
     void handleError(VkResult result,
@@ -95,9 +100,6 @@ class LinkTaskVk final : public vk::Context, public LinkTask
         ContextVk *contextVk              = vk::GetImpl(context);
         ProgramExecutableVk *executableVk = vk::GetImpl(mExecutable);
 
-        // Clean up garbage first, it's done no matter what may fail below.
-        mCompatibleRenderPass.destroy(contextVk->getDevice());
-
         ANGLE_TRY(executableVk->initializeDescriptorPools(contextVk,
                                                           &contextVk->getDescriptorSetLayoutCache(),
                                                           &contextVk->getMetaDescriptorPools()));
@@ -110,23 +112,14 @@ class LinkTaskVk final : public vk::Context, public LinkTask
         // the share group use this program, they will lazily switch to this mode.
         //
         // This is purely an optimization (to avoid creating and later releasing) non-framebuffer
-        // fetch render passes.
-        if (contextVk->getFeatures().permanentlySwitchToFramebufferFetchMode.enabled &&
-            mExecutable->usesFramebufferFetch())
+        // fetch render passes.  The optimization is unnecessary for and does not apply to dynamic
+        // rendering.
+        if (!contextVk->getFeatures().preferDynamicRendering.enabled &&
+            contextVk->getFeatures().permanentlySwitchToFramebufferFetchMode.enabled &&
+            mExecutable->usesColorFramebufferFetch())
         {
-            ANGLE_TRY(contextVk->switchToFramebufferFetchMode(true));
+            ANGLE_TRY(contextVk->switchToColorFramebufferFetchMode(true));
         }
-
-        // Update the relevant perf counters
-        angle::VulkanPerfCounters &from = contextVk->getPerfCounters();
-        angle::VulkanPerfCounters &to   = getPerfCounters();
-
-        to.pipelineCreationCacheHits += from.pipelineCreationCacheHits;
-        to.pipelineCreationCacheMisses += from.pipelineCreationCacheMisses;
-        to.pipelineCreationTotalCacheHitsDurationNs +=
-            from.pipelineCreationTotalCacheHitsDurationNs;
-        to.pipelineCreationTotalCacheMissesDurationNs +=
-            from.pipelineCreationTotalCacheMissesDurationNs;
 
         // Forward any errors
         if (mErrorCode != VK_SUCCESS)
@@ -134,12 +127,14 @@ class LinkTaskVk final : public vk::Context, public LinkTask
             contextVk->handleError(mErrorCode, mErrorFile, mErrorFunction, mErrorLine);
             return angle::Result::Stop;
         }
+
         return angle::Result::Continue;
     }
 
   private:
     angle::Result linkImpl(const gl::ProgramLinkedResources &resources,
-                           const gl::ProgramMergedVaryings &mergedVaryings);
+                           const gl::ProgramMergedVaryings &mergedVaryings,
+                           std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut);
 
     void linkResources(const gl::ProgramLinkedResources &resources);
     angle::Result initDefaultUniformBlocks();
@@ -159,9 +154,6 @@ class LinkTaskVk final : public vk::Context, public LinkTask
     PipelineLayoutCache &mPipelineLayoutCache;
     DescriptorSetLayoutCache &mDescriptorSetLayoutCache;
 
-    // Temporary objects to clean up at the end
-    vk::RenderPass mCompatibleRenderPass;
-
     // Error handling
     VkResult mErrorCode        = VK_SUCCESS;
     const char *mErrorFile     = nullptr;
@@ -170,7 +162,8 @@ class LinkTaskVk final : public vk::Context, public LinkTask
 };
 
 angle::Result LinkTaskVk::linkImpl(const gl::ProgramLinkedResources &resources,
-                                   const gl::ProgramMergedVaryings &mergedVaryings)
+                                   const gl::ProgramMergedVaryings &mergedVaryings,
+                                   std::vector<std::shared_ptr<LinkSubTask>> *postLinkSubTasksOut)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "LinkTaskVk::linkImpl");
     ProgramExecutableVk *executableVk = vk::GetImpl(mExecutable);
@@ -212,10 +205,10 @@ angle::Result LinkTaskVk::linkImpl(const gl::ProgramLinkedResources &resources,
     //   generated at draw time, it's just as well to let the pipelines be created using the
     //   renderer's shared cache.
     // - Individual GLES1 tests are long, and this adds a considerable overhead to those tests
-    if (!mState.isSeparable() && !mIsGLES1)
+    if (!mState.isSeparable() && !mIsGLES1 && getFeatures().warmUpPipelineCacheAtLink.enabled)
     {
-        ANGLE_TRY(executableVk->warmUpPipelineCache(
-            this, mPipelineRobustness, mPipelineProtectedAccess, &mCompatibleRenderPass));
+        ANGLE_TRY(executableVk->getPipelineCacheWarmUpTasks(
+            mRenderer, mPipelineRobustness, mPipelineProtectedAccess, postLinkSubTasksOut));
     }
 
     return angle::Result::Continue;
@@ -258,16 +251,7 @@ void InitDefaultUniformBlock(const std::vector<sh::ShaderVariable> &uniforms,
     VulkanDefaultBlockEncoder blockEncoder;
     sh::GetActiveUniformBlockInfo(uniforms, "", &blockEncoder, blockLayoutMapOut);
 
-    size_t blockSize = blockEncoder.getCurrentOffset();
-
-    // TODO(jmadill): I think we still need a valid block for the pipeline even if zero sized.
-    if (blockSize == 0)
-    {
-        *blockSizeOut = 0;
-        return;
-    }
-
-    *blockSizeOut = blockSize;
+    *blockSizeOut = blockEncoder.getCurrentOffset();
     return;
 }
 
@@ -292,6 +276,13 @@ void LinkTaskVk::initDefaultUniformLayoutMapping(gl::ShaderMap<sh::BlockLayoutMa
     // Init the default block layout info.
     ProgramExecutableVk *executableVk = vk::GetImpl(mExecutable);
     const auto &uniforms              = mExecutable->getUniforms();
+
+    // Reserve enough storage for the layoutInfo.
+    for (const gl::ShaderType shaderType : mExecutable->getLinkedShaderStages())
+    {
+        executableVk->getSharedDefaultUniformBlock(shaderType)
+            ->uniformLayout.reserve(mExecutable->getUniformLocations().size());
+    }
 
     for (const gl::VariableLocation &location : mExecutable->getUniformLocations())
     {
@@ -323,7 +314,6 @@ void LinkTaskVk::initDefaultUniformLayoutMapping(gl::ShaderMap<sh::BlockLayoutMa
                         layoutInfo[shaderType] = it->second;
                     }
                 }
-
                 ASSERT(found);
             }
         }
@@ -350,14 +340,15 @@ void ProgramVk::destroy(const gl::Context *context)
 
 angle::Result ProgramVk::load(const gl::Context *context,
                               gl::BinaryInputStream *stream,
-                              std::shared_ptr<LinkTask> *loadTaskOut)
+                              std::shared_ptr<LinkTask> *loadTaskOut,
+                              egl::CacheGetResult *resultOut)
 {
     ContextVk *contextVk = vk::GetImpl(context);
 
-    // TODO: parallelize program load.  http://anglebug.com/8297
+    // TODO: parallelize program load.  http://anglebug.com/41488637
     *loadTaskOut = {};
 
-    return getExecutable()->load(contextVk, mState.isSeparable(), stream);
+    return getExecutable()->load(contextVk, mState.isSeparable(), stream, resultOut);
 }
 
 void ProgramVk::save(const gl::Context *context, gl::BinaryOutputStream *stream)
@@ -394,12 +385,4 @@ GLboolean ProgramVk::validate(const gl::Caps &caps)
     return GL_TRUE;
 }
 
-angle::Result ProgramVk::syncState(const gl::Context *context,
-                                   const gl::Program::DirtyBits &dirtyBits)
-{
-    ASSERT(dirtyBits.any());
-    // Push dirty bits to executable so that they can be used later.
-    getExecutable()->mDirtyBits |= dirtyBits;
-    return angle::Result::Continue;
-}
 }  // namespace rx

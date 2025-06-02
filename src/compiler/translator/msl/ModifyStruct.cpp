@@ -12,9 +12,11 @@
 #include <unordered_set>
 
 #include "compiler/translator/Compiler.h"
+#include "compiler/translator/ImmutableStringBuilder.h"
 #include "compiler/translator/msl/AstHelpers.h"
 #include "compiler/translator/msl/ModifyStruct.h"
 #include "compiler/translator/msl/TranslatorMSL.h"
+#include "compiler/translator/tree_util/IntermNode_util.h"
 
 using namespace sh;
 
@@ -103,7 +105,7 @@ TIntermTyped &BuildPathAccess(SymbolEnv &symbolEnv,
         switch (item.type)
         {
             case PathItem::Type::Field:
-                curr = &AccessField(*curr, item.field->name());
+                curr = &AccessField(*curr, Name(*item.field));
                 break;
             case PathItem::Type::Index:
                 curr = &AccessIndex(*curr, item.index);
@@ -147,7 +149,7 @@ class ConvertStructState : angle::NonCopyable
         ConversionFunc stdFunc;
         const TFunction *astFunc;
         std::vector<PathItem> pathItems;
-        ImmutableString pathName;
+        Name modifiedFieldName;
     };
 
   public:
@@ -156,7 +158,8 @@ class ConvertStructState : angle::NonCopyable
                        IdGen &idGen,
                        const ModifyStructConfig &config,
                        ModifiedStructMachineries &outMachineries,
-                       const bool isUBO)
+                       const bool isUBO,
+                       const bool useAttributeAliasing)
         : mCompiler(compiler),
           config(config),
           symbolEnv(symbolEnv),
@@ -164,13 +167,12 @@ class ConvertStructState : angle::NonCopyable
           symbolTable(symbolEnv.symbolTable()),
           idGen(idGen),
           outMachineries(outMachineries),
-          isUBO(isUBO)
+          isUBO(isUBO),
+          useAttributeAliasing(useAttributeAliasing)
     {}
 
     ~ConvertStructState()
     {
-        ASSERT(namePath.empty());
-        ASSERT(namePathSizes.empty());
     }
 
     void publish(const TStructure &originalStruct, const Name &modifiedStructName)
@@ -228,10 +230,20 @@ class ConvertStructState : angle::NonCopyable
                     body.appendStatement(new TIntermBinary(TOperator::EOpAssign, &dest, &src));
                 }
             };
-
             OriginalAccess *original = &BuildPathAccess(symbolEnv, originalParam, info.pathItems);
-            ModifiedAccess *modified = &AccessField(modifiedParam, info.pathName);
+            ModifiedAccess *modified = &AccessField(modifiedParam, info.modifiedFieldName);
+            if (useAttributeAliasing)
+            {
+                std::ostringstream aliasedName;
+                aliasedName << "ANGLE_ALIASED_" << info.modifiedFieldName;
 
+                TType *placeholderType = new TType(modified->getType());
+                placeholderType->setQualifier(EvqSpecConst);
+
+                modified = new TIntermSymbol(
+                    new TVariable(&symbolTable, sh::ImmutableString(aliasedName.str()),
+                                  placeholderType, SymbolType::AngleInternal));
+            }
             const TType ot = original->getType();
             const TType mt = modified->getType();
             ASSERT(ot.isArray() == mt.isArray());
@@ -239,8 +251,9 @@ class ConvertStructState : angle::NonCopyable
             // Clip distance output uses float[n] type, so the field must be assigned per-element
             // when filling the modified struct. Explicit path name is used because original types
             // are not available here.
-            if (ot.isArray() && (ot.getLayoutQualifier().matrixPacking == EmpRowMajor || ot != mt ||
-                                 info.pathName == ImmutableString("gl_ClipDistance")))
+            if (ot.isArray() &&
+                (ot.getLayoutQualifier().matrixPacking == EmpRowMajor || ot != mt ||
+                 info.modifiedFieldName == Name("gl_ClipDistance", SymbolType::BuiltIn)))
             {
                 ASSERT(ot.getArraySizes() == mt.getArraySizes());
                 if (ot.isArrayOfArrays())
@@ -277,35 +290,30 @@ class ConvertStructState : angle::NonCopyable
         outMachineries.insert(originalStruct, machinery);
     }
 
-    void pushPath(PathItem const &item)
+    ImmutableString rootFieldName() const
     {
-        pathItems.push_back(item);
-
-        switch (item.type)
+        if (!pathItems.empty())
         {
-            case PathItem::Type::Field:
-                pushNamePath(item.field->name().data());
-                break;
-
-            case PathItem::Type::Index:
-                pushNamePath(item.index);
-                break;
-
-            case PathItem::Type::FlattenArray:
-                namePathSizes.push_back(namePath.size());
-                break;
+            if (pathItems[0].type == PathItem::Type::Field)
+            {
+                return pathItems[0].field->name();
+            }
         }
+        UNREACHABLE();
+        return kEmptyImmutableString;
     }
+
+    void pushPath(PathItem const &item) { pathItems.push_back(item); }
 
     void popPath()
     {
-        ASSERT(!namePath.empty());
-        ASSERT(!namePathSizes.empty());
-        namePath.resize(namePathSizes.back());
-        namePathSizes.pop_back();
-
         ASSERT(!pathItems.empty());
         pathItems.pop_back();
+        if (pathItems.empty())
+        {
+            // Next push will start a new root output variable to linearize.
+            mSubfieldIndex = 0;
+        }
     }
 
     void finalize(const bool allowPadding)
@@ -330,9 +338,22 @@ class ConvertStructState : angle::NonCopyable
         layoutQualifier.blockStorage     = storage;
         layoutQualifier.matrixPacking    = packing;
         newType.setLayoutQualifier(layoutQualifier);
-
-        const ImmutableString pathName(namePath);
-        TField *modifiedField = new TField(&newType, pathName, field.line(), field.symbolType());
+        sh::ImmutableString newName  = field.name();
+        sh::SymbolType newSymbolType = field.symbolType();
+        if (pathItems.size() > 1)
+        {
+            // Current state is linearizing a root input field into multiple modified fields. The
+            // new fields need unique names. Generate the new names into AngleInternal namespace.
+            // The user could choose a clashing name in UserDefined namespace.
+            newSymbolType = SymbolType::AngleInternal;
+            // The user specified root field name is currently used as the basis for the MSL vs-fs
+            // interface matching. The field linearization itself is deterministic, so subfield
+            // index is sufficient to define all the entries in MSL interface in all the compatible
+            // VS and FS MSL programs.
+            newName = BuildConcatenatedImmutableString(rootFieldName(), '_', mSubfieldIndex);
+            ++mSubfieldIndex;
+        }
+        TField *modifiedField = new TField(&newType, newName, field.line(), newSymbolType);
         if (addressSpace)
         {
             symbolEnv.markAsPointer(*modifiedField, *addressSpace);
@@ -347,13 +368,13 @@ class ConvertStructState : angle::NonCopyable
     void addConversion(const ConversionFunc &func)
     {
         ASSERT(!modifiedFields.empty());
-        conversionInfos.push_back({func, nullptr, pathItems, modifiedFields.back()->name()});
+        conversionInfos.push_back({func, nullptr, pathItems, Name(*modifiedFields.back())});
     }
 
     void addConversion(const TFunction &func)
     {
         ASSERT(!modifiedFields.empty());
-        conversionInfos.push_back({{}, &func, pathItems, modifiedFields.back()->name()});
+        conversionInfos.push_back({{}, &func, pathItems, Name(*modifiedFields.back())});
     }
 
     bool hasPacking() const { return containsPacked; }
@@ -371,7 +392,7 @@ class ConvertStructState : angle::NonCopyable
             reflection->addOriginalName(structure.uniqueId().get(), structure.name().data());
             const Name name = idGen.createNewName(structure.name().data());
             if (!TryCreateModifiedStruct(mCompiler, symbolEnv, idGen, config, structure, name,
-                                         outMachineries, isUBORecurse, config.allowPadding))
+                                         outMachineries, isUBORecurse, config.allowPadding, false))
             {
                 return false;
             }
@@ -578,38 +599,6 @@ class ConvertStructState : angle::NonCopyable
         }
     }
 
-    void pushNamePath(const char *extra)
-    {
-        ASSERT(extra && *extra != '\0');
-        namePathSizes.push_back(namePath.size());
-        const char *p = extra;
-        if (namePath.empty())
-        {
-            namePath = p;
-            return;
-        }
-        while (*p == '_')
-        {
-            ++p;
-        }
-        if (*p == '\0')
-        {
-            p = "x";
-        }
-        if (namePath.back() != '_')
-        {
-            namePath += '_';
-        }
-        namePath += p;
-    }
-
-    void pushNamePath(unsigned extra)
-    {
-        char buffer[std::numeric_limits<unsigned>::digits10 + 1];
-        snprintf(buffer, sizeof(buffer), "%u", extra);
-        pushNamePath(buffer);
-    }
-
   public:
     TCompiler &mCompiler;
     const ModifyStructConfig &config;
@@ -624,14 +613,14 @@ class ConvertStructState : angle::NonCopyable
 
     std::vector<PathItem> pathItems;
 
-    std::vector<size_t> namePathSizes;
-    std::string namePath;
+    int mSubfieldIndex = 0;
 
     std::vector<ConversionInfo> conversionInfos;
     TSymbolTable &symbolTable;
     IdGen &idGen;
     ModifiedStructMachineries &outMachineries;
     const bool isUBO;
+    const bool useAttributeAliasing;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1045,9 +1034,11 @@ bool sh::TryCreateModifiedStruct(TCompiler &compiler,
                                  const Name &modifiedStructName,
                                  ModifiedStructMachineries &outMachineries,
                                  const bool isUBO,
-                                 const bool allowPadding)
+                                 const bool allowPadding,
+                                 const bool useAttributeAliasing)
 {
-    ConvertStructState state(compiler, symbolEnv, idGen, config, outMachineries, isUBO);
+    ConvertStructState state(compiler, symbolEnv, idGen, config, outMachineries, isUBO,
+                             useAttributeAliasing);
     size_t identicalFieldCount = 0;
 
     const TFieldList &originalFields = originalStruct.fields();
@@ -1064,7 +1055,8 @@ bool sh::TryCreateModifiedStruct(TCompiler &compiler,
 
     state.finalize(allowPadding);
 
-    if (identicalFieldCount == originalFields.size() && !state.hasPacking() && !state.hasPadding())
+    if (identicalFieldCount == originalFields.size() && !state.hasPacking() &&
+        !state.hasPadding() && !useAttributeAliasing)
     {
         return false;
     }

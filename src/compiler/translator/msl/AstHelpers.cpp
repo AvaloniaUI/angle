@@ -15,30 +15,6 @@ using namespace sh;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const TVariable &sh::CreateStructTypeVariable(TSymbolTable &symbolTable,
-                                              const TStructure &structure)
-{
-    TType *type    = new TType(&structure, true);
-    TVariable *var = new TVariable(&symbolTable, ImmutableString(""), type, SymbolType::Empty);
-    return *var;
-}
-
-const TVariable &sh::CreateInstanceVariable(TSymbolTable &symbolTable,
-                                            const TStructure &structure,
-                                            const Name &name,
-                                            TQualifier qualifier,
-                                            const TSpan<const unsigned int> *arraySizes)
-{
-    TType *type = new TType(&structure, false);
-    type->setQualifier(qualifier);
-    if (arraySizes)
-    {
-        type->makeArrays(*arraySizes);
-    }
-    TVariable *var = new TVariable(&symbolTable, name.rawName(), type, name.symbolType());
-    return *var;
-}
-
 static void AcquireFunctionExtras(TFunction &dest, const TFunction &src)
 {
     if (src.isDefined())
@@ -196,54 +172,6 @@ void sh::SetArg(TIntermAggregate &call, size_t index, TIntermTyped &arg)
     (*call.getSequence())[index] = &arg;
 }
 
-int sh::GetFieldIndex(const TStructure &structure, const ImmutableString &fieldName)
-{
-    const TFieldList &fieldList = structure.fields();
-
-    int i = 0;
-    for (TField *field : fieldList)
-    {
-        if (field->name() == fieldName)
-        {
-            return i;
-        }
-        ++i;
-    }
-
-    return -1;
-}
-
-TIntermBinary &sh::AccessField(const TVariable &structInstanceVar, const ImmutableString &fieldName)
-{
-    return AccessField(*new TIntermSymbol(&structInstanceVar), fieldName);
-}
-
-TIntermBinary &sh::AccessField(TIntermTyped &object, const ImmutableString &fieldName)
-{
-    const TStructure *structure = object.getType().getStruct();
-    ASSERT(structure);
-
-    const int index = GetFieldIndex(*structure, fieldName);
-    ASSERT(index >= 0);
-    return AccessFieldByIndex(object, index);
-}
-
-TIntermBinary &sh::AccessFieldByIndex(TIntermTyped &object, int index)
-{
-#if defined(ANGLE_ENABLE_ASSERTS)
-    const TType &type = object.getType();
-    ASSERT(!type.isArray());
-    const TStructure *structure = type.getStruct();
-    ASSERT(structure);
-    ASSERT(0 <= index);
-    ASSERT(static_cast<size_t>(index) < structure->fields().size());
-#endif
-
-    return *new TIntermBinary(
-        TOperator::EOpIndexDirectStruct, &object,
-        new TIntermConstantUnion(new TConstantUnion(index), *new TType(TBasicType::EbtInt)));
-}
-
 TIntermBinary &sh::AccessIndex(TIntermTyped &indexableNode, int index)
 {
 #if defined(ANGLE_ENABLE_ASSERTS)
@@ -276,10 +204,10 @@ TIntermTyped &sh::SubVector(TIntermTyped &vectorNode, int begin, int end)
     {
         return vectorNode;
     }
-    TVector<int> offsets(static_cast<size_t>(end - begin));
+    TVector<uint32_t> offsets(static_cast<size_t>(end - begin));
     std::iota(offsets.begin(), offsets.end(), begin);
     TIntermSwizzle *swizzle = new TIntermSwizzle(vectorNode.deepCopy(), offsets);
-    return *swizzle;
+    return *swizzle->fold(nullptr);  // Swizzles must always be folded to prevent double swizzles.
 }
 
 bool sh::IsScalarBasicType(const TType &type)
@@ -305,7 +233,6 @@ bool sh::HasScalarBasicType(TBasicType type)
     switch (type)
     {
         case TBasicType::EbtFloat:
-        case TBasicType::EbtDouble:
         case TBasicType::EbtInt:
         case TBasicType::EbtUInt:
         case TBasicType::EbtBool:
@@ -423,7 +350,6 @@ TIntermTyped &sh::CoerceSimple(TBasicType toBasicType,
             switch (fromBasicType)
             {
                 case TBasicType::EbtFloat:
-                case TBasicType::EbtDouble:
                 case TBasicType::EbtInt:
                 case TBasicType::EbtUInt:
                 {
@@ -476,7 +402,6 @@ TIntermTyped &sh::CoerceSimple(const TType &toType,
             switch (fromBasicType)
             {
                 case TBasicType::EbtFloat:
-                case TBasicType::EbtDouble:
                 case TBasicType::EbtInt:
                 case TBasicType::EbtUInt:
                 {

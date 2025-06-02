@@ -8,8 +8,10 @@
 #include "libANGLE/renderer/gl/ProgramExecutableGL.h"
 
 #include "common/string_utils.h"
+#include "libANGLE/Context.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/Uniform.h"
+#include "libANGLE/renderer/gl/ContextGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
 #include "libANGLE/renderer/gl/RendererGL.h"
 #include "libANGLE/renderer/gl/StateManagerGL.h"
@@ -20,6 +22,7 @@ ProgramExecutableGL::ProgramExecutableGL(const gl::ProgramExecutable *executable
     : ProgramExecutableImpl(executable),
       mHasAppliedTransformFeedbackVaryings(false),
       mClipDistanceEnabledUniformLocation(-1),
+      mClipOriginUniformLocation(-1),
       mMultiviewBaseViewLayerIndexUniformLocation(-1),
       mProgramID(0),
       mFunctions(nullptr),
@@ -36,6 +39,7 @@ void ProgramExecutableGL::reset()
     mUniformBlockRealLocationMap.clear();
 
     mClipDistanceEnabledUniformLocation         = -1;
+    mClipOriginUniformLocation                  = -1;
     mMultiviewBaseViewLayerIndexUniformLocation = -1;
 }
 
@@ -92,6 +96,12 @@ void ProgramExecutableGL::postLink(const FunctionsGL *functions,
         ASSERT(mClipDistanceEnabledUniformLocation != -1);
     }
 
+    if (features.emulateClipOrigin.enabled)
+    {
+        ASSERT(functions->standard == STANDARD_GL_ES);
+        mClipOriginUniformLocation = functions->getUniformLocation(programID, "angle_ClipOrigin");
+    }
+
     if (mExecutable->usesMultiview())
     {
         mMultiviewBaseViewLayerIndexUniformLocation =
@@ -108,6 +118,26 @@ void ProgramExecutableGL::updateEnabledClipDistances(uint8_t enabledClipDistance
     ASSERT(mFunctions->programUniform1ui != nullptr);
     mFunctions->programUniform1ui(mProgramID, mClipDistanceEnabledUniformLocation,
                                   enabledClipDistancesPacked);
+}
+
+void ProgramExecutableGL::updateEmulatedClipOrigin(gl::ClipOrigin origin) const
+{
+    if (mClipOriginUniformLocation == -1)
+    {
+        // A driver may optimize away the uniform when gl_Position.y is always zero.
+        return;
+    }
+
+    const float originValue = (origin == gl::ClipOrigin::LowerLeft) ? 1.0f : -1.0f;
+    if (mFunctions->programUniform1f != nullptr)
+    {
+        mFunctions->programUniform1f(mProgramID, mClipOriginUniformLocation, originValue);
+    }
+    else
+    {
+        mStateManager->useProgram(mProgramID);
+        mFunctions->uniform1f(mClipOriginUniformLocation, originValue);
+    }
 }
 
 void ProgramExecutableGL::enableLayeredRenderingPath(int baseViewIndex) const
@@ -447,4 +477,50 @@ void ProgramExecutableGL::getUniformuiv(const gl::Context *context,
     mFunctions->getUniformuiv(mProgramID, uniLoc(location), params);
 }
 
+void ProgramExecutableGL::setUniformBlockBinding(GLuint uniformBlockIndex,
+                                                 GLuint uniformBlockBinding)
+{
+    // Lazy init
+    if (mUniformBlockRealLocationMap.empty())
+    {
+        mUniformBlockRealLocationMap.reserve(mExecutable->getUniformBlocks().size());
+        for (const gl::InterfaceBlock &uniformBlock : mExecutable->getUniformBlocks())
+        {
+            const std::string &mappedNameWithIndex = uniformBlock.mappedNameWithArrayIndex();
+            GLuint blockIndex =
+                mFunctions->getUniformBlockIndex(mProgramID, mappedNameWithIndex.c_str());
+            mUniformBlockRealLocationMap.push_back(blockIndex);
+        }
+    }
+
+    const GLuint realBlockIndex = mUniformBlockRealLocationMap[uniformBlockIndex];
+    if (realBlockIndex != GL_INVALID_INDEX)
+    {
+        mFunctions->uniformBlockBinding(mProgramID, realBlockIndex, uniformBlockBinding);
+    }
+}
+
+void ProgramExecutableGL::reapplyUBOBindings()
+{
+    const std::vector<gl::InterfaceBlock> &blocks = mExecutable->getUniformBlocks();
+    for (size_t blockIndex = 0; blockIndex < blocks.size(); ++blockIndex)
+    {
+        if (blocks[blockIndex].activeShaders().any())
+        {
+            const GLuint index = static_cast<GLuint>(blockIndex);
+            setUniformBlockBinding(index, mExecutable->getUniformBlockBinding(index));
+        }
+    }
+}
+
+void ProgramExecutableGL::syncUniformBlockBindings()
+{
+    for (size_t uniformBlockIndex : mDirtyUniformBlockBindings)
+    {
+        const GLuint index = static_cast<GLuint>(uniformBlockIndex);
+        setUniformBlockBinding(index, mExecutable->getUniformBlockBinding(index));
+    }
+
+    mDirtyUniformBlockBindings.reset();
+}
 }  // namespace rx

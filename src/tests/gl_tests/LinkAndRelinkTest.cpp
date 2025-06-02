@@ -33,6 +33,26 @@ class LinkAndRelinkTestES31 : public ANGLETest<>
     LinkAndRelinkTestES31() {}
 };
 
+// Test destruction of a context with a pending relink of the current in-use
+// program.
+TEST_P(LinkAndRelinkTest, DestructionWithPendingRelink)
+{
+    constexpr char kVS[] = "void main() {}";
+    constexpr char kFS[] = "void main() {}";
+
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVS);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFS);
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+
+    glLinkProgram(program);
+    glUseProgram(program);
+    glLinkProgram(program);
+    EXPECT_GL_NO_ERROR();
+}
+
 // When a program link or relink fails, if you try to install the unsuccessfully
 // linked program (via UseProgram) and start rendering or dispatch compute,
 // We can not always report INVALID_OPERATION for rendering/compute pipeline.
@@ -164,7 +184,7 @@ TEST_P(LinkAndRelinkTest, RenderingProgramFailsWithProgramInstalled)
 // Tests uniform default values.
 TEST_P(LinkAndRelinkTest, UniformDefaultValues)
 {
-    // TODO(anglebug.com/3969): Understand why rectangle texture CLs made this fail.
+    // TODO(anglebug.com/42262609): Understand why rectangle texture CLs made this fail.
     ANGLE_SKIP_TEST_IF(IsOzone() && IsIntel());
     constexpr char kFS[] = R"(precision mediump float;
 uniform vec4 u_uniform;
@@ -388,7 +408,7 @@ void main()
 // then starting rendering will fail, but dispatching compute can succeed.
 TEST_P(LinkAndRelinkTestES31, RelinkProgramSucceedsFromRenderingToCompute)
 {
-    // http://anglebug.com/5072
+    // http://anglebug.com/42263641
     ANGLE_SKIP_TEST_IF(IsIntel() && IsLinux() && IsOpenGL());
 
     constexpr char kVS[] = "void main() {}";

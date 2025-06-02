@@ -13,6 +13,7 @@
 #include "libANGLE/Error.h"
 #include "libANGLE/State.h"
 #include "libANGLE/angletypes.h"
+#include "libANGLE/renderer/gl/ProgramExecutableGL.h"
 #include "libANGLE/renderer/gl/functionsgl_typedefs.h"
 #include "platform/autogen/FeaturesGL_autogen.h"
 
@@ -34,6 +35,16 @@ class FunctionsGL;
 class TransformFeedbackGL;
 class VertexArrayGL;
 class QueryGL;
+
+struct ExternalContextVertexAttribute
+{
+    bool enabled;
+    const angle::Format *format;
+    GLuint stride;
+    GLvoid *pointer;
+    GLuint buffer;
+    gl::VertexAttribCurrentValueData currentData;
+};
 
 // TODO(penghuang): use gl::State?
 struct ExternalContextState
@@ -64,6 +75,7 @@ struct ExternalContextState
     bool sampleCoverageInvert;
     GLenum blendEquationRgb;
     GLenum blendEquationAlpha;
+    bool enableBlendEquationAdvancedCoherent;
 
     bool enableDither;
     GLenum polygonMode;
@@ -120,6 +132,9 @@ struct ExternalContextState
     std::vector<TextureBindings> textureBindings;
 
     GLenum vertexArrayBinding;
+
+    angle::FixedVector<ExternalContextVertexAttribute, gl::MAX_VERTEX_ATTRIBS>
+        defaultVertexArrayAttributes;
 };
 
 struct VertexAttributeGL
@@ -212,10 +227,12 @@ class StateManagerGL final : angle::NonCopyable
     void setBlendColor(const gl::ColorF &blendColor);
     void setBlendFuncs(const gl::BlendStateExt &blendStateExt);
     void setBlendEquations(const gl::BlendStateExt &blendStateExt);
+    void setBlendAdvancedCoherent(bool enabled);
     void setColorMask(bool red, bool green, bool blue, bool alpha);
     void setSampleAlphaToCoverageEnabled(bool enabled);
     void setSampleCoverageEnabled(bool enabled);
     void setSampleCoverage(float value, bool invert);
+    void forceSetSampleCoverage(float value, bool invert);
     void setSampleMaskEnabled(bool enabled);
     void setSampleMaski(GLuint maskNumber, GLbitfield mask);
 
@@ -299,6 +316,13 @@ class StateManagerGL final : angle::NonCopyable
         }
     }
 
+    ANGLE_INLINE void updateEmulatedClipOriginUniform(const gl::ProgramExecutable *executable,
+                                                      const gl::ClipOrigin origin) const
+    {
+        ASSERT(executable);
+        GetImplAs<ProgramExecutableGL>(executable)->updateEmulatedClipOrigin(origin);
+    }
+
     GLuint getProgramID() const { return mProgram; }
     GLuint getVertexArrayID() const { return mVAO; }
     GLuint getFramebufferID(angle::FramebufferBinding binding) const
@@ -319,7 +343,14 @@ class StateManagerGL final : angle::NonCopyable
     void restoreNativeContext(const gl::Extensions &extensions, const ExternalContextState *state);
 
   private:
+    void forceBindVertexArray(GLuint vao, VertexArrayStateGL *vaoState);
+
     void setTextureCubemapSeamlessEnabled(bool enabled);
+
+    void setClipControlWithEmulatedClipOrigin(const gl::ProgramExecutable *executable,
+                                              GLenum frontFace,
+                                              gl::ClipOrigin origin,
+                                              gl::ClipDepthMode depth);
 
     angle::Result propagateProgramToVAO(const gl::Context *context,
                                         const gl::ProgramExecutable *executable,
@@ -476,6 +507,7 @@ class StateManagerGL final : angle::NonCopyable
 
     gl::ColorF mBlendColor;
     gl::BlendStateExt mBlendStateExt;
+    bool mBlendAdvancedCoherent;
     const bool mIndependentBlendStates;
 
     bool mSampleAlphaToCoverageEnabled;
@@ -484,6 +516,7 @@ class StateManagerGL final : angle::NonCopyable
     bool mSampleCoverageInvert;
     bool mSampleMaskEnabled;
     gl::SampleMaskArray<GLbitfield> mSampleMaskValues;
+    bool mSampleCoverageEverChanged;
 
     bool mDepthTestEnabled;
     GLenum mDepthFunc;

@@ -9,7 +9,7 @@
 // From: interpolateAtOffset(float interpolant, vec2 offset);
 // To: interpolateAtOffset(float interpolant, vec2(offset * (pre-rotation * viewportYScale)));
 //
-// See http://anglebug.com/3589
+// See http://anglebug.com/42262252
 
 #ifndef COMPILER_TRANSLATOR_TREEOPS_SPIRV_REWRITEINTERPOLATEATOFFSET_H_
 #define COMPILER_TRANSLATOR_TREEOPS_SPIRV_REWRITEINTERPOLATEATOFFSET_H_
@@ -23,7 +23,6 @@ namespace sh
 class TCompiler;
 class TIntermBlock;
 class TSymbolTable;
-class SpecConst;
 class DriverUniform;
 
 // If fragRotation = nullptr, no rotation will be applied.
@@ -31,7 +30,6 @@ class DriverUniform;
                                               TIntermBlock *root,
                                               TSymbolTable *symbolTable,
                                               int shaderVersion,
-                                              SpecConst *specConst,
                                               const DriverUniform *driverUniforms);
 
 }  // namespace sh

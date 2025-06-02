@@ -30,14 +30,16 @@ static void GetGLVersion(PFNGLGETSTRINGPROC getStringFunction,
         // number.minor number.release number, where the numbers all have one or more
         // digits
         *outStandard = STANDARD_GL_DESKTOP;
-        *outVersion  = gl::Version(version[0] - '0', version[2] - '0');
+        *outVersion  = gl::Version(static_cast<uint8_t>(version[0] - '0'),
+                                   static_cast<uint8_t>(version[2] - '0'));
     }
     else
     {
         // ES spec states that the GL_VERSION string will be in the following format:
         // "OpenGL ES N.M vendor-specific information"
         *outStandard = STANDARD_GL_ES;
-        *outVersion  = gl::Version(version[10] - '0', version[12] - '0');
+        *outVersion  = gl::Version(static_cast<uint8_t>(version[10] - '0'),
+                                   static_cast<uint8_t>(version[12] - '0'));
     }
 }
 
@@ -157,7 +159,7 @@ void FunctionsGL::initialize(const egl::AttributeMap &displayAttributes)
             {
                 initProcsDesktopGL(version, extensionSet);
                 // Test that ANGLE_ENABLE_GL_DESKTOP_BACKEND has been enabled
-                // See http://anglebug.com/8195
+                // See http://anglebug.com/42266631
                 ASSERT(getString != nullptr && getError != nullptr);
             }
             break;

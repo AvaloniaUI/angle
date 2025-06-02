@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef ANGLE_ENABLE_NULL
+#    include "compiler/translator/null/TranslatorNULL.h"
+#endif  // ANGLE_ENABLE_NULL
+
 #ifdef ANGLE_ENABLE_ESSL
 #    include "compiler/translator/glsl/TranslatorESSL.h"
 #endif  // ANGLE_ENABLE_ESSL
@@ -24,6 +28,10 @@
 #    include "compiler/translator/msl/TranslatorMSL.h"
 #endif  // ANGLE_ENABLE_METAL
 
+#ifdef ANGLE_ENABLE_WGPU
+#    include "compiler/translator/wgsl/TranslatorWGSL.h"
+#endif  // ANGLE_ENABLE_WGPU
+
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -36,6 +44,13 @@ namespace sh
 //
 TCompiler *ConstructCompiler(sh::GLenum type, ShShaderSpec spec, ShShaderOutput output)
 {
+#ifdef ANGLE_ENABLE_NULL
+    if (IsOutputNULL(output))
+    {
+        return new TranslatorNULL(type, spec);
+    }
+#endif  // ANGLE_ENABLE_NULL
+
 #ifdef ANGLE_ENABLE_ESSL
     if (IsOutputESSL(output))
     {
@@ -70,6 +85,13 @@ TCompiler *ConstructCompiler(sh::GLenum type, ShShaderSpec spec, ShShaderOutput 
         return new TranslatorMSL(type, spec, output);
     }
 #endif  // ANGLE_ENABLE_METAL
+
+#ifdef ANGLE_ENABLE_WGPU
+    if (IsOutputWGSL(output))
+    {
+        return new TranslatorWGSL(type, spec, output);
+    }
+#endif  // ANGLE_ENABLE_WGPU
 
     // Unsupported compiler or unknown format. Return nullptr per the sh::ConstructCompiler API.
     return nullptr;

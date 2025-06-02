@@ -5,7 +5,7 @@
 //
 // CompiledShaderState.h:
 //   Defines a struct containing any data that is needed to build
-//   a ShaderState from a TCompiler.
+//   a CompiledShaderState from a TCompiler.
 //
 
 #ifndef COMMON_COMPILEDSHADERSTATE_H_
@@ -24,7 +24,9 @@
 namespace sh
 {
 struct BlockMemberInfo;
-}
+
+using CompilerMetadataFlags = angle::PackedEnumBitSet<sh::MetadataFlags, uint32_t>;
+}  // namespace sh
 
 namespace gl
 {
@@ -52,9 +54,20 @@ struct CompiledShaderState
     void serialize(gl::BinaryOutputStream &stream) const;
     void deserialize(gl::BinaryInputStream &stream);
 
-    const gl::ShaderType shaderType;
+    bool hasValidGeometryShaderInputPrimitiveType() const
+    {
+        return metadataFlags[sh::MetadataFlags::HasValidGeometryShaderInputPrimitiveType];
+    }
+    bool hasValidGeometryShaderOutputPrimitiveType() const
+    {
+        return metadataFlags[sh::MetadataFlags::HasValidGeometryShaderOutputPrimitiveType];
+    }
+    bool hasValidGeometryShaderMaxVertices() const
+    {
+        return metadataFlags[sh::MetadataFlags::HasValidGeometryShaderMaxVertices];
+    }
 
-    bool successfullyCompiled;
+    const gl::ShaderType shaderType;
 
     int shaderVersion;
     std::string translatedSource;
@@ -70,9 +83,7 @@ struct CompiledShaderState
     std::vector<sh::ShaderVariable> activeAttributes;
     std::vector<sh::ShaderVariable> activeOutputVariables;
 
-    bool hasClipDistance;
-    bool hasDiscard;
-    bool enablesPerSampleShading;
+    sh::CompilerMetadataFlags metadataFlags;
     gl::BlendEquationBitSet advancedBlendEquations;
     SpecConstUsageBits specConstUsageBits;
 
@@ -80,9 +91,9 @@ struct CompiledShaderState
     int numViews;
 
     // Geometry Shader
-    Optional<gl::PrimitiveMode> geometryShaderInputPrimitiveType;
-    Optional<gl::PrimitiveMode> geometryShaderOutputPrimitiveType;
-    Optional<GLint> geometryShaderMaxVertices;
+    gl::PrimitiveMode geometryShaderInputPrimitiveType;
+    gl::PrimitiveMode geometryShaderOutputPrimitiveType;
+    GLint geometryShaderMaxVertices;
     int geometryShaderInvocations;
 
     // Tessellation Shader
@@ -91,6 +102,10 @@ struct CompiledShaderState
     GLenum tessGenSpacing;
     GLenum tessGenVertexOrder;
     GLenum tessGenPointMode;
+
+    // ANGLE_shader_pixel_local_storage: A mapping from binding index to the PLS uniform format at
+    // that index.
+    std::vector<ShPixelLocalStorageFormat> pixelLocalStorageFormats;
 };
 
 using SharedCompiledShaderState = std::shared_ptr<CompiledShaderState>;

@@ -22,7 +22,9 @@
 #include <vector>
 
 #include "common/Optional.h"
+#include "common/SimpleMutex.h"
 #include "common/angleutils.h"
+#include "common/hash_containers.h"
 #include "common/mathutil.h"
 #include "common/utilities.h"
 
@@ -33,6 +35,7 @@
 #include "libANGLE/ProgramExecutable.h"
 #include "libANGLE/ProgramLinkedResources.h"
 #include "libANGLE/RefCountObject.h"
+#include "libANGLE/Shader.h"
 #include "libANGLE/Uniform.h"
 #include "libANGLE/angletypes.h"
 
@@ -40,6 +43,7 @@ namespace rx
 {
 class GLImplFactory;
 class ProgramImpl;
+class LinkSubTask;
 struct TranslatedAttribute;
 }  // namespace rx
 
@@ -53,7 +57,6 @@ class Context;
 struct Extensions;
 class Framebuffer;
 class ProgramExecutable;
-class Shader;
 class ShaderProgramManager;
 class State;
 struct UnusedUniform;
@@ -281,6 +284,7 @@ class ProgramState final : angle::NonCopyable
 
     std::string mLabel;
 
+    ShaderMap<SharedCompileJob> mShaderCompileJobs;
     ShaderMap<SharedCompiledShaderState> mAttachedShaders;
 
     std::vector<std::string> mTransformFeedbackVaryingNames;
@@ -352,17 +356,17 @@ class Program final : public LabeledObject, public angle::Subject
 
     Shader *getAttachedShader(ShaderType shaderType) const;
 
-    void bindAttributeLocation(GLuint index, const char *name);
-    void bindUniformLocation(UniformLocation location, const char *name);
+    void bindAttributeLocation(const Context *context, GLuint index, const char *name);
+    void bindUniformLocation(const Context *context, UniformLocation location, const char *name);
 
     // EXT_blend_func_extended
-    void bindFragmentOutputLocation(GLuint index, const char *name);
-    void bindFragmentOutputIndex(GLuint index, const char *name);
+    void bindFragmentOutputLocation(const Context *context, GLuint index, const char *name);
+    void bindFragmentOutputIndex(const Context *context, GLuint index, const char *name);
 
     // KHR_parallel_shader_compile
     // Try to link the program asynchronously. As a result, background threads may be launched to
     // execute the linking tasks concurrently.
-    angle::Result link(const Context *context);
+    angle::Result link(const Context *context, angle::JobResultExpectancy resultExpectancy);
 
     // Peek whether there is any running linking tasks.
     bool isLinking() const;
@@ -373,6 +377,17 @@ class Program final : public LabeledObject, public angle::Subject
         ASSERT(!mLinkingState);
         return mLinked;
     }
+    bool isBinaryReady(const Context *context);
+    ANGLE_INLINE void cacheProgramBinaryIfNecessary(const Context *context)
+    {
+        // This function helps ensure the program binary is cached, even if the backend waits for
+        // post-link tasks without the knowledge of the front-end.
+        if (!mIsBinaryCached && !mState.mBinaryRetrieveableHint &&
+            mState.mExecutable->mPostLinkSubTasks.empty())
+        {
+            cacheProgramBinaryIfNotAlready(context);
+        }
+    }
 
     angle::Result setBinary(const Context *context,
                             GLenum binaryFormat,
@@ -382,41 +397,37 @@ class Program final : public LabeledObject, public angle::Subject
                             GLenum *binaryFormat,
                             void *binary,
                             GLsizei bufSize,
-                            GLsizei *length) const;
-    GLint getBinaryLength(Context *context) const;
+                            GLsizei *length);
+    GLint getBinaryLength(Context *context);
     void setBinaryRetrievableHint(bool retrievable);
     bool getBinaryRetrievableHint() const;
 
     angle::Result loadBinary(const Context *context,
                              const void *binary,
                              GLsizei length,
-                             bool *successOut);
+                             egl::CacheGetResult *resultOut);
 
     InfoLog &getInfoLog() { return mState.mInfoLog; }
     int getInfoLogLength() const;
     void getInfoLog(GLsizei bufSize, GLsizei *length, char *infoLog) const;
 
-    void setSeparable(bool separable);
+    void setSeparable(const Context *context, bool separable);
     bool isSeparable() const { return mState.mSeparable; }
 
     void getAttachedShaders(GLsizei maxCount, GLsizei *count, ShaderProgramID *shaders) const;
 
     void bindUniformBlock(UniformBlockIndex uniformBlockIndex, GLuint uniformBlockBinding);
 
-    void setTransformFeedbackVaryings(GLsizei count,
+    void setTransformFeedbackVaryings(const Context *context,
+                                      GLsizei count,
                                       const GLchar *const *varyings,
                                       GLenum bufferMode);
     GLenum getTransformFeedbackBufferMode() const { return mState.mTransformFeedbackBufferMode; }
 
-    ANGLE_INLINE void addRef()
-    {
-        ASSERT(!mLinkingState);
-        mRefCount++;
-    }
+    ANGLE_INLINE void addRef() { mRefCount++; }
 
     ANGLE_INLINE void release(const Context *context)
     {
-        ASSERT(!mLinkingState);
         mRefCount--;
 
         if (mRefCount == 0 && mDeleteStatus)
@@ -449,36 +460,18 @@ class Program final : public LabeledObject, public angle::Subject
         return mState.getFragmentOutputIndexes();
     }
 
-    // Program dirty bits.
-    enum DirtyBitType
-    {
-        DIRTY_BIT_UNIFORM_BLOCK_BINDING_0,
-        DIRTY_BIT_UNIFORM_BLOCK_BINDING_MAX =
-            DIRTY_BIT_UNIFORM_BLOCK_BINDING_0 + IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS,
-
-        DIRTY_BIT_COUNT = DIRTY_BIT_UNIFORM_BLOCK_BINDING_MAX,
-    };
-    static_assert(DIRTY_BIT_UNIFORM_BLOCK_BINDING_0 == 0,
-                  "UniformBlockBindingMask must match DirtyBits because UniformBlockBindingMask is "
-                  "used directly to set dirty bits.");
-
-    using DirtyBits = angle::BitSet<DIRTY_BIT_COUNT>;
-
-    angle::Result syncState(const Context *context);
-
     // Try to resolve linking. Inlined to make sure its overhead is as low as possible.
-    void resolveLink(const Context *context)
+    ANGLE_INLINE void resolveLink(const Context *context)
     {
-        if (mLinkingState)
+        if (ANGLE_UNLIKELY(mLinkingState))
         {
             resolveLinkImpl(context);
         }
     }
 
-    ANGLE_INLINE bool hasAnyDirtyBit() const { return mDirtyBits.any(); }
-
-    // Writes a program's binary to the output memory buffer.
-    angle::Result serialize(const Context *context, angle::MemoryBuffer *binaryOut) const;
+    // Writes a program's binary to |mBinary|.
+    angle::Result serialize(const Context *context);
+    const angle::MemoryBuffer &getSerializedBinary() const { return mBinary; }
 
     rx::UniqueSerial serial() const { return mSerial; }
 
@@ -487,15 +480,6 @@ class Program final : public LabeledObject, public angle::Subject
     const SharedProgramExecutable &getSharedExecutable() const
     {
         return mState.getSharedExecutable();
-    }
-
-    void onUniformBufferStateChange(size_t uniformBufferIndex)
-    {
-        if (uniformBufferIndex >= mUniformBlockBindingMasks.size())
-        {
-            mUniformBlockBindingMasks.resize(uniformBufferIndex + 1, UniformBlockBindingMask());
-        }
-        mDirtyBits |= mUniformBlockBindingMasks[uniformBufferIndex];
     }
 
   private:
@@ -512,13 +496,13 @@ class Program final : public LabeledObject, public angle::Subject
     struct LinkingState;
     ~Program() override;
 
-    // Loads program state according to the specified binary blob.
-    angle::Result deserialize(const Context *context, BinaryInputStream &stream);
+    // Loads program state according to the specified binary blob.  Returns true on success.
+    bool deserialize(const Context *context, BinaryInputStream &stream);
 
     void unlink();
+    void setupExecutableForLink(const Context *context);
     void deleteSelf(const Context *context);
 
-    angle::Result linkImpl(const Context *context);
     angle::Result linkJobImpl(const Caps &caps,
                               const Limitations &limitations,
                               const Version &clientVersion,
@@ -541,12 +525,13 @@ class Program final : public LabeledObject, public angle::Subject
 
     void updateLinkedShaderStages();
 
-    void initInterfaceBlockBindings();
-
     // Block until linking is finished and resolve it.
-    void resolveLinkImpl(const gl::Context *context);
+    void resolveLinkImpl(const Context *context);
+    // Block until post-link tasks are finished.
+    void waitForPostLinkTasks(const Context *context);
 
-    void postResolveLink(const gl::Context *context);
+    void postResolveLink(const Context *context);
+    void cacheProgramBinaryIfNotAlready(const Context *context);
 
     void dumpProgramInfo(const Context *context) const;
 
@@ -555,10 +540,19 @@ class Program final : public LabeledObject, public angle::Subject
     rx::ProgramImpl *mProgram;
 
     bool mValidated;
+    // Flag to indicate that the program can be deleted when no longer in use
+    bool mDeleteStatus;
+    // Whether the program binary is implicitly cached yet.  This is usually done in
+    // |resolveLinkImpl|, but may be deferred in the presence of post-link tasks.  In that case,
+    // |waitForPostLinkTasks| would cache the binary.  However, if the wait on the tasks is done by
+    // the backend itself, this caching will not be done.  This flag is used to make sure the binary
+    // is eventually cached at some point in the future.
+    bool mIsBinaryCached;
 
     bool mLinked;
     std::unique_ptr<LinkingState> mLinkingState;
-    bool mDeleteStatus;  // Flag to indicate that the program can be deleted when no longer in use
+
+    egl::BlobCache::Key mProgramHash;
 
     unsigned int mRefCount;
 
@@ -571,19 +565,12 @@ class Program final : public LabeledObject, public angle::Subject
     // backends.
     ShaderMap<Shader *> mAttachedShaders;
 
-    DirtyBits mDirtyBits;
+    // A cache of the program binary, prepared by |serialize()|.  OpenGL requires the application to
+    // query the length of the binary first (requiring a call to |serialize()|), and then get the
+    // actual binary.  This cache ensures the second call does not need to call |serialize()| again.
+    angle::MemoryBuffer mBinary;
 
-    // To simplify dirty bits handling, instead of tracking dirtiness of both uniform block index
-    // and uniform binding index, we only track which uniform block index is dirty. And then when
-    // buffer index is dirty, we look at which uniform blocks are bound to this buffer binding index
-    // and set all of these uniform blocks dirty. This variable tracks all the uniform blocks bound
-    // to the given binding index in the form of bitmask so that we can quickly convert them to the
-    // dirty bits.
-    static constexpr size_t kFastUniformBlockBindingLimit = 8;
-    angle::FastVector<UniformBlockBindingMask, kFastUniformBlockBindingLimit>
-        mUniformBlockBindingMasks;
-
-    std::mutex mHistogramMutex;
+    angle::SimpleMutex mHistogramMutex;
 };
 }  // namespace gl
 

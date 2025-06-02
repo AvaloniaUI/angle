@@ -5,9 +5,9 @@
 //
 
 #include "compiler/translator/tree_ops/msl/RewriteUnaddressableReferences.h"
-#include "compiler/translator/msl/AsNode.h"
+#include "compiler/translator/AsNode.h"
+#include "compiler/translator/IntermRebuild.h"
 #include "compiler/translator/msl/AstHelpers.h"
-#include "compiler/translator/msl/IntermRebuild.h"
 
 using namespace sh;
 
@@ -296,14 +296,14 @@ class Rewriter2 : public TIntermRebuild
         }
 
         TIntermTyped &vecNode         = *swizzleNode.getOperand();
-        const TQualifierList &offsets = swizzleNode.getSwizzleOffsets();
+        const TVector<uint32_t> &offsets = swizzleNode.getSwizzleOffsets();
         ASSERT(!offsets.empty());
         ASSERT(offsets.size() <= 4);
 
         auto &args = *new TIntermSequence();
         args.reserve(offsets.size() + 1);
         args.push_back(&vecNode);
-        for (int offset : offsets)
+        for (uint32_t offset : offsets)
         {
             args.push_back(new TIntermConstantUnion(new TConstantUnion(offset),
                                                     *new TType(TBasicType::EbtInt)));

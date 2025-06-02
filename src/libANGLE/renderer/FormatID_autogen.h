@@ -15,7 +15,7 @@
 namespace angle
 {
 
-enum class FormatID
+enum class FormatID : uint8_t
 {
     NONE,
     D16_UNORM,
@@ -127,6 +127,7 @@ enum class FormatID
     L16_FLOAT,
     L32A32_FLOAT,
     L32_FLOAT,
+    L4A4_UNORM,
     L8A8_UNORM,
     L8_UNORM,
     PALETTE4_R4G4B4A4_UNORM,
@@ -154,6 +155,7 @@ enum class FormatID
     R10G10B10A2_UNORM,
     R10G10B10A2_USCALED,
     R10G10B10X2_UNORM,
+    R10X6G10X6B10X6A10X6_UNORM,
     R11G11B10_FLOAT,
     R16G16B16A16_FLOAT,
     R16G16B16A16_SINT,
@@ -256,10 +258,18 @@ enum class FormatID
     X2R10G10B10_SSCALED_VERTEX,
     X2R10G10B10_UINT_VERTEX,
     X2R10G10B10_UNORM_VERTEX,
-    X2R10G10B10_USCALED_VERTEX
+    X2R10G10B10_USCALED_VERTEX,
+    EXTERNAL0,
+    EXTERNAL1,
+    EXTERNAL2,
+    EXTERNAL3,
+    EXTERNAL4,
+    EXTERNAL5,
+    EXTERNAL6,
+    EXTERNAL7
 };
 
-constexpr uint32_t kNumANGLEFormats = 240;
+constexpr uint32_t kNumANGLEFormats = 250;
 
 }  // namespace angle
 

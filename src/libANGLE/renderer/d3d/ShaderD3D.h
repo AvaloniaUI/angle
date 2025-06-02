@@ -114,9 +114,10 @@ class ShaderD3D : public ShaderImpl
     ShaderD3D(const gl::ShaderState &state, RendererD3D *renderer);
     ~ShaderD3D() override;
 
-    std::shared_ptr<WaitableCompileEvent> compile(const gl::Context *context,
-                                                  gl::ShCompilerInstance *compilerInstance,
-                                                  ShCompileOptions *options) override;
+    std::shared_ptr<ShaderTranslateTask> compile(const gl::Context *context,
+                                                 ShCompileOptions *options) override;
+    std::shared_ptr<ShaderTranslateTask> load(const gl::Context *context,
+                                              gl::BinaryInputStream *stream) override;
 
     std::string getDebugInfo() const override;
 

@@ -19,7 +19,6 @@
         if (!(set)->feature.hasOverride)                      \
         {                                                     \
             (set)->feature.enabled   = cond;                  \
-            (set)->feature.condition = ANGLE_STRINGIFY(cond); \
         }                                                     \
     } while (0)
 
@@ -38,6 +37,7 @@ enum class FeatureCategory
     VulkanAppWorkarounds,
     MetalFeatures,
     MetalWorkarounds,
+    WebGPUWorkarounds,
 };
 
 constexpr char kFeatureCategoryFrontendWorkarounds[]  = "Frontend workarounds";
@@ -50,6 +50,7 @@ constexpr char kFeatureCategoryVulkanWorkarounds[]    = "Vulkan workarounds";
 constexpr char kFeatureCategoryVulkanFeatures[]       = "Vulkan features";
 constexpr char kFeatureCategoryMetalFeatures[]        = "Metal features";
 constexpr char kFeatureCategoryMetalWorkarounds[]     = "Metal workarounds";
+constexpr char kFeatureCategoryWebGPUWorkarounds[]    = "WebGPU workarounds";
 constexpr char kFeatureCategoryUnknown[]              = "Unknown";
 
 inline const char *FeatureCategoryToString(const FeatureCategory &fc)
@@ -96,6 +97,10 @@ inline const char *FeatureCategoryToString(const FeatureCategory &fc)
             return kFeatureCategoryMetalWorkarounds;
             break;
 
+        case FeatureCategory::WebGPUWorkarounds:
+            return kFeatureCategoryWebGPUWorkarounds;
+            break;
+
         default:
             return kFeatureCategoryUnknown;
             break;
@@ -122,26 +127,16 @@ using FeatureList = std::vector<const FeatureInfo *>;
 struct FeatureInfo
 {
     FeatureInfo(const FeatureInfo &other);
-    FeatureInfo(const char *name,
-                const FeatureCategory &category,
-                const char *description,
-                FeatureMap *const mapPtr,
-                const char *bug);
+    FeatureInfo(const char *name, const FeatureCategory &category, FeatureMap *const mapPtr);
     ~FeatureInfo();
 
     void applyOverride(bool state);
 
-    // The name of the workaround, lowercase, camel_case
+    // The name of the workaround
     const char *const name;
 
     // The category that the workaround belongs to. Eg. "Vulkan workarounds"
     const FeatureCategory category;
-
-    // A short description to be read by the user.
-    const char *const description;
-
-    // A link to the bug, if any
-    const char *const bug;
 
     // Whether the workaround is enabled or not. Determined by heuristics like vendor ID and
     // version, but may be overriden to any value.
@@ -150,23 +145,13 @@ struct FeatureInfo
     // Whether this feature has an override applied to it, and the condition to
     // enable it should not be checked.
     bool hasOverride = false;
-
-    // A stringified version of the condition used to set 'enabled'. ie "IsNvidia() && IsApple()"
-    const char *condition;
 };
 
 inline FeatureInfo::FeatureInfo(const FeatureInfo &other) = default;
 inline FeatureInfo::FeatureInfo(const char *name,
                                 const FeatureCategory &category,
-                                const char *description,
-                                FeatureMap *const mapPtr,
-                                const char *bug = "")
-    : name(name),
-      category(category),
-      description(description),
-      bug(bug),
-      enabled(false),
-      condition("")
+                                FeatureMap *const mapPtr)
+    : name(name), category(category), enabled(false)
 {
     if (mapPtr != nullptr)
     {
@@ -192,7 +177,7 @@ struct FeatureSetBase
 
   public:
     void reset();
-    void overrideFeatures(const std::vector<std::string> &featureNames, bool enabled);
+    std::string overrideFeatures(const std::vector<std::string> &featureNames, bool enabled);
     void populateFeatureList(FeatureList *features) const;
 
     const FeatureMap &getFeatures() const { return members; }

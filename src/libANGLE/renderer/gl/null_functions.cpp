@@ -787,6 +787,8 @@ void INTERNAL_GL_APIENTRY glEndQueryNULL(GLenum target) {}
 
 void INTERNAL_GL_APIENTRY glEndQueryIndexedNULL(GLenum target, GLuint index) {}
 
+void INTERNAL_GL_APIENTRY glEndTilingQCOMNULL(GLbitfield preserveMask) {}
+
 void INTERNAL_GL_APIENTRY glEndTransformFeedbackNULL() {}
 
 GLsync INTERNAL_GL_APIENTRY glFenceSyncNULL(GLenum condition, GLbitfield flags)
@@ -1860,6 +1862,14 @@ void INTERNAL_GL_APIENTRY glNamedFramebufferTextureLayerNULL(GLuint framebuffer,
                                                              GLint layer)
 {}
 
+void INTERNAL_GL_APIENTRY glNamedFramebufferTextureMultiviewOVRNULL(GLuint framebuffer,
+                                                                    GLenum attachment,
+                                                                    GLuint texture,
+                                                                    GLint level,
+                                                                    GLint baseViewIndex,
+                                                                    GLsizei numViews)
+{}
+
 void INTERNAL_GL_APIENTRY glNamedRenderbufferStorageNULL(GLuint renderbuffer,
                                                          GLenum internalformat,
                                                          GLsizei width,
@@ -2357,6 +2367,10 @@ void INTERNAL_GL_APIENTRY glSignalSemaphoreEXTNULL(GLuint semaphore,
                                                    GLuint numTextureBarriers,
                                                    const GLuint *textures,
                                                    const GLenum *dstLayouts)
+{}
+
+void INTERNAL_GL_APIENTRY
+glStartTilingQCOMNULL(GLuint x, GLuint y, GLuint width, GLuint height, GLbitfield preserveMask)
 {}
 
 void INTERNAL_GL_APIENTRY glStencilFuncNULL(GLenum func, GLint ref, GLuint mask) {}

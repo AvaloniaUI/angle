@@ -18,13 +18,10 @@
 #include "angle_gl.h"
 #include "common/MemoryBuffer.h"
 #include "common/PackedEnums.h"
+#include "common/SimpleMutex.h"
 #include "common/angleutils.h"
 #include "libANGLE/Caps.h"
 #include "libANGLE/Constants.h"
-#include "libANGLE/Context_gl_1_autogen.h"
-#include "libANGLE/Context_gl_2_autogen.h"
-#include "libANGLE/Context_gl_3_autogen.h"
-#include "libANGLE/Context_gl_4_autogen.h"
 #include "libANGLE/Context_gles_1_0_autogen.h"
 #include "libANGLE/Context_gles_2_0_autogen.h"
 #include "libANGLE/Context_gles_3_0_autogen.h"
@@ -43,9 +40,11 @@
 
 namespace angle
 {
+class Closure;
 class FrameCapture;
 class FrameCaptureShared;
 struct FrontendFeatures;
+class WaitableEvent;
 }  // namespace angle
 
 namespace rx
@@ -119,6 +118,8 @@ class ErrorSet : angle::NonCopyable
     bool isContextLost() const { return mContextLost.load(std::memory_order_relaxed) != 0; }
     GLenum getGraphicsResetStatus(rx::ContextImpl *contextImpl);
     GLenum getResetStrategy() const { return mResetStrategy; }
+    GLenum getErrorForCapture() const;
+    uint32_t getPushedErrorCount() const { return mPushedErrors; }
 
   private:
     void setContextLost();
@@ -148,6 +149,9 @@ class ErrorSet : angle::NonCopyable
     std::atomic_int mSkipValidation;
     std::atomic_int mContextLost;
     std::atomic_int mHasAnyErrors;
+
+    // Error counter for asserting validation layer consistency
+    uint32_t mPushedErrors;
 };
 
 enum class VertexAttribTypeCase
@@ -218,6 +222,7 @@ class StateCache final : angle::NonCopyable
     // 2. onProgramExecutableChange.
     // 3. onVertexArrayStateChange.
     // 4. onGLES1ClientStateChange.
+    // 5. onGLES1TextureStateChange.
     AttributesMask getActiveBufferedAttribsMask() const { return mCachedActiveBufferedAttribsMask; }
     AttributesMask getActiveClientAttribsMask() const { return mCachedActiveClientAttribsMask; }
     AttributesMask getActiveDefaultAttribsMask() const { return mCachedActiveDefaultAttribsMask; }
@@ -366,6 +371,7 @@ class StateCache final : angle::NonCopyable
     void onVertexArrayBufferContentsChange(Context *context);
     void onVertexArrayStateChange(Context *context);
     void onVertexArrayBufferStateChange(Context *context);
+    void onGLES1TextureStateChange(Context *context);
     void onGLES1ClientStateChange(Context *context);
     void onDrawFramebufferChange(Context *context);
     void onActiveTextureChange(Context *context);
@@ -386,9 +392,13 @@ class StateCache final : angle::NonCopyable
     void updateValidDrawModes(Context *context);
     void updateValidBindTextureTypes(Context *context);
     void updateValidDrawElementsTypes(Context *context);
-    void updateBasicDrawStatesError();
-    void updateProgramPipelineError();
-    void updateBasicDrawElementsError();
+    void updateBasicDrawStatesError()
+    {
+        mCachedBasicDrawStatesErrorString = kInvalidPointer;
+        mCachedBasicDrawStatesErrorCode   = GL_NO_ERROR;
+    }
+    void updateProgramPipelineError() { mCachedProgramPipelineError = kInvalidPointer; }
+    void updateBasicDrawElementsError() { mCachedBasicDrawElementsError = kInvalidPointer; }
     void updateTransformFeedbackActiveUnpaused(Context *context);
     void updateVertexAttribTypesValidation(Context *context);
     void updateActiveShaderStorageBufferIndices(Context *context);
@@ -412,9 +422,53 @@ class StateCache final : angle::NonCopyable
     AttributesMask mCachedActiveBufferedAttribsMask;
     AttributesMask mCachedActiveClientAttribsMask;
     AttributesMask mCachedActiveDefaultAttribsMask;
-    bool mCachedHasAnyEnabledClientAttrib;
+
+    // Given a vertex attribute's stride, the corresponding vertex buffer can fit a number of such
+    // attributes.  A draw call that attempts to use more vertex attributes thus needs to fail (when
+    // robust access is enabled).  The following variables help implement this limit given the
+    // following situations:
+    //
+    // Assume:
+    //
+    // Ni = Number of vertex attributes that can fit in buffer bound to attribute i.
+    // Di = Vertex attribute divisor set for attribute i.
+    // F = Draw calls "first" vertex index
+    // C = Draw calls vertex "count"
+    // B = Instanced draw calls "baseinstance"
+    // P = Instanced draw calls "primcount"
+    //
+    // Then, for each attribute i:
+    //
+    //   If Di == 0 (i.e. non-instanced)
+    //     Vertices [F, F+C) are accessed
+    //     Draw call should fail if F+C > Ni
+    //
+    //   If Di != 0 (i.e. instanced), in a non-instanced draw call:
+    //     Only vertex 0 is accessed - note that a non-zero divisor in a non-instanced draw call
+    //       implies that F is ignored and the vertex index is not incremented.
+    //     Draw call should fail if Ni < 1
+    //
+    //   If Di != 0, in an instanced draw call:
+    //     Vertices [B, B+ceil(P/Di)) are accessed
+    //     Draw call should fail if B+ceil(P/Di) > Ni
+    //
+    // To avoid needing to iterate over all attributes in the hot paths, the following is
+    // calculated:
+    //
+    // Non-instanced limit: min(Ni) for all non-instanced attributes.  At draw time F+C <= min(Ni)
+    // is validated.
+    // Instanced limit: min(Ni*Di) for all instanced attributes.  At draw time, B+P <= min(Ni*Di) is
+    // validated (the math works out, try with an example!)
+    //
+    // For instanced attributes in a non-instanced draw call, need to check that min(Ni) > 0.
+    // Evaluating min(Ni*DI) > 0 produces the same result though, so the instanced limit is used
+    // there too.
+    //
+    // If there are no instanced attributes, the non-instanced limit is set to infinity.  If there
+    // are no instanced attributes, the instanced limits are set to infinity.
     GLint64 mCachedNonInstancedVertexElementLimit;
     GLint64 mCachedInstancedVertexElementLimit;
+
     mutable intptr_t mCachedBasicDrawStatesErrorString;
     mutable GLenum mCachedBasicDrawStatesErrorCode;
     mutable intptr_t mCachedBasicDrawElementsError;
@@ -427,6 +481,7 @@ class StateCache final : angle::NonCopyable
     // mCachedProgramPipelineError can be no-error or also in error, or
     // unknown due to early exiting.
     mutable intptr_t mCachedProgramPipelineError;
+    bool mCachedHasAnyEnabledClientAttrib;
     bool mCachedTransformFeedbackActiveUnpaused;
     StorageBuffersMask mCachedActiveShaderStorageBufferIndices;
     ImageUnitMask mCachedActiveImageUnitIndices;
@@ -465,7 +520,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
             egl::ContextMutex *sharedContextMutex,
             MemoryProgramCache *memoryProgramCache,
             MemoryShaderCache *memoryShaderCache,
-            const EGLenum clientType,
             const egl::AttributeMap &attribs,
             const egl::DisplayExtensions &displayExtensions,
             const egl::ClientExtensions &clientExtensions);
@@ -532,8 +586,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     bool isVertexArrayGenerated(VertexArrayID vertexArray) const;
     bool isTransformFeedbackGenerated(TransformFeedbackID transformFeedback) const;
 
-    bool isExternal() const { return mIsExternal; }
-    bool saveAndRestoreState() const { return mSaveAndRestoreState; }
+    bool isExternal() const { return mState.isExternal(); }
 
     void getBooleanvImpl(GLenum pname, GLboolean *params) const;
     void getFloatvImpl(GLenum pname, GLfloat *params) const;
@@ -547,12 +600,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     void deleteFramebuffer(FramebufferID framebuffer);
 
     bool hasActiveTransformFeedback(ShaderProgramID program) const;
-
-    // Desktop GL entry point interface
-    ANGLE_GL_1_CONTEXT_API
-    ANGLE_GL_2_CONTEXT_API
-    ANGLE_GL_3_CONTEXT_API
-    ANGLE_GL_4_CONTEXT_API
 
     // GLES entry point interface
     ANGLE_GLES_1_0_CONTEXT_API
@@ -576,7 +623,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     bool isRobustnessEnabled() const { return mState.hasRobustAccess(); }
 
     const egl::Config *getConfig() const { return mConfig; }
-    EGLenum getClientType() const { return mState.getClientType(); }
     EGLenum getRenderBuffer() const;
     EGLenum getContextPriority() const;
 
@@ -606,7 +652,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     MemoryProgramCache *getMemoryProgramCache() const { return mMemoryProgramCache; }
     MemoryShaderCache *getMemoryShaderCache() const { return mMemoryShaderCache; }
 
-    std::mutex &getProgramCacheMutex() const;
+    angle::SimpleMutex &getProgramCacheMutex() const;
 
     bool hasBeenCurrent() const { return mHasBeenCurrent; }
     egl::Display *getDisplay() const { return mDisplay; }
@@ -628,8 +674,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     const State &getState() const { return mState; }
     const PrivateState &getPrivateState() const { return mState.privateState(); }
-    GLint getClientMajorVersion() const { return mState.getClientMajorVersion(); }
-    GLint getClientMinorVersion() const { return mState.getClientMinorVersion(); }
     const Version &getClientVersion() const { return mState.getClientVersion(); }
     const Caps &getCaps() const { return mState.getCaps(); }
     const TextureCapsMap &getTextureCaps() const { return mState.getTextureCaps(); }
@@ -645,6 +689,10 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     void markContextLost(GraphicsResetStatus status) { mErrors.markContextLost(status); }
     bool isContextLost() const { return mErrors.isContextLost(); }
 
+    // Some commands may need to generate a context lost error but still return a value.
+    // The validation layer does not generate the context lost error in such cases.
+    void contextLostErrorOnBlockingCall(angle::EntryPoint entryPoint) const;
+
     ErrorSet *getMutableErrorSetForValidation() const { return &mErrors; }
 
     // Specific methods needed for validation.
@@ -654,7 +702,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     ANGLE_INLINE Program *getProgramResolveLink(ShaderProgramID handle) const
     {
         Program *program = mState.mShaderProgramManager->getProgram(handle);
-        if (program)
+        if (ANGLE_LIKELY(program))
         {
             program->resolveLink(this);
         }
@@ -664,6 +712,12 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     Program *getProgramNoResolveLink(ShaderProgramID handle) const;
     Shader *getShaderResolveCompile(ShaderProgramID handle) const;
     Shader *getShaderNoResolveCompile(ShaderProgramID handle) const;
+
+    bool nameStartsWithReservedPrefix(const GLchar *name) const
+    {
+        return (strncmp(name, "gl_", 3) == 0) ||
+               (isWebGL() && (strncmp(name, "webgl_", 6) == 0 || strncmp(name, "_webgl_", 7) == 0));
+    }
 
     ANGLE_INLINE bool isTextureGenerated(TextureID texture) const
     {
@@ -698,6 +752,11 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     // GL_KHR_parallel_shader_compile
     std::shared_ptr<angle::WorkerThreadPool> getShaderCompileThreadPool() const;
+    std::shared_ptr<angle::WorkerThreadPool> getLinkSubTaskThreadPool() const;
+    std::shared_ptr<angle::WaitableEvent> postCompileLinkTask(
+        const std::shared_ptr<angle::Closure> &task,
+        angle::JobThreadSafety safety,
+        angle::JobResultExpectancy resultExpectancy) const;
 
     // Single-threaded pool; runs everything instantly
     std::shared_ptr<angle::WorkerThreadPool> getSingleThreadPool() const;
@@ -727,10 +786,22 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     {
         return mTransformFeedbackMap;
     }
+    GLenum getErrorForCapture() const { return mErrors.getErrorForCapture(); }
+    uint32_t getPushedErrorCount() const { return mErrors.getPushedErrorCount(); }
 
     void onPreSwap();
 
-    Program *getActiveLinkedProgram() const;
+    ANGLE_INLINE Program *getActiveLinkedProgram() const
+    {
+        Program *program = mState.getLinkedProgram(this);
+        if (ANGLE_LIKELY(program))
+        {
+            return program;
+        }
+        return getActiveLinkedProgramPPO();
+    }
+
+    ANGLE_NOINLINE Program *getActiveLinkedProgramPPO() const;
 
     // EGL_ANGLE_power_preference implementation.
     egl::Error releaseHighPowerGPU();
@@ -741,11 +812,14 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     egl::Error acquireExternalContext(egl::Surface *drawAndReadSurface);
     egl::Error releaseExternalContext();
 
+    bool noopDrawProgram() const;
     bool noopDraw(PrimitiveMode mode, GLsizei count) const;
     bool noopDrawInstanced(PrimitiveMode mode, GLsizei count, GLsizei instanceCount) const;
     bool noopMultiDraw(GLsizei drawcount) const;
 
-    bool isClearBufferMaskedOut(GLenum buffer, GLint drawbuffer) const;
+    bool isClearBufferMaskedOut(GLenum buffer,
+                                GLint drawbuffer,
+                                GLuint framebufferStencilSize) const;
     bool noopClearBuffer(GLenum buffer, GLint drawbuffer) const;
 
     void addRef() const { mRefCount++; }
@@ -776,22 +850,27 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
 
     const angle::PerfMonitorCounterGroups &getPerfMonitorCounterGroups() const;
 
-    // Enables GL_SHADER_PIXEL_LOCAL_STORAGE_EXT and polyfills load operations for
-    // ANGLE_shader_pixel_local_storage using a fullscreen draw.
-    //
-    // The implementation's ShPixelLocalStorageType must be "PixelLocalStorageEXT".
-    void drawPixelLocalStorageEXTEnable(GLsizei n,
-                                        const PixelLocalStoragePlane[],
-                                        const GLenum loadops[]);
-
-    // Stores texture-backed PLS planes via fullscreen draw and disables
-    // GL_SHADER_PIXEL_LOCAL_STORAGE_EXT.
-    //
-    // The implementation's ShPixelLocalStorageType must be "PixelLocalStorageEXT".
-    void drawPixelLocalStorageEXTDisable(const PixelLocalStoragePlane[], const GLenum storeops[]);
-
     // Ends the currently active pixel local storage session with GL_STORE_OP_STORE on all planes.
-    void endPixelLocalStorageWithStoreOpsStore();
+    void endPixelLocalStorageImplicit();
+
+    bool areBlobCacheFuncsSet() const;
+
+    size_t getMemoryUsage() const;
+
+    // Only used by vulkan backend.
+    void onSwapChainImageChanged() const { mDefaultFramebuffer->onSwapChainImageChanged(); }
+    void onBufferChanged(const angle::SubjectMessage message,
+                         VertexArrayBufferBindingMask vertexArrayBufferBindingMask) const
+    {
+        // Notify current vertex array of the buffer changed. Note that other vertex arrays of this
+        // context or other context requires rebind which will check buffer changes
+        // at that time.
+        if (vertexArrayBufferBindingMask.any())
+        {
+            ASSERT(mState.mVertexArray != nullptr);
+            mState.mVertexArray->onBufferChanged(this, message, vertexArrayBufferBindingMask);
+        }
+    }
 
   private:
     void initializeDefaultResources();
@@ -804,7 +883,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
                             const state::ExtendedDirtyBits extendedBitMask,
                             const state::DirtyObjects &objectMask,
                             Command command);
-    angle::Result syncAllDirtyBits(Command command);
     angle::Result syncDirtyBits(const state::DirtyBits bitMask,
                                 const state::ExtendedDirtyBits extendedBitMask,
                                 Command command);
@@ -831,6 +909,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     egl::Error unsetDefaultFramebuffer();
 
     void initRendererString();
+    void initVendorString();
     void initVersionStrings();
     void initExtensionStrings();
 
@@ -851,6 +930,10 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
                                             GLsizei width,
                                             GLsizei height,
                                             MultisamplingMode mode);
+
+    void onUniformBlockBindingUpdated(GLuint uniformBlockIndex);
+
+    void endTilingImplicit();
 
     State mState;
     bool mShared;
@@ -890,6 +973,7 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     TransformFeedbackMap mTransformFeedbackMap;
     HandleAllocator mTransformFeedbackHandleAllocator;
 
+    const char *mVendorString;
     const char *mVersionString;
     const char *mShadingLanguageString;
     const char *mRendererString;
@@ -925,7 +1009,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     state::DirtyObjects mComputeDirtyObjects;
     state::DirtyBits mCopyImageDirtyBits;
     state::DirtyObjects mCopyImageDirtyObjects;
-    state::DirtyObjects mPixelLocalStorageEXTEnableDisableDirtyObjects;
 
     // Binding to container objects that use dependent state updates.
     angle::ObserverBinding mVertexArrayObserverBinding;
@@ -952,9 +1035,6 @@ class Context final : public egl::LabeledObject, angle::NonCopyable, public angl
     mutable size_t mRefCount;
 
     OverlayType mOverlay;
-
-    const bool mIsExternal;
-    const bool mSaveAndRestoreState;
 
     bool mIsDestroyed;
 

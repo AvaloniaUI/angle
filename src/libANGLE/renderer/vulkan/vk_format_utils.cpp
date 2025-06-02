@@ -8,18 +8,19 @@
 
 #include "libANGLE/renderer/vulkan/vk_format_utils.h"
 
+#include "image_util/loadimage.h"
 #include "libANGLE/Texture.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/load_functions_table.h"
 #include "libANGLE/renderer/vulkan/ContextVk.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/vk_caps_utils.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 namespace rx
 {
 namespace
 {
-void FillTextureFormatCaps(RendererVk *renderer,
+void FillTextureFormatCaps(vk::Renderer *renderer,
                            angle::FormatID formatID,
                            gl::TextureCaps *outTextureCaps)
 {
@@ -47,24 +48,48 @@ void FillTextureFormatCaps(RendererVk *renderer,
 
     if (outTextureCaps->renderbuffer)
     {
+        VkPhysicalDeviceImageFormatInfo2 imageFormatInfo = {};
+        imageFormatInfo.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+        imageFormatInfo.format = GetVkFormatFromFormatID(renderer, formatID);
+        imageFormatInfo.type   = VK_IMAGE_TYPE_2D;
+        imageFormatInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageFormatInfo.usage  = VK_IMAGE_USAGE_SAMPLED_BIT;
         if (hasColorAttachmentFeatureBit)
         {
-            vk_gl::AddSampleCounts(physicalDeviceLimits.framebufferColorSampleCounts,
-                                   &outTextureCaps->sampleCounts);
+            imageFormatInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         }
         if (hasDepthAttachmentFeatureBit)
         {
-            // Some drivers report different depth and stencil sample counts.  We'll AND those
-            // counts together, limiting all depth and/or stencil formats to the lower number of
-            // sample counts.
-            vk_gl::AddSampleCounts((physicalDeviceLimits.framebufferDepthSampleCounts &
-                                    physicalDeviceLimits.framebufferStencilSampleCounts),
-                                   &outTextureCaps->sampleCounts);
+            imageFormatInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        }
+
+        VkImageFormatProperties2 imageFormatProperties2 = {};
+        imageFormatProperties2.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+        VkResult result              = vkGetPhysicalDeviceImageFormatProperties2(
+            renderer->getPhysicalDevice(), &imageFormatInfo, &imageFormatProperties2);
+        if (result == VK_SUCCESS)
+        {
+            if (hasColorAttachmentFeatureBit)
+            {
+                vk_gl::AddSampleCounts(imageFormatProperties2.imageFormatProperties.sampleCounts &
+                                           physicalDeviceLimits.framebufferColorSampleCounts,
+                                       &outTextureCaps->sampleCounts);
+            }
+            if (hasDepthAttachmentFeatureBit)
+            {
+                // Some drivers report different depth and stencil sample counts.  We'll AND those
+                // counts together, limiting all depth and/or stencil formats to the lower number of
+                // sample counts.
+                vk_gl::AddSampleCounts((imageFormatProperties2.imageFormatProperties.sampleCounts &
+                                        physicalDeviceLimits.framebufferDepthSampleCounts &
+                                        physicalDeviceLimits.framebufferStencilSampleCounts),
+                                       &outTextureCaps->sampleCounts);
+            }
         }
     }
 }
 
-bool HasFullBufferFormatSupport(RendererVk *renderer, angle::FormatID formatID)
+bool HasFullBufferFormatSupport(vk::Renderer *renderer, angle::FormatID formatID)
 {
     // Note: GL_EXT_texture_buffer support uses the same vkBufferFormat that is determined by
     // Format::initBufferFallback, which uses this function.  That relies on the fact that formats
@@ -75,37 +100,31 @@ bool HasFullBufferFormatSupport(RendererVk *renderer, angle::FormatID formatID)
     return renderer->hasBufferFormatFeatureBits(formatID, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT);
 }
 
-using SupportTest = bool (*)(RendererVk *renderer, angle::FormatID formatID);
+using SupportTest = bool (*)(vk::Renderer *renderer, angle::FormatID formatID);
 
 template <class FormatInitInfo>
-int FindSupportedFormat(RendererVk *renderer,
+int FindSupportedFormat(vk::Renderer *renderer,
                         const FormatInitInfo *info,
                         size_t skip,
                         int numInfo,
                         SupportTest hasSupport)
 {
     ASSERT(numInfo > 0);
-    const int last = numInfo - 1;
 
-    for (int i = static_cast<int>(skip); i < last; ++i)
+    for (int i = static_cast<int>(skip); i < numInfo; ++i)
     {
         ASSERT(info[i].format != angle::FormatID::NONE);
         if (hasSupport(renderer, info[i].format))
+        {
             return i;
+        }
     }
 
-    if (skip > 0 && !hasSupport(renderer, info[last].format))
-    {
-        // We couldn't find a valid fallback, try again without skip
-        return FindSupportedFormat(renderer, info, 0, numInfo, hasSupport);
-    }
-
-    ASSERT(info[last].format != angle::FormatID::NONE);
-    ASSERT(hasSupport(renderer, info[last].format));
-    return last;
+    // We couldn't find a valid fallback, ignore the skip and return 0
+    return 0;
 }
 
-bool HasNonFilterableTextureFormatSupport(RendererVk *renderer, angle::FormatID formatID)
+bool HasNonFilterableTextureFormatSupport(vk::Renderer *renderer, angle::FormatID formatID)
 {
     constexpr uint32_t kBitsColor =
         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
@@ -138,7 +157,7 @@ Format::Format()
       mVkFormatIsUnsigned(false)
 {}
 
-void Format::initImageFallback(RendererVk *renderer, const ImageFormatInitInfo *info, int numInfo)
+void Format::initImageFallback(Renderer *renderer, const ImageFormatInitInfo *info, int numInfo)
 {
     size_t skip                 = renderer->getFeatures().forceFallbackFormat.enabled ? 1 : 0;
     SupportTest testFunction    = HasNonRenderableTextureFormatSupport;
@@ -168,7 +187,7 @@ void Format::initImageFallback(RendererVk *renderer, const ImageFormatInitInfo *
     }
 }
 
-void Format::initBufferFallback(RendererVk *renderer,
+void Format::initBufferFallback(Renderer *renderer,
                                 const BufferFormatInitInfo *info,
                                 int numInfo,
                                 int compressedStartIndex)
@@ -233,7 +252,7 @@ FormatTable::FormatTable() {}
 
 FormatTable::~FormatTable() {}
 
-void FormatTable::initialize(RendererVk *renderer, gl::TextureCapsMap *outTextureCapsMap)
+void FormatTable::initialize(Renderer *renderer, gl::TextureCapsMap *outTextureCapsMap)
 {
     for (size_t formatIndex = 0; formatIndex < angle::kNumANGLEFormats; ++formatIndex)
     {
@@ -306,6 +325,46 @@ void FormatTable::initialize(RendererVk *renderer, gl::TextureCapsMap *outTextur
     }
 }
 
+angle::FormatID ExternalFormatTable::getOrAllocExternalFormatID(uint64_t externalFormat,
+                                                                VkFormat colorAttachmentFormat,
+                                                                VkFormatFeatureFlags formatFeatures)
+{
+    std::unique_lock<angle::SimpleMutex> lock(mExternalYuvFormatMutex);
+    for (size_t index = 0; index < mExternalYuvFormats.size(); index++)
+    {
+        if (mExternalYuvFormats[index].externalFormat == externalFormat)
+        {
+            // Found a match. Just return existing formatID
+            return angle::FormatID(ToUnderlying(angle::FormatID::EXTERNAL0) + index);
+        }
+    }
+
+    if (mExternalYuvFormats.size() >= kMaxExternalFormatCountSupported)
+    {
+        ERR() << "ANGLE only suports maximum " << kMaxExternalFormatCountSupported
+              << " external renderable formats";
+        return angle::FormatID::NONE;
+    }
+
+    mExternalYuvFormats.push_back({externalFormat, colorAttachmentFormat, formatFeatures});
+    return angle::FormatID(ToUnderlying(angle::FormatID::EXTERNAL0) + mExternalYuvFormats.size() -
+                           1);
+}
+
+const ExternalYuvFormatInfo &ExternalFormatTable::getExternalFormatInfo(
+    angle::FormatID formatID) const
+{
+    ASSERT(formatID >= angle::FormatID::EXTERNAL0);
+    size_t index = ToUnderlying(formatID) - ToUnderlying(angle::FormatID::EXTERNAL0);
+    ASSERT(index < mExternalYuvFormats.size());
+    return mExternalYuvFormats[index];
+}
+
+bool IsYUVExternalFormat(angle::FormatID formatID)
+{
+    return formatID >= angle::FormatID::EXTERNAL0 && formatID <= angle::FormatID::EXTERNAL7;
+}
+
 size_t GetImageCopyBufferAlignment(angle::FormatID actualFormatID)
 {
     // vkCmdCopyBufferToImage must have an offset that is a multiple of 4 as well as a multiple
@@ -346,7 +405,7 @@ size_t GetValidImageCopyBufferAlignment(angle::FormatID intendedFormatID,
                : GetImageCopyBufferAlignment(actualFormatID);
 }
 
-VkImageUsageFlags GetMaximalImageUsageFlags(RendererVk *renderer, angle::FormatID formatID)
+VkImageUsageFlags GetMaximalImageUsageFlags(Renderer *renderer, angle::FormatID formatID)
 {
     constexpr VkFormatFeatureFlags kImageUsageFeatureBits =
         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
@@ -370,9 +429,53 @@ VkImageUsageFlags GetMaximalImageUsageFlags(RendererVk *renderer, angle::FormatI
     imageUsageFlags |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
     return imageUsageFlags;
 }
+
+VkImageCreateFlags GetMinimalImageCreateFlags(Renderer *renderer,
+                                              gl::TextureType textureType,
+                                              VkImageUsageFlags usage)
+{
+    switch (textureType)
+    {
+        case gl::TextureType::CubeMap:
+        case gl::TextureType::CubeMapArray:
+            return VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+        case gl::TextureType::_3D:
+        {
+            // Slices of this image may be used as:
+            //
+            // - Render target: The VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT flag is needed for that.
+            // - Sampled or storage image: The VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT flag is
+            //   needed for this.  If VK_EXT_image_2d_view_of_3d is not supported, we tolerate the
+            //   VVL error as drivers seem to support this behavior anyway.
+            VkImageCreateFlags flags = VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+
+            if ((usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0)
+            {
+                if (renderer->getFeatures().supportsImage2dViewOf3d.enabled)
+                {
+                    flags |= VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT;
+                }
+            }
+            else if ((usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0)
+            {
+                if (renderer->getFeatures().supportsSampler2dViewOf3d.enabled)
+                {
+                    flags |= VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT;
+                }
+            }
+
+            return flags;
+        }
+
+        default:
+            return 0;
+    }
+}
+
 }  // namespace vk
 
-bool HasFullTextureFormatSupport(RendererVk *renderer, angle::FormatID formatID)
+bool HasFullTextureFormatSupport(vk::Renderer *renderer, angle::FormatID formatID)
 {
     constexpr uint32_t kBitsColor = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                     VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
@@ -398,7 +501,7 @@ bool HasFullTextureFormatSupport(RendererVk *renderer, angle::FormatID formatID)
            renderer->hasImageFormatFeatureBits(formatID, kBitsDepth);
 }
 
-bool HasNonRenderableTextureFormatSupport(RendererVk *renderer, angle::FormatID formatID)
+bool HasNonRenderableTextureFormatSupport(vk::Renderer *renderer, angle::FormatID formatID)
 {
     constexpr uint32_t kBitsColor =
         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
@@ -421,6 +524,56 @@ bool IsBCFormat(angle::FormatID formatID)
            formatID <= angle::FormatID::BC7_RGBA_UNORM_SRGB_BLOCK;
 }
 
+static constexpr int kNumETCFormats = 12;
+
+static_assert((int)angle::FormatID::ETC2_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + kNumETCFormats - 1);
+
+static_assert((int)angle::FormatID::EAC_R11G11_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 1);
+static_assert((int)angle::FormatID::EAC_R11_SNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 2);
+static_assert((int)angle::FormatID::EAC_R11_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 3);
+static_assert((int)angle::FormatID::ETC1_LOSSY_DECODE_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 4);
+static_assert((int)angle::FormatID::ETC1_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 5);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A1_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 6);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A1_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 7);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A8_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 8);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 9);
+static_assert((int)angle::FormatID::ETC2_R8G8B8_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 10);
+
+static const std::array<LoadImageFunction, kNumETCFormats> kEtcToBcLoadingFunc = {
+    angle::LoadEACRG11SToBC5,     // EAC_R11G11_SNORM
+    angle::LoadEACRG11ToBC5,      // EAC_R11G11_UNORM
+    angle::LoadEACR11SToBC4,      // EAC_R11_SNORM
+    angle::LoadEACR11ToBC4,       // EAC_R11_UNORM_BLOCK
+    angle::LoadETC1RGB8ToBC1,     // ETC1_LOSSY_DECODE_R8G8B8_UNORM
+    angle::LoadETC2RGB8ToBC1,     // ETC1_R8G8B8_UNORM
+    angle::LoadETC2SRGB8A1ToBC1,  // ETC2_R8G8B8A1_SRGB
+    angle::LoadETC2RGB8A1ToBC1,   // ETC2_R8G8B8A1_UNORM
+    angle::LoadETC2SRGBA8ToBC3,   // ETC2_R8G8B8A8_SRGB
+    angle::LoadETC2RGBA8ToBC3,    // ETC2_R8G8B8A8_UNORM
+    angle::LoadETC2SRGB8ToBC1,    // ETC2_R8G8B8_SRGB
+    angle::LoadETC2RGB8ToBC1,     // ETC2_R8G8B8_UNORM
+};
+
+LoadImageFunctionInfo GetEtcToBcTransCodingFunc(angle::FormatID formatID)
+{
+    ASSERT(IsETCFormat(formatID));
+    return LoadImageFunctionInfo(
+        kEtcToBcLoadingFunc[static_cast<uint32_t>(formatID) -
+                            static_cast<uint32_t>(angle::FormatID::EAC_R11G11_SNORM_BLOCK)],
+        true);
+}
+
 static constexpr angle::FormatID kEtcToBcFormatMapping[] = {
     angle::FormatID::BC5_RG_SNORM_BLOCK,         // EAC_R11G11_SNORM
     angle::FormatID::BC5_RG_UNORM_BLOCK,         // EAC_R11G11_UNORM
@@ -441,6 +594,76 @@ angle::FormatID GetTranscodeBCFormatID(angle::FormatID formatID)
     ASSERT(IsETCFormat(formatID));
     return kEtcToBcFormatMapping[static_cast<uint32_t>(formatID) -
                                  static_cast<uint32_t>(angle::FormatID::EAC_R11G11_SNORM_BLOCK)];
+}
+
+VkFormat AdjustASTCFormatForHDR(const vk::Renderer *renderer, VkFormat vkFormat)
+{
+    ASSERT(renderer != nullptr);
+    const bool hdrEnabled = renderer->supportsAstcHdr();
+    if (hdrEnabled == false)
+    {
+        return vkFormat;
+    }
+
+    // When KHR_texture_compression_astc_hdr is enabled,
+    // VK_FORMAT_ASTC_nxm_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_nxm_SFLOAT_BLOCK
+    auto transformFormat = [](VkFormat vkFormat) -> VkFormat {
+        if (vkFormat >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK &&
+            vkFormat <= VK_FORMAT_ASTC_12x12_UNORM_BLOCK && (vkFormat & 1) == 1)
+        {
+            return static_cast<VkFormat>(((vkFormat - VK_FORMAT_ASTC_4x4_UNORM_BLOCK) >> 1) +
+                                         VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK);
+        }
+        return vkFormat;
+    };
+
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_4x4_UNORM_BLOCK) == VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_4x4_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_5x4_UNORM_BLOCK) == VK_FORMAT_ASTC_5x4_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_5x4_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_5x4_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_5x5_UNORM_BLOCK) == VK_FORMAT_ASTC_5x5_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_5x5_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_5x5_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_6x5_UNORM_BLOCK) == VK_FORMAT_ASTC_6x5_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_6x5_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_6x5_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_6x6_UNORM_BLOCK) == VK_FORMAT_ASTC_6x6_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_6x6_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_6x6_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_8x5_UNORM_BLOCK) == VK_FORMAT_ASTC_8x5_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_8x5_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_8x5_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_8x6_UNORM_BLOCK) == VK_FORMAT_ASTC_8x6_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_8x6_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_8x6_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_8x8_UNORM_BLOCK) == VK_FORMAT_ASTC_8x8_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_8x8_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_8x8_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_10x5_UNORM_BLOCK) == VK_FORMAT_ASTC_10x5_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_10x5_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_10x5_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_10x6_UNORM_BLOCK) == VK_FORMAT_ASTC_10x6_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_10x6_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_10x6_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_10x8_UNORM_BLOCK) == VK_FORMAT_ASTC_10x8_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_10x8_UNORM_BLOCK should be converted to VK_FORMAT_ASTC_10x8_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_10x10_UNORM_BLOCK) == VK_FORMAT_ASTC_10x10_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_10x10_UNORM_BLOCK should be converted to"
+        "VK_FORMAT_ASTC_10x10_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_12x10_UNORM_BLOCK) == VK_FORMAT_ASTC_12x10_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_12x10_UNORM_BLOCK should be converted to"
+        "VK_FORMAT_ASTC_12x10_SFLOAT_BLOCK");
+    static_assert(
+        transformFormat(VK_FORMAT_ASTC_12x12_UNORM_BLOCK) == VK_FORMAT_ASTC_12x12_SFLOAT_BLOCK,
+        "VK_FORMAT_ASTC_12x12_UNORM_BLOCK should be converted to"
+        "VK_FORMAT_ASTC_12x12_SFLOAT_BLOCK");
+
+    return transformFormat(vkFormat);
 }
 
 GLenum GetSwizzleStateComponent(const gl::SwizzleState &swizzleState, GLenum component)

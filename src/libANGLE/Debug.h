@@ -11,6 +11,7 @@
 
 #include "angle_gl.h"
 #include "common/PackedEnums.h"
+#include "common/SimpleMutex.h"
 #include "common/angleutils.h"
 #include "libANGLE/AttributeMap.h"
 #include "libANGLE/Error.h"
@@ -55,15 +56,13 @@ class Debug : angle::NonCopyable
                        GLuint id,
                        GLenum severity,
                        const std::string &message,
-                       gl::LogSeverity logSeverity,
-                       angle::EntryPoint entryPoint) const;
+                       gl::LogSeverity logSeverity) const;
     void insertMessage(GLenum source,
                        GLenum type,
                        GLuint id,
                        GLenum severity,
                        std::string &&message,
-                       gl::LogSeverity logSeverity,
-                       angle::EntryPoint entryPoint) const;
+                       gl::LogSeverity logSeverity) const;
 
     void setMessageControl(GLenum source,
                            GLenum type,
@@ -129,7 +128,7 @@ class Debug : angle::NonCopyable
     };
 
     bool mOutputEnabled;
-    mutable std::mutex mMutex;
+    mutable angle::SimpleMutex mMutex;
     GLDEBUGPROCKHR mCallbackFunction;
     const void *mCallbackUserParam;
     mutable std::deque<Message> mMessages;

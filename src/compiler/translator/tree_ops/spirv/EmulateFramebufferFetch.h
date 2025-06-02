@@ -3,26 +3,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// EmulateFramebufferFetch.h: Replace input, gl_LastFragData and gl_LastFragColorARM with usages of
-// input attachments.
+// EmulateFramebufferFetch.h: Replace inout, gl_LastFragData, gl_LastFragColorARM,
+// gl_LastFragDepthARM and gl_LastFragStencilARM with usages of input attachments.
 //
 
 #ifndef COMPILER_TRANSLATOR_TREEOPS_SPIRV_EMULATEFRAMEBUFFERFETCH_H_
 #define COMPILER_TRANSLATOR_TREEOPS_SPIRV_EMULATEFRAMEBUFFERFETCH_H_
 
 #include "common/angleutils.h"
+#include "compiler/translator/Compiler.h"
+#include "compiler/translator/spirv/TranslatorSPIRV.h"
 
 namespace sh
 {
 
-class TCompiler;
 class TIntermBlock;
-struct ShaderVariable;
 
 // Emulate framebuffer fetch through the use of input attachments.
 [[nodiscard]] bool EmulateFramebufferFetch(TCompiler *compiler,
                                            TIntermBlock *root,
-                                           std::vector<ShaderVariable> *uniforms);
+                                           InputAttachmentMap *inputAttachmentMapOut);
 
 }  // namespace sh
 

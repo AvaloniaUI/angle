@@ -127,6 +127,7 @@ void PrintStackBacktrace()
 static void Handler(int sig)
 {
     printf("\nSignal %d:\n", sig);
+    fflush(stdout);
 
     if (gCrashHandlerCallback)
     {
@@ -134,6 +135,7 @@ static void Handler(int sig)
     }
 
     PrintStackBacktrace();
+    fflush(stdout);
 
     // Exit NOW.  Don't notify other threads, don't call anything registered with atexit().
     _Exit(sig);
@@ -584,7 +586,7 @@ void PrintStackBacktrace()
                 // This will resolve `./out/Debug/angle_end2end_tests` to
                 // `/home/user/angle/out/Debug/angle_end2end_tests` when CWD is
                 // `/home/user/angle/out/Debug`, which is caused by ScopedVkLoaderEnvironment.
-                // This is required for printing traces during RendererVk init.
+                // This is required for printing traces during vk::Renderer init.
                 // Since we do not store the initial CWD globally we need to reconstruct here
                 // by removing the overlapping path.
                 std::string removeOverlappingPath = RemoveOverlappingPath(resolvedModule);

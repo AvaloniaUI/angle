@@ -61,6 +61,7 @@ enum Token
     kConfigIntel,
     kConfigVMWare,
     kConfigApple,
+    kConfigQualcomm,
     // build type
     kConfigRelease,
     kConfigDebug,
@@ -72,6 +73,8 @@ enum Token
     kConfigVulkan,
     kConfigSwiftShader,
     kConfigMetal,
+    kConfigWgpu,
+    kConfigNative,
     // Android devices
     kConfigNexus5X,
     kConfigPixel2,
@@ -83,9 +86,12 @@ enum Token
     kConfigGalaxyA23,
     kConfigGalaxyA34,
     kConfigGalaxyA54,
+    kConfigGalaxyS22,
     kConfigGalaxyS23,
-    kConfigGalaxyQualcomm,
+    kConfigGalaxyS24Exynos,
+    kConfigGalaxyS24Qualcomm,
     kConfigFindX6,
+    kConfigPineapple,
     // GPU devices
     kConfigNVIDIAQuadroP400,
     kConfigNVIDIAGTX1660,
@@ -173,13 +179,15 @@ constexpr TokenInfo kTokenData[kNumberOfTokens] = {
     {"mac", GPUTestConfig::kConditionMac},
     {"ios", GPUTestConfig::kConditionIOS},
     {"linux", GPUTestConfig::kConditionLinux},
-    {"chromeos", GPUTestConfig::kConditionNone},  // https://anglebug.com/3363 CrOS not supported
+    {"chromeos",
+     GPUTestConfig::kConditionNone},  // https://anglebug.com/42262032 CrOS not supported
     {"android", GPUTestConfig::kConditionAndroid},
     {"nvidia", GPUTestConfig::kConditionNVIDIA},
     {"amd", GPUTestConfig::kConditionAMD},
     {"intel", GPUTestConfig::kConditionIntel},
     {"vmware", GPUTestConfig::kConditionVMWare},
     {"apple", GPUTestConfig::kConditionApple},
+    {"qualcomm", GPUTestConfig::kConditionQualcomm},
     {"release", GPUTestConfig::kConditionRelease},
     {"debug", GPUTestConfig::kConditionDebug},
     {"d3d9", GPUTestConfig::kConditionD3D9},
@@ -187,8 +195,10 @@ constexpr TokenInfo kTokenData[kNumberOfTokens] = {
     {"opengl", GPUTestConfig::kConditionGLDesktop},
     {"gles", GPUTestConfig::kConditionGLES},
     {"vulkan", GPUTestConfig::kConditionVulkan},
+    {"native", GPUTestConfig::kConditionNative},
     {"swiftshader", GPUTestConfig::kConditionSwiftShader},
     {"metal", GPUTestConfig::kConditionMetal},
+    {"wgpu", GPUTestConfig::kConditionWgpu},
     {"nexus5x", GPUTestConfig::kConditionNexus5X},
     {"pixel2orxl", GPUTestConfig::kConditionPixel2OrXL},
     {"pixel4orxl", GPUTestConfig::kConditionPixel4OrXL},
@@ -199,9 +209,12 @@ constexpr TokenInfo kTokenData[kNumberOfTokens] = {
     {"galaxya23", GPUTestConfig::kConditionGalaxyA23},
     {"galaxya34", GPUTestConfig::kConditionGalaxyA34},
     {"galaxya54", GPUTestConfig::kConditionGalaxyA54},
+    {"galaxys22", GPUTestConfig::kConditionGalaxyS22},
     {"galaxys23", GPUTestConfig::kConditionGalaxyS23},
-    {"galaxyqualcomm", GPUTestConfig::kConditionGalaxyQualcomm},
+    {"galaxys24exynos", GPUTestConfig::kConditionGalaxyS24Exynos},
+    {"galaxys24qualcomm", GPUTestConfig::kConditionGalaxyS24Qualcomm},
     {"findx6", GPUTestConfig::kConditionFindX6},
+    {"pineapple", GPUTestConfig::kConditionPineapple},
     {"quadrop400", GPUTestConfig::kConditionNVIDIAQuadroP400},
     {"gtx1660", GPUTestConfig::kConditionNVIDIAGTX1660},
     {"prerotation", GPUTestConfig::kConditionPreRotation},
@@ -509,6 +522,7 @@ bool GPUTestExpectationsParser::parseLine(const GPUTestConfig *config,
             case kConfigIntel:
             case kConfigVMWare:
             case kConfigApple:
+            case kConfigQualcomm:
             case kConfigRelease:
             case kConfigDebug:
             case kConfigD3D9:
@@ -518,6 +532,8 @@ bool GPUTestExpectationsParser::parseLine(const GPUTestConfig *config,
             case kConfigVulkan:
             case kConfigSwiftShader:
             case kConfigMetal:
+            case kConfigWgpu:
+            case kConfigNative:
             case kConfigNexus5X:
             case kConfigPixel2:
             case kConfigPixel4:
@@ -528,9 +544,12 @@ bool GPUTestExpectationsParser::parseLine(const GPUTestConfig *config,
             case kConfigGalaxyA23:
             case kConfigGalaxyA34:
             case kConfigGalaxyA54:
+            case kConfigGalaxyS22:
             case kConfigGalaxyS23:
-            case kConfigGalaxyQualcomm:
+            case kConfigGalaxyS24Exynos:
+            case kConfigGalaxyS24Qualcomm:
             case kConfigFindX6:
+            case kConfigPineapple:
             case kConfigNVIDIAQuadroP400:
             case kConfigNVIDIAGTX1660:
             case kConfigPreRotation:

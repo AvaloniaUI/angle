@@ -315,7 +315,7 @@ class EXTBlendFuncExtendedDrawTestES31 : public EXTBlendFuncExtendedDrawTestES3
     GLuint createShaderProgram(GLenum type, const GLchar *shaderString)
     {
         GLShader shader(type);
-        if (!shader.get())
+        if (!shader)
         {
             return 0;
         }
@@ -440,6 +440,15 @@ TEST_P(EXTBlendFuncExtendedTest, MaxDualSourceDrawBuffersError)
             glEnable(GL_BLEND);
             drawQuad(redProgram, essl1_shaders::PositionAttrib(), 0.0);
             EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+            // Limit must be applied even when an attachment is missing
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1_EXT, GL_RENDERBUFFER, 0);
+            drawQuad(redProgram, essl1_shaders::PositionAttrib(), 0.0);
+            EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+            // Restore the attachment for the next iteration
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1_EXT, GL_RENDERBUFFER,
+                                      rb1);
 
             // Limit is not applied when non-SRC1 funcs are used
             glBlendFunc(GL_ONE, GL_ONE);
