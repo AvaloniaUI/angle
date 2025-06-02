@@ -18,36 +18,15 @@
 			<Pack>true</Pack>
 			<PackagePath>runtimes\win-x64\native</PackagePath>
 		</Content>
-		<Content Include="..\out\x64\av_libglesv2.lib">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\win-x64\static</PackagePath>
-		</Content>
 
 		<Content Include="..\out\x86\av_libglesv2.dll">
 			<Pack>true</Pack>
 			<PackagePath>runtimes\win-x86\native</PackagePath>
 		</Content>
-		<Content Include="..\out\x86\av_libglesv2.lib">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\win-x86\static</PackagePath>
-		</Content>
 
 		<Content Include="..\out\arm64\av_libglesv2.dll">
 			<Pack>true</Pack>
 			<PackagePath>runtimes\win-arm64\native</PackagePath>
-		</Content>
-		<Content Include="..\out\arm64\av_libglesv2.lib">
-			<Pack>true</Pack>
-			<PackagePath>runtimes\win-arm64\static</PackagePath>
-		</Content>
-
-		<Content Include="*.props">
-			<Pack>true</Pack>
-			<PackagePath>build\</PackagePath>
-		</Content>
-		<Content Include="*.targets">
-			<Pack>true</Pack>
-			<PackagePath>build\;buildTransitive\</PackagePath>
 		</Content>
 
     	<None Include="$(MSBuildThisFileDirectory)/Icon.png">
