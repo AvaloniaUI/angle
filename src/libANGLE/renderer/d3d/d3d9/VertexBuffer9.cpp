@@ -6,6 +6,10 @@
 
 // VertexBuffer9.cpp: Defines the D3D9 VertexBuffer implementation.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/d3d/d3d9/VertexBuffer9.h"
 
 #include "libANGLE/Buffer.h"
@@ -61,7 +65,7 @@ angle::Result VertexBuffer9::storeVertexAttributes(const gl::Context *context,
                                                    const gl::VertexAttribute &attrib,
                                                    const gl::VertexBinding &binding,
                                                    gl::VertexAttribType currentValueType,
-                                                   GLint start,
+                                                   size_t start,
                                                    size_t count,
                                                    GLsizei instances,
                                                    unsigned int offset,

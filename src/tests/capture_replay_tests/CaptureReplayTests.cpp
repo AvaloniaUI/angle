@@ -7,6 +7,10 @@
 //   Application that runs replay for testing of capture replay
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "common/debug.h"
 #include "common/system_utils.h"
 #include "platform/PlatformMethods.h"
@@ -250,10 +254,13 @@ class CaptureReplayTests
         configParams.depthBits   = traceInfo.configDepthBits;
         configParams.stencilBits = traceInfo.configStencilBits;
 
+        configParams.colorSpace = traceInfo.drawSurfaceColorSpace;
+
         configParams.clientArraysEnabled   = traceInfo.areClientArraysEnabled;
         configParams.bindGeneratesResource = traceInfo.isBindGeneratesResourcesEnabled;
         configParams.webGLCompatibility    = traceInfo.isWebGLCompatibilityEnabled;
         configParams.robustResourceInit    = traceInfo.isRobustResourceInitEnabled;
+        configParams.extensionsEnabled     = traceInfo.areExtensionsEnabled;
 
         mPlatformParams.renderer   = traceInfo.displayPlatformType;
         mPlatformParams.deviceType = traceInfo.displayDeviceType;

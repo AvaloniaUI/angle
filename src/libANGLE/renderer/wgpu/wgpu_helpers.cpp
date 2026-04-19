@@ -4,14 +4,22 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/wgpu/wgpu_helpers.h"
 
 #include <algorithm>
 
+#include "common/PackedGLEnums_autogen.h"
+#include "dawn/dawn_proc_table.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/wgpu/ContextWgpu.h"
 #include "libANGLE/renderer/wgpu/DisplayWgpu.h"
 #include "libANGLE/renderer/wgpu/FramebufferWgpu.h"
+#include "libANGLE/renderer/wgpu/wgpu_utils.h"
+#include "webgpu/webgpu.h"
 
 namespace rx
 {
@@ -59,6 +67,57 @@ uint8_t *AdjustMapPointerForOffset(uint8_t *mapPtr, size_t offset)
 const uint8_t *AdjustMapPointerForOffset(const uint8_t *mapPtr, size_t offset)
 {
     return AdjustMapPointerForOffset(const_cast<uint8_t *>(mapPtr), offset);
+}
+
+angle::Result GetCheckedAllocationSizeAndRowPitch(uint32_t rowBytes,
+                                                  uint32_t width,
+                                                  uint32_t height,
+                                                  uint32_t *outputRowPitchOut,
+                                                  uint32_t *allocationSizeOut)
+{
+    angle::CheckedNumeric<uint32_t> checkedOutputRowPitch = rx::CheckedRoundUp(
+        static_cast<uint32_t>(angle::base::CheckMul(rowBytes, width).ValueOrDie()),
+        static_cast<uint32_t>(webgpu::kTextureRowSizeAlignment));
+
+    angle::CheckedNumeric<uint32_t> checkedAllocationSize = rx::CheckedRoundUpPow2(
+        static_cast<uint32_t>(angle::base::CheckMul(checkedOutputRowPitch, height).ValueOrDie()),
+        static_cast<uint32_t>(kBufferSizeAlignment));
+
+    if (!checkedAllocationSize.AssignIfValid(allocationSizeOut) ||
+        !checkedOutputRowPitch.AssignIfValid(outputRowPitchOut))
+    {
+        ERR() << "Calculating allocation size and output row pitch for an image copy failed.";
+        return angle::Result::Stop;
+    }
+
+    return angle::Result::Continue;
+}
+
+WGPUTextureFormat GetDepthOnlyFormat(WGPUTextureFormat format)
+{
+    if (format == WGPUTextureFormat_Depth24PlusStencil8)
+    {
+        return WGPUTextureFormat_Depth24Plus;
+    }
+    else if (format == WGPUTextureFormat_Depth32FloatStencil8)
+    {
+        return WGPUTextureFormat_Depth32Float;
+    }
+
+    UNREACHABLE();
+    return format;
+}
+
+WGPUTextureFormat GetStencilOnlyFormat(WGPUTextureFormat format)
+{
+    if (format == WGPUTextureFormat_Depth24PlusStencil8 ||
+        format == WGPUTextureFormat_Depth32FloatStencil8)
+    {
+        return WGPUTextureFormat_Stencil8;
+    }
+
+    UNREACHABLE();
+    return format;
 }
 
 }  // namespace
@@ -126,11 +185,23 @@ angle::Result ImageHelper::flushSingleLevelUpdates(ContextWgpu *contextWgpu,
     {
         return angle::Result::Continue;
     }
+
+    std::optional<CommandEncoderHandle> encoder;
+    auto ensureEncoder = [&]() -> angle::Result {
+        ANGLE_TRY(contextWgpu->getCurrentCommandEncoder(
+            webgpu::RenderPassClosureReason::CopyBufferToTexture, &encoder.emplace()));
+        return angle::Result::Continue;
+    };
+
     WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
     dst.texture                  = mTexture.get();
     std::vector<PackedRenderPassColorAttachment> colorAttachments;
     TextureViewHandle textureView;
-    ANGLE_TRY(createTextureViewSingleLevel(levelGL, 0, textureView));
+    // Create a texture view of the entire level, layers and all.
+    ANGLE_TRY(createTextureView(levelGL, /*levelCount=*/1, /*layerIndex*/ 0,
+                                mTextureDescriptor.size.depthOrArrayLayers, textureView,
+                                WGPUTextureViewDimension_Undefined, WGPUTextureAspect_All,
+                                WGPUTextureFormat_Undefined));
     bool updateDepth      = false;
     bool updateStencil    = false;
     float depthValue      = 1;
@@ -149,15 +220,23 @@ angle::Result ImageHelper::flushSingleLevelUpdates(ContextWgpu *contextWgpu,
                 dst.mipLevel            = wgpuLevel.get();
                 WGPUExtent3D copyExtent = getLevelSize(wgpuLevel);
 
-                ANGLE_TRY(contextWgpu->flush(webgpu::RenderPassClosureReason::CopyBufferToTexture));
-                contextWgpu->ensureCommandEncoderCreated();
-                CommandEncoderHandle encoder = contextWgpu->getCurrentCommandEncoder();
+                // TODO(anglebug.com/389145696): copyExtent just always copies to the whole level.
+                // Should support smaller regions.
+                dst.origin = WGPUOrigin3D{0, 0, srcUpdate.layerIndex};
+                // Updating multiple layers at once maybe not currently supported.
+                ASSERT(srcUpdate.layerCount == 1);
+                copyExtent.depthOrArrayLayers = srcUpdate.layerCount;
+
+                if (!encoder.has_value())
+                {
+                    ANGLE_TRY(ensureEncoder());
+                }
 
                 WGPUTexelCopyBufferInfo copyInfo = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
                 copyInfo.layout                  = srcUpdate.textureDataLayout;
                 copyInfo.buffer                  = srcUpdate.textureData.get();
-                mProcTable->commandEncoderCopyBufferToTexture(encoder.get(), &copyInfo, &dst,
-                                                              &copyExtent);
+                mProcTable->commandEncoderCopyBufferToTexture(encoder.value().get(), &copyInfo,
+                                                              &dst, &copyExtent);
             }
             break;
 
@@ -206,7 +285,7 @@ angle::Result ImageHelper::flushSingleLevelUpdates(ContextWgpu *contextWgpu,
     }
     if (updateDepth || updateStencil)
     {
-        frameBuffer->updateDepthStencilAttachment(CreateNewDepthStencilAttachment(
+        frameBuffer->updateDepthStencilAttachment(CreateNewClearDepthStencilAttachment(
             depthValue, stencilValue, textureView, updateDepth, updateStencil));
     }
     currentLevelQueue->clear();
@@ -265,9 +344,13 @@ angle::Result ImageHelper::stageTextureUpload(ContextWgpu *contextWgpu,
     WGPUTexelCopyBufferLayout textureDataLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
     textureDataLayout.bytesPerRow             = outputRowPitch;
     textureDataLayout.rowsPerImage            = outputDepthPitch;
+
+    GLint layerIndex = index.hasLayer() ? index.getLayerIndex() : 0;
+
     appendSubresourceUpdate(
-        levelGL, SubresourceUpdate(UpdateSource::Texture, levelGL, bufferHelper.getBuffer(),
-                                   textureDataLayout));
+        levelGL,
+        SubresourceUpdate(UpdateSource::Texture, levelGL, layerIndex, index.getLayerCount(),
+                          bufferHelper.getBuffer(), textureDataLayout));
     return angle::Result::Continue;
 }
 
@@ -278,6 +361,28 @@ void ImageHelper::stageClear(gl::LevelIndex targetLevel,
 {
     appendSubresourceUpdate(targetLevel, SubresourceUpdate(UpdateSource::Clear, targetLevel,
                                                            clearValues, hasDepth, hasStencil));
+}
+
+void ImageHelper::removeSingleSubresourceStagedUpdates(gl::LevelIndex levelToRemove,
+                                                       uint32_t layerIndex,
+                                                       uint32_t layerCount)
+{
+    std::vector<SubresourceUpdate> *updatesToClear = getLevelUpdates(levelToRemove);
+    if (!updatesToClear || updatesToClear->size() == 0)
+    {
+        return;
+    }
+
+    for (int64_t i = updatesToClear->size() - 1; i >= 0; i--)
+    {
+        size_t index = static_cast<size_t>(i);
+        // TODO(anglebug.com/420782526): maybe clear partial matches here. Vulkan backend does not.
+        if ((*updatesToClear)[index].layerIndex == layerIndex &&
+            (*updatesToClear)[index].layerCount == layerCount)
+        {
+            updatesToClear->erase(updatesToClear->begin() + index);
+        }
+    }
 }
 
 void ImageHelper::removeStagedUpdates(gl::LevelIndex levelToRemove)
@@ -301,6 +406,129 @@ void ImageHelper::resetImage()
     mInitialized         = false;
     mFirstAllocatedLevel = gl::LevelIndex(0);
 }
+
+angle::Result ImageHelper::CopyImage(ContextWgpu *contextWgpu,
+                                     ImageHelper *srcImage,
+                                     const gl::ImageIndex &dstIndex,
+                                     const gl::Offset &dstOffset,
+                                     gl::LevelIndex sourceLevelGL,
+                                     uint32_t sourceLayer,
+                                     const gl::Box &sourceBox,
+                                     WGPUTextureAspect aspect)
+{
+    gl::LevelIndex dstLevel(dstIndex.getLevelIndex());
+    uint32_t dstLayerOrZOffset = dstIndex.hasLayer() ? dstIndex.getLayerIndex() : dstOffset.z;
+
+    WGPUTexelCopyTextureInfo src = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    src.texture                  = srcImage->getTexture().get();
+    src.mipLevel                 = srcImage->toWgpuLevel(sourceLevelGL).get();
+    src.origin.x                 = static_cast<uint32_t>(sourceBox.x);
+    src.origin.y                 = static_cast<uint32_t>(sourceBox.y);
+    src.origin.z                 = sourceLayer;
+    src.aspect                   = aspect;
+
+    WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    dst.texture                  = mTexture.get();
+    dst.mipLevel                 = toWgpuLevel(dstLevel).get();
+    dst.origin.x                 = static_cast<uint32_t>(dstOffset.x);
+    dst.origin.y                 = static_cast<uint32_t>(dstOffset.y);
+    dst.origin.z                 = dstLayerOrZOffset;
+    dst.aspect                   = aspect;
+
+    WGPUExtent3D copySize = {static_cast<uint32_t>(sourceBox.width),
+                             static_cast<uint32_t>(sourceBox.height),
+                             static_cast<uint32_t>(sourceBox.depth)};
+
+    webgpu::CommandEncoderHandle encoder;
+    ANGLE_TRY(contextWgpu->getCurrentCommandEncoder(
+        webgpu::RenderPassClosureReason::CopyTextureToTexture, &encoder));
+    mProcTable->commandEncoderCopyTextureToTexture(encoder.get(), &src, &dst, &copySize);
+
+    return angle::Result::Continue;
+}
+
+angle::Result ImageHelper::copyImageCpuReadback(const gl::Context *context,
+                                                const gl::ImageIndex &index,
+                                                const gl::Rectangle &sourceArea,
+                                                const gl::Offset &dstOffset,
+                                                const gl::Extents &dstExtent,
+                                                const gl::InternalFormat &formatInfo,
+                                                ImageHelper *srcImage,
+                                                const gl::Extents &srcExtents)
+{
+    ContextWgpu *contextWgpu = GetImpl(context);
+    mProcTable               = webgpu::GetProcs(contextWgpu);
+
+    const webgpu::Format &dstWebgpuFormat = contextWgpu->getFormat(formatInfo.sizedInternalFormat);
+    const angle::Format &storageFormat    = dstWebgpuFormat.getActualImageFormat();
+    LoadImageFunctionInfo loadFunctionInfo =
+        dstWebgpuFormat.getTextureLoadFunction(formatInfo.type);
+
+    uint32_t allocationSize;
+    uint32_t outputRowPitch;
+    ANGLE_TRY(GetCheckedAllocationSizeAndRowPitch(storageFormat.pixelBytes, sourceArea.width,
+                                                  sourceArea.height, &outputRowPitch,
+                                                  &allocationSize));
+
+    BufferHelper stagingBuffer;
+    ANGLE_TRY(stagingBuffer.initBuffer(mProcTable, contextWgpu->getDevice(), allocationSize,
+                                       WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst,
+                                       MapAtCreation::Yes));
+
+    uint8_t *stagingPointer = stagingBuffer.getMapWritePointer(0, allocationSize);
+    const angle::Format &copyFormat =
+        GetFormatFromFormatType(formatInfo.internalFormat, formatInfo.type);
+    PackPixelsParams packPixelsParams(sourceArea, copyFormat, static_cast<GLuint>(outputRowPitch),
+                                      false, nullptr, 0);
+
+    if (loadFunctionInfo.requiresConversion)
+    {
+        // When a conversion is required, we need to use the loadFunction to read from a temporary
+        // buffer instead so its an even slower path.
+        angle::MemoryBuffer memoryBuffer;
+        if (!memoryBuffer.resize(allocationSize))
+        {
+            return angle::Result::Stop;
+        }
+
+        // Read into the scratch buffer
+        ANGLE_TRY(srcImage->readPixels(contextWgpu, sourceArea, packPixelsParams,
+                                       srcImage->toWgpuLevel(gl::LevelIndex(0)), 0,
+                                       memoryBuffer.data()));
+
+        // Load from scratch buffer to our pixel buffer
+        loadFunctionInfo.loadFunction(contextWgpu->getImageLoadContext(), sourceArea.width,
+                                      sourceArea.height, 1, memoryBuffer.data(),
+                                      packPixelsParams.outputPitch, 0, stagingPointer,
+                                      outputRowPitch, 0);
+    }
+    else
+    {
+        // We read directly from the framebuffer into our pixel buffer.
+        ANGLE_TRY(srcImage->readPixels(contextWgpu, sourceArea, packPixelsParams,
+                                       srcImage->toWgpuLevel(gl::LevelIndex(0)), 0,
+                                       stagingPointer));
+    }
+
+    ANGLE_TRY(stagingBuffer.unmap());
+
+    WGPUTexelCopyBufferLayout textureDataLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+    textureDataLayout.bytesPerRow               = outputRowPitch;
+    textureDataLayout.rowsPerImage              = sourceArea.height;
+    textureDataLayout.offset =
+        dstOffset.x * storageFormat.pixelBytes + dstOffset.y * outputRowPitch;
+
+    gl::LevelIndex levelGL(index.getLevelIndex());
+    GLint layerIndex = index.hasLayer() ? index.getLayerIndex() : 0;
+
+    appendSubresourceUpdate(
+        levelGL,
+        SubresourceUpdate(UpdateSource::Texture, levelGL, layerIndex, index.getLayerCount(),
+                          stagingBuffer.getBuffer(), textureDataLayout));
+
+    return angle::Result::Continue;
+}
+
 // static
 angle::Result ImageHelper::getReadPixelsParams(rx::ContextWgpu *contextWgpu,
                                                const gl::PixelPackState &packState,
@@ -329,6 +557,8 @@ angle::Result ImageHelper::getReadPixelsParams(rx::ContextWgpu *contextWgpu,
 angle::Result ImageHelper::readPixels(rx::ContextWgpu *contextWgpu,
                                       const gl::Rectangle &area,
                                       const rx::PackPixelsParams &packPixelsParams,
+                                      webgpu::LevelIndex level,
+                                      uint32_t layer,
                                       void *pixels)
 {
     if (mActualFormatID == angle::FormatID::NONE)
@@ -338,10 +568,10 @@ angle::Result ImageHelper::readPixels(rx::ContextWgpu *contextWgpu,
         return angle::Result::Stop;
     }
 
-    DeviceHandle device          = contextWgpu->getDisplay()->getDevice();
-    CommandEncoderHandle encoder = CommandEncoderHandle::Acquire(
-        mProcTable, mProcTable->deviceCreateCommandEncoder(device.get(), nullptr));
-    QueueHandle queue = contextWgpu->getDisplay()->getQueue();
+    DeviceHandle device = contextWgpu->getDisplay()->getDevice();
+    webgpu::CommandEncoderHandle encoder;
+    ANGLE_TRY(contextWgpu->getCurrentCommandEncoder(
+        webgpu::RenderPassClosureReason::CopyBufferToTexture, &encoder));
 
     const angle::Format &actualFormat = angle::Format::Get(mActualFormatID);
     uint32_t textureBytesPerRow =
@@ -360,11 +590,12 @@ angle::Result ImageHelper::readPixels(rx::ContextWgpu *contextWgpu,
     copyBuffer.buffer                  = bufferHelper.getBuffer().get();
     copyBuffer.layout = textureDataLayout;
 
-    WGPUTexelCopyTextureInfo copyTexture WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    WGPUTexelCopyTextureInfo copyTexture = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
     copyTexture.origin.x = area.x;
     copyTexture.origin.y = area.y;
+    copyTexture.origin.z = layer;
     copyTexture.texture  = mTexture.get();
-    copyTexture.mipLevel = toWgpuLevel(mFirstAllocatedLevel).get();
+    copyTexture.mipLevel = level.get();
 
     WGPUExtent3D copySize = WGPU_EXTENT_3D_INIT;
     copySize.width  = area.width;
@@ -372,10 +603,7 @@ angle::Result ImageHelper::readPixels(rx::ContextWgpu *contextWgpu,
     mProcTable->commandEncoderCopyTextureToBuffer(encoder.get(), &copyTexture, &copyBuffer,
                                                   &copySize);
 
-    CommandBufferHandle commandBuffer = CommandBufferHandle::Acquire(
-        mProcTable, mProcTable->commandEncoderFinish(encoder.get(), nullptr));
-    mProcTable->queueSubmit(queue.get(), 1, &commandBuffer.get());
-    encoder = nullptr;
+    ANGLE_TRY(contextWgpu->flush(webgpu::RenderPassClosureReason::GLReadPixels));
 
     ANGLE_TRY(bufferHelper.mapImmediate(contextWgpu, WGPUMapMode_Read, 0, allocationSize));
     const uint8_t *readPixelBuffer = bufferHelper.getMapReadPointer(0, allocationSize);
@@ -386,10 +614,12 @@ angle::Result ImageHelper::readPixels(rx::ContextWgpu *contextWgpu,
 
 angle::Result ImageHelper::createTextureViewSingleLevel(gl::LevelIndex targetLevel,
                                                         uint32_t layerIndex,
-                                                        TextureViewHandle &textureViewOut)
+                                                        TextureViewHandle &textureViewOut,
+                                                        WGPUTextureAspect aspect,
+                                                        WGPUTextureFormat format)
 {
     return createTextureView(targetLevel, /*levelCount=*/1, layerIndex, /*arrayLayerCount=*/1,
-                             textureViewOut, WGPUTextureViewDimension_Undefined);
+                             textureViewOut, WGPUTextureViewDimension_Undefined, aspect, format);
 }
 
 angle::Result ImageHelper::createFullTextureView(TextureViewHandle &textureViewOut,
@@ -397,27 +627,31 @@ angle::Result ImageHelper::createFullTextureView(TextureViewHandle &textureViewO
 {
     return createTextureView(mFirstAllocatedLevel, mTextureDescriptor.mipLevelCount, 0,
                              mTextureDescriptor.size.depthOrArrayLayers, textureViewOut,
-                             desiredViewDimension);
+                             desiredViewDimension, WGPUTextureAspect_All,
+                             WGPUTextureFormat_Undefined);
 }
 
-angle::Result ImageHelper::createTextureView(gl::LevelIndex targetLevel,
-                                             uint32_t levelCount,
-                                             uint32_t layerIndex,
-                                             uint32_t arrayLayerCount,
-                                             TextureViewHandle &textureViewOut,
-                                             WGPUTextureViewDimension desiredViewDimension)
+angle::Result ImageHelper::createTextureView(
+    gl::LevelIndex targetLevel,
+    uint32_t levelCount,
+    uint32_t layerIndex,
+    uint32_t arrayLayerCount,
+    TextureViewHandle &textureViewOut,
+    Optional<WGPUTextureViewDimension> desiredViewDimension,
+    WGPUTextureAspect aspect,
+    WGPUTextureFormat format)
 {
     if (!isTextureLevelInAllocatedImage(targetLevel))
     {
         return angle::Result::Stop;
     }
     WGPUTextureViewDescriptor textureViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    textureViewDesc.aspect                    = WGPUTextureAspect_All;
+    textureViewDesc.aspect                    = aspect;
     textureViewDesc.baseArrayLayer  = layerIndex;
     textureViewDesc.arrayLayerCount = arrayLayerCount;
     textureViewDesc.baseMipLevel    = toWgpuLevel(targetLevel).get();
     textureViewDesc.mipLevelCount   = levelCount;
-    if (desiredViewDimension == WGPUTextureViewDimension_Undefined)
+    if (!desiredViewDimension.valid())
     {
         switch (mTextureDescriptor.dimension)
         {
@@ -440,10 +674,27 @@ angle::Result ImageHelper::createTextureView(gl::LevelIndex targetLevel,
     }
     else
     {
-        textureViewDesc.dimension = desiredViewDimension;
+        textureViewDesc.dimension = desiredViewDimension.value();
     }
-    textureViewDesc.format = mTextureDescriptor.format;
-    textureViewOut         = TextureViewHandle::Acquire(
+
+    if (format != WGPUTextureFormat_Undefined)
+    {
+        textureViewDesc.format = format;
+    }
+    else
+    {
+        textureViewDesc.format = mTextureDescriptor.format;
+        if (aspect == WGPUTextureAspect_DepthOnly)
+        {
+            textureViewDesc.format = GetDepthOnlyFormat(mTextureDescriptor.format);
+        }
+        else if (aspect == WGPUTextureAspect_StencilOnly)
+        {
+            textureViewDesc.format = GetStencilOnlyFormat(mTextureDescriptor.format);
+        }
+    }
+
+    textureViewOut = TextureViewHandle::Acquire(
         mProcTable, mProcTable->textureCreateView(mTexture.get(), &textureViewDesc));
     return angle::Result::Continue;
 }
@@ -686,8 +937,8 @@ angle::Result BufferHelper::readDataImmediate(ContextWgpu *context,
         WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead, webgpu::MapAtCreation::No));
 
     // Copy the source buffer to staging and flush the commands
-    context->ensureCommandEncoderCreated();
-    webgpu::CommandEncoderHandle &commandEncoder = context->getCurrentCommandEncoder();
+    webgpu::CommandEncoderHandle commandEncoder;
+    ANGLE_TRY(context->getCurrentCommandEncoder(reason, &commandEncoder));
     size_t safeCopyOffset   = rx::roundDownPow2(offset, webgpu::kBufferCopyToBufferAlignment);
     size_t offsetAdjustment = offset - safeCopyOffset;
     size_t copySize = roundUpPow2(size + offsetAdjustment, webgpu::kBufferCopyToBufferAlignment);

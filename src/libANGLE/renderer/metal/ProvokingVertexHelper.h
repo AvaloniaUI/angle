@@ -28,22 +28,22 @@ class ProvokingVertexHelper : angle::NonCopyable
     ProvokingVertexHelper(ContextMtl *context);
     angle::Result preconditionIndexBuffer(ContextMtl *context,
                                           mtl::BufferRef indexBuffer,
-                                          size_t indexCount,
+                                          GLsizei indexCount,
                                           size_t indexOffset,
                                           bool primitiveRestartEnabled,
                                           gl::PrimitiveMode primitiveMode,
                                           gl::DrawElementsType elementsType,
-                                          size_t &outIndexCount,
+                                          uint32_t &outIndexCount,
                                           size_t &outIndexOffset,
                                           gl::PrimitiveMode &outPrimitiveMode,
                                           mtl::BufferRef &outNewBuffer);
 
     angle::Result generateIndexBuffer(ContextMtl *context,
                                       size_t first,
-                                      size_t indexCount,
+                                      GLsizei indexCount,
                                       gl::PrimitiveMode primitiveMode,
                                       gl::DrawElementsType elementsType,
-                                      size_t &outIndexCount,
+                                      uint32_t &outIndexCount,
                                       size_t &outIndexOffset,
                                       gl::PrimitiveMode &outPrimitiveMode,
                                       mtl::BufferRef &outNewBuffer);
@@ -54,19 +54,14 @@ class ProvokingVertexHelper : angle::NonCopyable
     mtl::ComputeCommandEncoder *getComputeCommandEncoder();
 
   private:
-    angle::Result getComputePipleineState(
-        ContextMtl *context,
-        const mtl::ProvokingVertexComputePipelineDesc &desc,
-        angle::ObjCPtr<id<MTLComputePipelineState>> *outComputePipeline);
-
-    angle::Result prepareCommandEncoderForDescriptor(ContextMtl *context,
-                                                     mtl::ComputeCommandEncoder *encoder,
-                                                     mtl::ProvokingVertexComputePipelineDesc desc);
+    angle::Result prepareCommandEncoderForFunction(ContextMtl *context,
+                                                   mtl::ComputeCommandEncoder *encoder,
+                                                   uint32_t indexBufferKey,
+                                                   bool isForGenerateIndices);
 
     mtl::BufferPool mIndexBuffers;
-
-    std::unordered_map<mtl::ProvokingVertexComputePipelineDesc, angle::ObjCPtr<id<MTLFunction>>>
-        mComputeFunctions;
+    std::unordered_map<uint32_t, angle::ObjCPtr<id<MTLFunction>>> mFixIndexBufferFunctions;
+    std::unordered_map<uint32_t, angle::ObjCPtr<id<MTLFunction>>> mGenIndexBufferFunctions;
 };
 }  // namespace rx
 #endif /* LIBANGLE_RENDERER_METAL_PROVOKINGVERTEXHELPER_H */

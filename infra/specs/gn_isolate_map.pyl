@@ -127,6 +127,10 @@
     "label": "//src/tests:angle_deqp_khr_gles32_tests",
     "type": "windowed_test_launcher",
   },
+  "angle_deqp_khr_glesext_tests": {
+    "label": "//src/tests:angle_deqp_khr_glesext_tests",
+    "type": "windowed_test_launcher",
+  },
   "angle_deqp_khr_noctx_gles2_tests": {
     "label": "//src/tests:angle_deqp_khr_noctx_gles2_tests",
     "type": "windowed_test_launcher",
@@ -203,5 +207,9 @@
   "angle_white_box_tests": {
     "label": "//src/tests:angle_white_box_tests",
     "type": "windowed_test_launcher",
+  },
+  "noop_target": {
+    "label": "//:noop_target",
+    "type": "additional_compile_target",
   },
 }

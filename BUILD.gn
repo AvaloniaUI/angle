@@ -36,7 +36,7 @@ declare_args() {
                angle_has_build
 
   # Enable using Vulkan to collect system info as a fallback.
-  angle_enable_vulkan_system_info = false
+  angle_enable_vulkan_system_info = is_chromeos
 
   # Link in system libGL, to work with apitrace.  See doc/DebuggingTips.md.
   angle_link_glx = false
@@ -89,6 +89,8 @@ declare_args() {
 
   # Prefix where the artifacts should be installed on the system
   install_prefix = ""
+
+  angle_use_crypto_hasher = build_with_chromium
 }
 
 declare_args() {
@@ -107,6 +109,7 @@ if (angle_build_all) {
     deps = [
       ":angle",
       ":angle_shader_translator",
+      ":noop_target",
       ":translator_fuzzer",
       ":xxhash_fuzzer",
       "$angle_root/samples:angle_samples",
@@ -125,8 +128,8 @@ if (angle_build_all) {
   }
 }
 
-if (build_angle_end2end_tests_aosp) {
-  group("angle_end2end_tests_aosp") {
+if (build_angle_end2end_tests_library) {
+  group("angle_end2end_tests_library") {
     testonly = true
     deps = [ "src/tests:angle_end2end_tests" ]
   }
@@ -310,6 +313,9 @@ config("internal_config") {
   if (angle_trace_events_ignore_timestamp) {
     defines += [ "ANGLE_TRACE_EVENTS_IGNORE_TIMESTAMP" ]
   }
+  if (angle_use_crypto_hasher) {
+    defines += [ "ANGLE_USE_CRYPTO_HASHER=1" ]
+  }
 }
 
 config("constructor_and_destructor_warnings") {
@@ -318,6 +324,13 @@ config("constructor_and_destructor_warnings") {
       "-Wexit-time-destructors",
       "-Wglobal-constructors",
     ]
+  }
+}
+
+config("no_thread_safety_warnings") {
+  if (is_clang) {
+    cflags_cc = [ "-Wno-thread-safety" ]
+    cflags_objcc = [ "-Wno-thread-safety" ]
   }
 }
 
@@ -413,6 +426,14 @@ config("angle_uwp_env") {
   if (angle_is_winuwp && !angle_is_winappsdk) {
     defines = [ "WINAPI_FAMILY=WINAPI_FAMILY_PC_APP" ]
   }
+}
+
+config("angle_translator_ir") {
+  defines = [ "ANGLE_IR=1" ]
+  include_dirs = [
+    "$root_gen_dir/src",
+    "$root_gen_dir/third_party/angle/src",
+  ]
 }
 
 angle_source_set("cl_includes") {
@@ -579,12 +600,20 @@ angle_common_lib("angle_common_shader_state") {
 
 angle_source_set("angle_capture_common") {
   sources = [
+    "src/common/frame_capture_binary_data.cpp",
+    "src/common/frame_capture_binary_data.h",
     "src/common/frame_capture_utils.cpp",
     "src/common/frame_capture_utils.h",
     "src/common/frame_capture_utils_autogen.cpp",
     "src/common/frame_capture_utils_autogen.h",
   ]
-  deps = [ ":angle_common" ]
+
+  # Required for 32-bit platform large file I/O
+  defines = [ "_FILE_OFFSET_BITS=64" ]
+  deps = [
+    ":angle_common",
+    ":angle_compression",
+  ]
   public_deps = [ ":angle_gl_enum_utils" ]
 }
 
@@ -685,7 +714,7 @@ angle_static_library("angle_gpu_info_util") {
 
     if (angle_use_x11 && angle_has_build) {
       sources += libangle_gpu_info_util_x11_sources
-      deps += [ "src/third_party/libXNVCtrl:libXNVCtrl" ]
+      deps += [ "src/third_party/libXNVCtrl" ]
       defines += [ "GPU_INFO_USE_X11" ]
       libs += [
         "X11",
@@ -778,7 +807,7 @@ angle_static_library("translator") {
     defines += [ "ANGLE_ENABLE_VULKAN" ]
   }
 
-  if (angle_enable_metal) {
+  if (angle_enable_msl) {
     sources += angle_translator_lib_msl_sources
     defines += [ "ANGLE_ENABLE_METAL" ]
   }
@@ -803,6 +832,12 @@ angle_static_library("translator") {
     ":preprocessor",
     "$angle_root/src/common/spirv:angle_spirv_headers",
   ]
+
+  if (angle_ir) {
+    deps += [ "$angle_root/src/compiler/translator/ir:translator_ir" ]
+    sources += angle_translator_lib_ir_sources
+    public_configs += [ ":angle_translator_ir" ]
+  }
 
   if (_uses_spirv) {
     deps += [
@@ -1121,11 +1156,6 @@ angle_source_set("libANGLE_no_vulkan") {
     public_deps += [ "src/libANGLE/renderer/cl:angle_cl_backend" ]
   }
 
-  # Enable extra Chromium style warnings for libANGLE.
-  if (is_clang && angle_has_build && !is_nacl) {
-    suppressed_configs -= [ "//build/config/clang:find_bad_constructs" ]
-  }
-
   if (is_apple) {
     sources += libangle_mac_sources
   }
@@ -1136,6 +1166,9 @@ angle_source_set("libANGLE_no_vulkan") {
 
   if (is_debug) {
     defines += [ "ANGLE_GENERATE_SHADER_DEBUG_INFO" ]
+  }
+  if (build_with_chromium) {
+    defines += [ "ANGLE_ALWAYS_REPORT_VALIDATION_ERRORS" ]
   }
 
   configs += [ ":debug_annotations_config" ]
@@ -1157,6 +1190,7 @@ angle_source_set("angle_frame_capture_mock") {
   public_deps = [ ":libANGLE_headers" ]
   public_configs = [ ":angle_frame_capture_disabled" ]
   sources = [
+    "src/common/frame_capture_binary_data.h",
     "src/common/frame_capture_utils.h",
     "src/common/frame_capture_utils_autogen.h",
     "src/common/gl_enum_utils_autogen.h",
@@ -1607,7 +1641,8 @@ angle_executable("angle_shader_translator") {
   }
 }
 
-if (angle_standalone || build_with_chromium || build_angle_end2end_tests_aosp) {
+if (angle_standalone || build_with_chromium ||
+    build_angle_end2end_tests_library) {
   config("angle_feature_support_config") {
     include_dirs = [
       "include",
@@ -1852,4 +1887,9 @@ if (!build_with_chromium && angle_has_build &&
            ] + build_gn_logs
 
   write_file("$root_build_dir/gn_logs.txt", _lines)
+}
+
+# An empty target primarily meant for performing a no-op compile on trace
+# builders.
+group("noop_target") {
 }

@@ -8,6 +8,10 @@
 //      MTLCommandEncoder's wrappers.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_libc_calls
+#endif
+
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
 
 #include <cassert>
@@ -180,7 +184,7 @@ inline void SetVertexBufferCmd(id<MTLRenderCommandEncoder> encoder,
                                IntermediateCommandStream *stream)
 {
     id<MTLBuffer> buffer = stream->fetch<id<MTLBuffer>>();
-    uint32_t offset      = stream->fetch<uint32_t>();
+    size_t offset        = stream->fetch<size_t>();
     uint32_t index       = stream->fetch<uint32_t>();
     [encoder setVertexBuffer:buffer offset:offset atIndex:index];
     [buffer ANGLE_MTL_RELEASE];
@@ -189,7 +193,7 @@ inline void SetVertexBufferCmd(id<MTLRenderCommandEncoder> encoder,
 inline void SetVertexBufferOffsetCmd(id<MTLRenderCommandEncoder> encoder,
                                      IntermediateCommandStream *stream)
 {
-    uint32_t offset = stream->fetch<uint32_t>();
+    size_t offset   = stream->fetch<size_t>();
     uint32_t index  = stream->fetch<uint32_t>();
     [encoder setVertexBufferOffset:offset atIndex:index];
 }
@@ -231,7 +235,7 @@ inline void SetFragmentBufferCmd(id<MTLRenderCommandEncoder> encoder,
                                  IntermediateCommandStream *stream)
 {
     id<MTLBuffer> buffer = stream->fetch<id<MTLBuffer>>();
-    uint32_t offset      = stream->fetch<uint32_t>();
+    size_t offset        = stream->fetch<size_t>();
     uint32_t index       = stream->fetch<uint32_t>();
     [encoder setFragmentBuffer:buffer offset:offset atIndex:index];
     [buffer ANGLE_MTL_RELEASE];
@@ -240,8 +244,8 @@ inline void SetFragmentBufferCmd(id<MTLRenderCommandEncoder> encoder,
 inline void SetFragmentBufferOffsetCmd(id<MTLRenderCommandEncoder> encoder,
                                        IntermediateCommandStream *stream)
 {
-    uint32_t offset = stream->fetch<uint32_t>();
-    uint32_t index  = stream->fetch<uint32_t>();
+    size_t offset  = stream->fetch<size_t>();
+    uint32_t index = stream->fetch<uint32_t>();
     [encoder setFragmentBufferOffset:offset atIndex:index];
 }
 
@@ -593,6 +597,26 @@ bool CommandQueue::waitUntilSerialCompleted(uint64_t serial, uint64_t timeoutNs)
     return true;
 }
 
+bool CommandQueue::isSerialScheduled(uint64_t serial) const
+{
+    return mScheduledBufferSerial.load() >= serial;
+}
+
+void CommandQueue::addCommandBufferScheduledCallback(uint64_t serial,
+                                                     std::function<void()> callback)
+{
+    std::lock_guard<std::mutex> lg(mLock);
+    if (isSerialScheduled(serial))
+    {
+        // Run the callback immediately if the command buffer for `serial` was already scheduled.
+        callback();
+    }
+    else
+    {
+        mCommandBufferScheduledCallbacks[serial].push_back(std::move(callback));
+    }
+}
+
 angle::ObjCPtr<id<MTLCommandBuffer>> CommandQueue::makeMetalCommandBuffer(uint64_t *queueSerialOut)
 {
     ANGLE_MTL_OBJC_SCOPE
@@ -613,6 +637,10 @@ angle::ObjCPtr<id<MTLCommandBuffer>> CommandQueue::makeMetalCommandBuffer(uint64
             addCommandBufferToTimeElapsedEntry(lg, timeElapsedEntry);
         }
 
+        [metalCmdBuffer addScheduledHandler:^(id<MTLCommandBuffer> buf) {
+          onCommandBufferScheduled(serial);
+        }];
+
         [metalCmdBuffer addCompletedHandler:^(id<MTLCommandBuffer> buf) {
           onCommandBufferCompleted(buf, serial, timeElapsedEntry);
         }];
@@ -630,6 +658,25 @@ void CommandQueue::onCommandBufferCommitted(id<MTLCommandBuffer> buf, uint64_t s
     ANGLE_MTL_LOG("Committed MTLCommandBuffer %llu:%p", serial, buf);
 
     mCommittedBufferSerial.storeMaxValue(serial);
+}
+
+void CommandQueue::onCommandBufferScheduled(uint64_t serial)
+{
+    std::vector<std::function<void()>> callbacks;
+    {
+        std::lock_guard<std::mutex> lg(mLock);
+        auto it = mCommandBufferScheduledCallbacks.find(serial);
+        if (it != mCommandBufferScheduledCallbacks.end())
+        {
+            callbacks = std::move(it->second);
+            mCommandBufferScheduledCallbacks.erase(it);
+        }
+        mScheduledBufferSerial.storeMaxValue(serial);
+    }
+    for (const auto &callback : callbacks)
+    {
+        callback();
+    }
 }
 
 void CommandQueue::onCommandBufferCompleted(id<MTLCommandBuffer> buf,
@@ -825,19 +872,17 @@ void CommandBuffer::wait(CommandBufferFinishOperation operation)
 
         case WaitUntilScheduled:
             // Only wait if we haven't already waited
-            if (mLastWaitOp == NoWait)
+            if (!mCmdQueue.isSerialScheduled(mQueueSerial))
             {
                 [get() waitUntilScheduled];
-                mLastWaitOp = WaitUntilScheduled;
             }
             break;
 
         case WaitUntilFinished:
             // Only wait if we haven't already waited until finished.
-            if (mLastWaitOp != WaitUntilFinished)
+            if (!mCmdQueue.isSerialCompleted(mQueueSerial))
             {
                 [get() waitUntilCompleted];
-                mLastWaitOp = WaitUntilFinished;
             }
             break;
     }
@@ -940,7 +985,6 @@ void CommandBuffer::restart()
     set(metalCmdBuffer);
     mQueueSerial = serial;
     mCommitted   = false;
-    mLastWaitOp  = mtl::NoWait;
 
     for (std::string &marker : mDebugGroups)
     {
@@ -1258,7 +1302,7 @@ void RenderCommandEncoderShaderStates::reset()
         buffer = nil;
     }
 
-    for (uint32_t &offset : bufferOffsets)
+    for (size_t &offset : bufferOffsets)
     {
         offset = 0;
     }
@@ -1878,7 +1922,7 @@ RenderCommandEncoder &RenderCommandEncoder::setBlendColor(float r, float g, floa
 
 RenderCommandEncoder &RenderCommandEncoder::setBuffer(gl::ShaderType shaderType,
                                                       const BufferRef &buffer,
-                                                      uint32_t offset,
+                                                      size_t offset,
                                                       uint32_t index)
 {
     if (index >= kMaxShaderBuffers)
@@ -1895,7 +1939,7 @@ RenderCommandEncoder &RenderCommandEncoder::setBuffer(gl::ShaderType shaderType,
 
 RenderCommandEncoder &RenderCommandEncoder::setBufferForWrite(gl::ShaderType shaderType,
                                                               const BufferRef &buffer,
-                                                              uint32_t offset,
+                                                              size_t offset,
                                                               uint32_t index)
 {
     if (index >= kMaxShaderBuffers)
@@ -1912,7 +1956,7 @@ RenderCommandEncoder &RenderCommandEncoder::setBufferForWrite(gl::ShaderType sha
 
 RenderCommandEncoder &RenderCommandEncoder::commonSetBuffer(gl::ShaderType shaderType,
                                                             id<MTLBuffer> mtlBuffer,
-                                                            uint32_t offset,
+                                                            size_t offset,
                                                             uint32_t index)
 {
     RenderCommandEncoderShaderStates &shaderStates = mStateCache.perShaderStates[shaderType];
@@ -2633,7 +2677,7 @@ ComputeCommandEncoder &ComputeCommandEncoder::setComputePipelineState(
 }
 
 ComputeCommandEncoder &ComputeCommandEncoder::setBuffer(const BufferRef &buffer,
-                                                        uint32_t offset,
+                                                        size_t offset,
                                                         uint32_t index)
 {
     if (index >= kMaxShaderBuffers)
@@ -2649,7 +2693,7 @@ ComputeCommandEncoder &ComputeCommandEncoder::setBuffer(const BufferRef &buffer,
 }
 
 ComputeCommandEncoder &ComputeCommandEncoder::setBufferForWrite(const BufferRef &buffer,
-                                                                uint32_t offset,
+                                                                size_t offset,
                                                                 uint32_t index)
 {
     if (index >= kMaxShaderBuffers)

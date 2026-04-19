@@ -6,6 +6,10 @@
 
 // StateManagerGL.h: Defines a class for caching applied OpenGL state
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/gl/StateManagerGL.h"
 
 #include <string.h>
@@ -162,7 +166,8 @@ StateManagerGL::StateManagerGL(const FunctionsGL *functions,
       mClearStencil(0),
       mFramebufferSRGBAvailable(extensions.sRGBWriteControlEXT),
       mFramebufferSRGBEnabled(false),
-      mHasSeparateFramebufferBindings(mFunctions->isAtLeastGL(gl::Version(3, 0)) ||
+      // Note: GL 3.2 is required for desktop GL
+      mHasSeparateFramebufferBindings(functions->standard == STANDARD_GL_DESKTOP ||
                                       mFunctions->isAtLeastGLES(gl::Version(3, 0))),
       mDitherEnabled(true),
       mTextureCubemapSeamlessEnabled(false),
@@ -2011,26 +2016,9 @@ void StateManagerGL::setClearDepth(float clearDepth)
 
 void StateManagerGL::setClearColor(const gl::ColorF &clearColor)
 {
-    gl::ColorF modifiedClearColor = clearColor;
-    if (mFeatures.clearToZeroOrOneBroken.enabled &&
-        (clearColor.red == 1.0f || clearColor.red == 0.0f) &&
-        (clearColor.green == 1.0f || clearColor.green == 0.0f) &&
-        (clearColor.blue == 1.0f || clearColor.blue == 0.0f) &&
-        (clearColor.alpha == 1.0f || clearColor.alpha == 0.0f))
+    if (mClearColor != clearColor)
     {
-        if (clearColor.alpha == 1.0f)
-        {
-            modifiedClearColor.alpha = 2.0f;
-        }
-        else
-        {
-            modifiedClearColor.alpha = -1.0f;
-        }
-    }
-
-    if (mClearColor != modifiedClearColor)
-    {
-        mClearColor = modifiedClearColor;
+        mClearColor = clearColor;
         mFunctions->clearColor(mClearColor.red, mClearColor.green, mClearColor.blue,
                                mClearColor.alpha);
 
@@ -2523,11 +2511,14 @@ angle::Result StateManagerGL::syncState(const gl::Context *context,
                         case gl::state::EXTENDED_DIRTY_BIT_SHADER_DERIVATIVE_HINT:
                             // These hints aren't forwarded to GL yet.
                             break;
-                        case gl::state::EXTENDED_DIRTY_BIT_SHADING_RATE:
+                        case gl::state::EXTENDED_DIRTY_BIT_SHADING_RATE_QCOM:
+                        case gl::state::EXTENDED_DIRTY_BIT_SHADING_RATE_EXT:
                             // Unimplemented extensions.
                             break;
                         case gl::state::EXTENDED_DIRTY_BIT_BLEND_ADVANCED_COHERENT:
                             setBlendAdvancedCoherent(state.isBlendAdvancedCoherentEnabled());
+                            break;
+                        case gl::state::EXTENDED_DIRTY_BIT_FETCH_PER_SAMPLE_ENABLED:
                             break;
                         default:
                             UNREACHABLE();
@@ -2801,8 +2792,7 @@ void StateManagerGL::setLogicOp(gl::LogicalOperation opcode)
 
 void StateManagerGL::setTextureCubemapSeamlessEnabled(bool enabled)
 {
-    // TODO(jmadill): Also check for seamless extension.
-    if (!mFunctions->isAtLeastGL(gl::Version(3, 2)))
+    if (mFunctions->standard != STANDARD_GL_DESKTOP)
     {
         return;
     }

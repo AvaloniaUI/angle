@@ -329,6 +329,9 @@ enum class RenderPassClosureReason
     VertexArrayStreaming,
     VertexArrayLineLoop,
     CopyBufferToTexture,
+    CopyTextureToTexture,
+    CopyImage,
+    ClearWithDraw,
 
     InvalidEnum,
     EnumCount = InvalidEnum,
@@ -451,9 +454,13 @@ webgpu::InstanceHandle GetInstance(const gl::Context *context);
 PackedRenderPassColorAttachment CreateNewClearColorAttachment(const gl::ColorF &clearValue,
                                                               uint32_t depthSlice,
                                                               TextureViewHandle textureView);
-PackedRenderPassDepthStencilAttachment CreateNewDepthStencilAttachment(
+PackedRenderPassDepthStencilAttachment CreateNewClearDepthStencilAttachment(
     float depthClearValue,
     uint32_t stencilClearValue,
+    TextureViewHandle textureView,
+    bool hasDepthValue   = false,
+    bool hasStencilValue = false);
+PackedRenderPassDepthStencilAttachment CreateNewDepthStencilAttachment(
     TextureViewHandle textureView,
     bool hasDepthValue   = false,
     bool hasStencilValue = false);

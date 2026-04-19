@@ -18,6 +18,7 @@ namespace gl
 {
 class Context;
 class PrivateState;
+class PrivateStateCache;
 class ErrorSet;
 
 bool ValidateAlphaFunc(const PrivateState &state,
@@ -143,7 +144,7 @@ bool ValidateGetClipPlanex(const PrivateState &state,
 bool ValidateGetFixedv(const Context *context,
                        angle::EntryPoint entryPoint,
                        GLenum pname,
-                       const GLfixed *params);
+                       const GLfixed *data);
 bool ValidateGetLightfv(const PrivateState &state,
                         ErrorSet *errors,
                         angle::EntryPoint entryPoint,

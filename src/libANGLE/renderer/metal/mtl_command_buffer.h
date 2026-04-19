@@ -11,6 +11,10 @@
 #ifndef LIBANGLE_RENDERER_METAL_COMMANDENBUFFERMTL_H_
 #define LIBANGLE_RENDERER_METAL_COMMANDENBUFFERMTL_H_
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <cstdint>
@@ -100,6 +104,9 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
     bool isSerialCompleted(uint64_t serial) const;
     bool waitUntilSerialCompleted(uint64_t serial, uint64_t timeoutNs) const;
 
+    bool isSerialScheduled(uint64_t serial) const;
+    void addCommandBufferScheduledCallback(uint64_t serial, std::function<void()> callback);
+
     CommandQueue &operator=(id<MTLCommandQueue> metalQueue)
     {
         set(metalQueue);
@@ -107,6 +114,7 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
     }
 
     angle::ObjCPtr<id<MTLCommandBuffer>> makeMetalCommandBuffer(uint64_t *queueSerialOut);
+
     void onCommandBufferCommitted(id<MTLCommandBuffer> buf, uint64_t serial);
 
     uint64_t getNextRenderPassEncoderSerial();
@@ -119,10 +127,18 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
     MTLCommandBufferError popCmdBufferError() { return mCmdBufferError.pop(); }
 
   private:
+    using ParentClass = WrappedObject<id<MTLCommandQueue>>;
+
     void onCommandBufferCompleted(id<MTLCommandBuffer> buf,
                                   uint64_t serial,
                                   uint64_t timeElapsedEntry);
-    using ParentClass = WrappedObject<id<MTLCommandQueue>>;
+
+    void onCommandBufferScheduled(uint64_t serial);
+
+    void addCommandBufferToTimeElapsedEntry(std::lock_guard<std::mutex> &lg, uint64_t id);
+    void recordCommandBufferTimeElapsed(std::lock_guard<std::mutex> &lg,
+                                        uint64_t id,
+                                        double seconds);
 
     struct CmdBufferQueueEntry
     {
@@ -133,6 +149,7 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
 
     uint64_t mQueueSerialCounter = 1;
     AtomicSerial mCommittedBufferSerial;
+    AtomicSerial mScheduledBufferSerial;
     AtomicSerial mCompletedBufferSerial;
     uint64_t mRenderEncoderCounter = 1;
 
@@ -158,10 +175,7 @@ class CommandQueue final : public WrappedObject<id<MTLCommandQueue>>, angle::Non
 
     AtomicCommandBufferError mCmdBufferError;
 
-    void addCommandBufferToTimeElapsedEntry(std::lock_guard<std::mutex> &lg, uint64_t id);
-    void recordCommandBufferTimeElapsed(std::lock_guard<std::mutex> &lg,
-                                        uint64_t id,
-                                        double seconds);
+    angle::HashMap<uint64_t, std::vector<std::function<void()>>> mCommandBufferScheduledCallbacks;
 };
 
 class CommandBuffer final : public WrappedObject<id<MTLCommandBuffer>>, angle::NonCopyable
@@ -252,7 +266,6 @@ class CommandBuffer final : public WrappedObject<id<MTLCommandBuffer>>, angle::N
     angle::HashSet<id> mResourceList;
     size_t mWorkingResourceSize              = 0;
     bool mCommitted                          = false;
-    CommandBufferFinishOperation mLastWaitOp = mtl::NoWait;
 };
 
 class CommandEncoder : public WrappedObject<id<MTLCommandEncoder>>, angle::NonCopyable
@@ -370,7 +383,7 @@ struct RenderCommandEncoderShaderStates
     void reset();
 
     std::array<id<MTLBuffer>, kMaxShaderBuffers> buffers;
-    std::array<uint32_t, kMaxShaderBuffers> bufferOffsets;
+    std::array<size_t, kMaxShaderBuffers> bufferOffsets;
     std::array<id<MTLSamplerState>, kMaxShaderSamplers> samplers;
     std::array<Optional<std::pair<float, float>>, kMaxShaderSamplers> samplerLodClamps;
     std::array<id<MTLTexture>, kMaxShaderSamplers> textures;
@@ -441,7 +454,7 @@ class RenderCommandEncoder final : public CommandEncoder
 
     RenderCommandEncoder &setBlendColor(float r, float g, float b, float a);
 
-    RenderCommandEncoder &setVertexBuffer(const BufferRef &buffer, uint32_t offset, uint32_t index)
+    RenderCommandEncoder &setVertexBuffer(const BufferRef &buffer, size_t offset, uint32_t index)
     {
         return setBuffer(gl::ShaderType::Vertex, buffer, offset, index);
     }
@@ -466,9 +479,7 @@ class RenderCommandEncoder final : public CommandEncoder
         return setTexture(gl::ShaderType::Vertex, texture, index);
     }
 
-    RenderCommandEncoder &setFragmentBuffer(const BufferRef &buffer,
-                                            uint32_t offset,
-                                            uint32_t index)
+    RenderCommandEncoder &setFragmentBuffer(const BufferRef &buffer, size_t offset, uint32_t index)
     {
         return setBuffer(gl::ShaderType::Fragment, buffer, offset, index);
     }
@@ -495,11 +506,11 @@ class RenderCommandEncoder final : public CommandEncoder
 
     RenderCommandEncoder &setBuffer(gl::ShaderType shaderType,
                                     const BufferRef &buffer,
-                                    uint32_t offset,
+                                    size_t offset,
                                     uint32_t index);
     RenderCommandEncoder &setBufferForWrite(gl::ShaderType shaderType,
                                             const BufferRef &buffer,
-                                            uint32_t offset,
+                                            size_t offset,
                                             uint32_t index);
     RenderCommandEncoder &setBytes(gl::ShaderType shaderType,
                                    const void *bytes,
@@ -617,7 +628,7 @@ class RenderCommandEncoder final : public CommandEncoder
 
     RenderCommandEncoder &commonSetBuffer(gl::ShaderType shaderType,
                                           id<MTLBuffer> mtlBuffer,
-                                          uint32_t offset,
+                                          size_t offset,
                                           uint32_t index);
 
     RenderPassDesc mRenderPassDesc;
@@ -719,9 +730,9 @@ class ComputeCommandEncoder final : public CommandEncoder
 
     ComputeCommandEncoder &setComputePipelineState(id<MTLComputePipelineState> state);
 
-    ComputeCommandEncoder &setBuffer(const BufferRef &buffer, uint32_t offset, uint32_t index);
+    ComputeCommandEncoder &setBuffer(const BufferRef &buffer, size_t offset, uint32_t index);
     ComputeCommandEncoder &setBufferForWrite(const BufferRef &buffer,
-                                             uint32_t offset,
+                                             size_t offset,
                                              uint32_t index);
     ComputeCommandEncoder &setBytes(const void *bytes, size_t size, uint32_t index);
     template <typename T>

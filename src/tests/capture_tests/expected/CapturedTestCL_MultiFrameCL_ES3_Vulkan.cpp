@@ -2,6 +2,9 @@
 #include "trace_fixture_cl.h"
 
 const char clGetExtensionFunctionAddress_func_name_0[] = { "clIcdGetPlatformIDsKHR" };
+const char clGetExtensionFunctionAddress_func_name_1[] = { "clEnqueueAcquireExternalMemObjectsKHR" };
+const char clGetExtensionFunctionAddress_func_name_2[] = { "clEnqueueReleaseExternalMemObjectsKHR" };
+const char clGetExtensionFunctionAddress_func_name_3[] = { "clImportMemoryARM" };
 const char * clCreateProgramWithSource_strings_0[] = { 
 "\n"
 "        __kernel void frame1(__global float *output)\n"
@@ -26,10 +29,6 @@ const char * clCreateProgramWithSource_strings_0[] = {
 "        {\n"
 "            int gid = get_global_id(0);\n"
 "            output[gid] = gid;\n"
-"            if (gid == 0)\n"
-"            {\n"
-"                printf(\"Frame 4!\\n\");\n"
-"            }\n"
 "        }\n"
 "\n"
 "        __kernel void frame5(__global float *output)\n"
@@ -37,9 +36,15 @@ const char * clCreateProgramWithSource_strings_0[] = {
 "            int gid = get_global_id(0);\n"
 "            output[gid] = gid/gid;\n"
 "        }\n"
+"\n"
+"        __kernel void frame6(__global float *output)\n"
+"        {\n"
+"            int gid = get_global_id(0);\n"
+"            output[gid] = gid * 1.0f;\n"
+"        }\n"
 "        ",
 };
-const char clCreateKernel_kernel_name_4[] = { "frame1" };
+const char clCreateKernel_kernel_name_5[] = { "frame1" };
 
 // Private Functions
 
@@ -58,7 +63,8 @@ void InitReplay(void)
     // clKernelsMapSize = 16
     // clSamplerMapSize = 0
     // clVoidMapSize = 0
-    InitializeReplayCL("CapturedTestCL_MultiFrameCL_ES3_Vulkan.angledata", 0, 512, 8, 8, 8, 8, 8, 0, 8, 16, 0, 0);
+    InitializeReplayCL2("CapturedTestCL_MultiFrameCL_ES3_Vulkan.angledata", 0, 512, 8, 8, 8, 8, 8, 0, 8, 16, 0, 0);
+    InitializeBinaryDataLoader();
 }
 
 // Public Functions
@@ -79,6 +85,9 @@ void ReplayFrame(uint32_t frameIndex)
         case 5:
             ReplayFrame5();
             break;
+        case 6:
+            ReplayFrame6();
+            break;
         default:
             break;
     }
@@ -87,6 +96,9 @@ void ReplayFrame(uint32_t frameIndex)
 void SetupFirstFrame()
 {
     clIcdGetPlatformIDsKHR = (clIcdGetPlatformIDsKHR_fn)clGetExtensionFunctionAddress(clGetExtensionFunctionAddress_func_name_0);
+    clEnqueueAcquireExternalMemObjectsKHR = (clEnqueueAcquireExternalMemObjectsKHR_fn)clGetExtensionFunctionAddress(clGetExtensionFunctionAddress_func_name_1);
+    clEnqueueReleaseExternalMemObjectsKHR = (clEnqueueReleaseExternalMemObjectsKHR_fn)clGetExtensionFunctionAddress(clGetExtensionFunctionAddress_func_name_2);
+    clImportMemoryARM = (clImportMemoryARM_fn)clGetExtensionFunctionAddress(clGetExtensionFunctionAddress_func_name_3);
     clGetPlatformIDs(1, clPlatformsMap, NULL);
     temporaryDevicesList.clear();
     temporaryDevicesList.resize(1);
@@ -96,11 +108,11 @@ void SetupFirstFrame()
     clContextsMap[0] = clCreateContext(NULL, 1, temporaryDevicesList.data(), NULL, 0, NULL);
     clCommandQueuesMap[0] = clCreateCommandQueue(clContextsMap[0], clDevicesMap[0], 0, NULL);
     clProgramsMap[0] = clCreateProgramWithSource(clContextsMap[0], 1, clCreateProgramWithSource_strings_0, NULL, NULL);
-    clBuildProgram(clProgramsMap[0], 0, NULL, 0, NULL, 0);
+    clBuildProgram(clProgramsMap[0], 0, NULL, NULL, NULL, 0);
     clMemMap[0] = clCreateBuffer(clContextsMap[0], 1, 512, 0, NULL);
-    clKernelsMap[0] = clCreateKernel(clProgramsMap[0], clCreateKernel_kernel_name_4, NULL);
+    clKernelsMap[0] = clCreateKernel(clProgramsMap[0], clCreateKernel_kernel_name_5, NULL);
     clSetKernelArg(clKernelsMap[0], 0, 8, (const void *)&clMemMap[0]);
-    clEnqueueWriteBuffer(clCommandQueuesMap[0], clMemMap[0], 1, 0, 512, (const GLubyte *)&gBinaryData[64], 0, NULL, NULL);
+    clEnqueueWriteBuffer(clCommandQueuesMap[0], clMemMap[0], 1, 0, 512, (const GLubyte *)GetBinaryData(80), 0, NULL, NULL);
 }
 
 void ResetReplay(void)

@@ -42,10 +42,12 @@ enum class ParamType
     TBufferID,
     TBufferIDConstPointer,
     TBufferIDPointer,
+    TBufferParam,
     TBufferUsage,
     TClientVertexArrayType,
     TClipDepthMode,
     TClipOrigin,
+    TCombinerOp,
     TCommandQueueInfo,
     TCommandQueueProperties,
     TCompositorTiming,
@@ -163,6 +165,7 @@ enum class ParamType
     TMemoryObjectIDPointer,
     TObjectType,
     TPipeInfo,
+    TPlaneParameter,
     TPlatformInfo,
     TPointParameter,
     TPolygonMode,
@@ -177,6 +180,8 @@ enum class ParamType
     TQueryID,
     TQueryIDConstPointer,
     TQueryIDPointer,
+    TQueryObjectParameter,
+    TQueryParameter,
     TQueryType,
     TRenderbufferID,
     TRenderbufferIDConstPointer,
@@ -186,14 +191,17 @@ enum class ParamType
     TSamplerIDConstPointer,
     TSamplerIDPointer,
     TSamplerInfo,
+    TSamplerParameter,
     TSemaphoreID,
     TSemaphoreIDConstPointer,
     TSemaphoreIDPointer,
+    TShaderParameter,
     TShaderProgramID,
     TShaderProgramIDConstPointer,
     TShaderProgramIDPointer,
     TShaderType,
     TShadingModel,
+    TShadingRate,
     TSurfaceID,
     TSyncID,
     TTextureEnvParameter,
@@ -201,6 +209,7 @@ enum class ParamType
     TTextureID,
     TTextureIDConstPointer,
     TTextureIDPointer,
+    TTextureImageParameter,
     TTextureTarget,
     TTextureType,
     TTimestamp,
@@ -208,6 +217,7 @@ enum class ParamType
     TTransformFeedbackIDConstPointer,
     TTransformFeedbackIDPointer,
     TUniformBlockIndex,
+    TUniformBlockParameter,
     TUniformLocation,
     TVertexArrayID,
     TVertexArrayIDConstPointer,
@@ -235,6 +245,7 @@ enum class ParamType
     Tcl_image_descConstPointer,
     Tcl_image_formatConstPointer,
     Tcl_image_formatPointer,
+    Tcl_import_properties_armConstPointer,
     Tcl_int,
     Tcl_intPointer,
     Tcl_kernel,
@@ -271,7 +282,7 @@ enum class ParamType
     TvoidPointerPointer,
 };
 
-constexpr uint32_t kParamTypeCount = 234;
+constexpr uint32_t kParamTypeCount = 245;
 
 union ParamValue
 {
@@ -283,10 +294,12 @@ union ParamValue
     gl::BufferID BufferIDVal;
     const gl::BufferID *BufferIDConstPointerVal;
     gl::BufferID *BufferIDPointerVal;
+    gl::BufferParam BufferParamVal;
     gl::BufferUsage BufferUsageVal;
     gl::ClientVertexArrayType ClientVertexArrayTypeVal;
     gl::ClipDepthMode ClipDepthModeVal;
     gl::ClipOrigin ClipOriginVal;
+    gl::CombinerOp CombinerOpVal;
     egl::CompositorTiming CompositorTimingVal;
     gl::ContextID ContextIDVal;
     gl::CullFaceMode CullFaceModeVal;
@@ -385,6 +398,7 @@ union ParamValue
     const gl::MemoryObjectID *MemoryObjectIDConstPointerVal;
     gl::MemoryObjectID *MemoryObjectIDPointerVal;
     egl::ObjectType ObjectTypeVal;
+    gl::PlaneParameter PlaneParameterVal;
     gl::PointParameter PointParameterVal;
     gl::PolygonMode PolygonModeVal;
     gl::PrimitiveMode PrimitiveModeVal;
@@ -395,6 +409,8 @@ union ParamValue
     gl::QueryID QueryIDVal;
     const gl::QueryID *QueryIDConstPointerVal;
     gl::QueryID *QueryIDPointerVal;
+    gl::QueryObjectParameter QueryObjectParameterVal;
+    gl::QueryParameter QueryParameterVal;
     gl::QueryType QueryTypeVal;
     gl::RenderbufferID RenderbufferIDVal;
     const gl::RenderbufferID *RenderbufferIDConstPointerVal;
@@ -402,14 +418,17 @@ union ParamValue
     gl::SamplerID SamplerIDVal;
     const gl::SamplerID *SamplerIDConstPointerVal;
     gl::SamplerID *SamplerIDPointerVal;
+    gl::SamplerParameter SamplerParameterVal;
     gl::SemaphoreID SemaphoreIDVal;
     const gl::SemaphoreID *SemaphoreIDConstPointerVal;
     gl::SemaphoreID *SemaphoreIDPointerVal;
+    gl::ShaderParameter ShaderParameterVal;
     gl::ShaderProgramID ShaderProgramIDVal;
     const gl::ShaderProgramID *ShaderProgramIDConstPointerVal;
     gl::ShaderProgramID *ShaderProgramIDPointerVal;
     gl::ShaderType ShaderTypeVal;
     gl::ShadingModel ShadingModelVal;
+    gl::ShadingRate ShadingRateVal;
     egl::SurfaceID SurfaceIDVal;
     gl::SyncID SyncIDVal;
     gl::TextureEnvParameter TextureEnvParameterVal;
@@ -417,6 +436,7 @@ union ParamValue
     gl::TextureID TextureIDVal;
     const gl::TextureID *TextureIDConstPointerVal;
     gl::TextureID *TextureIDPointerVal;
+    gl::TextureImageParameter TextureImageParameterVal;
     gl::TextureTarget TextureTargetVal;
     gl::TextureType TextureTypeVal;
     egl::Timestamp TimestampVal;
@@ -424,6 +444,7 @@ union ParamValue
     const gl::TransformFeedbackID *TransformFeedbackIDConstPointerVal;
     gl::TransformFeedbackID *TransformFeedbackIDPointerVal;
     gl::UniformBlockIndex UniformBlockIndexVal;
+    gl::UniformBlockParameter UniformBlockParameterVal;
     gl::UniformLocation UniformLocationVal;
     gl::VertexArrayID VertexArrayIDVal;
     const gl::VertexArrayID *VertexArrayIDConstPointerVal;
@@ -490,6 +511,7 @@ union ParamValue
     const cl_image_desc *cl_image_descConstPointerVal;
     const cl_image_format *cl_image_formatConstPointerVal;
     cl_image_format *cl_image_formatPointerVal;
+    const cl_import_properties_arm *cl_import_properties_armConstPointerVal;
     cl_int cl_intVal;
     cl_int *cl_intPointerVal;
     cl_kernel cl_kernelVal;
@@ -560,6 +582,13 @@ inline gl::BufferID *GetParamVal<ParamType::TBufferIDPointer, gl::BufferID *>(
 }
 
 template <>
+inline gl::BufferParam GetParamVal<ParamType::TBufferParam, gl::BufferParam>(
+    const ParamValue &value)
+{
+    return value.BufferParamVal;
+}
+
+template <>
 inline gl::BufferUsage GetParamVal<ParamType::TBufferUsage, gl::BufferUsage>(
     const ParamValue &value)
 {
@@ -584,6 +613,12 @@ template <>
 inline gl::ClipOrigin GetParamVal<ParamType::TClipOrigin, gl::ClipOrigin>(const ParamValue &value)
 {
     return value.ClipOriginVal;
+}
+
+template <>
+inline gl::CombinerOp GetParamVal<ParamType::TCombinerOp, gl::CombinerOp>(const ParamValue &value)
+{
+    return value.CombinerOpVal;
 }
 
 template <>
@@ -1218,6 +1253,13 @@ inline egl::ObjectType GetParamVal<ParamType::TObjectType, egl::ObjectType>(cons
 }
 
 template <>
+inline gl::PlaneParameter GetParamVal<ParamType::TPlaneParameter, gl::PlaneParameter>(
+    const ParamValue &value)
+{
+    return value.PlaneParameterVal;
+}
+
+template <>
 inline gl::PointParameter GetParamVal<ParamType::TPointParameter, gl::PointParameter>(
     const ParamValue &value)
 {
@@ -1288,6 +1330,20 @@ inline gl::QueryID *GetParamVal<ParamType::TQueryIDPointer, gl::QueryID *>(const
 }
 
 template <>
+inline gl::QueryObjectParameter
+GetParamVal<ParamType::TQueryObjectParameter, gl::QueryObjectParameter>(const ParamValue &value)
+{
+    return value.QueryObjectParameterVal;
+}
+
+template <>
+inline gl::QueryParameter GetParamVal<ParamType::TQueryParameter, gl::QueryParameter>(
+    const ParamValue &value)
+{
+    return value.QueryParameterVal;
+}
+
+template <>
 inline gl::QueryType GetParamVal<ParamType::TQueryType, gl::QueryType>(const ParamValue &value)
 {
     return value.QueryTypeVal;
@@ -1335,6 +1391,13 @@ inline gl::SamplerID *GetParamVal<ParamType::TSamplerIDPointer, gl::SamplerID *>
 }
 
 template <>
+inline gl::SamplerParameter GetParamVal<ParamType::TSamplerParameter, gl::SamplerParameter>(
+    const ParamValue &value)
+{
+    return value.SamplerParameterVal;
+}
+
+template <>
 inline gl::SemaphoreID GetParamVal<ParamType::TSemaphoreID, gl::SemaphoreID>(
     const ParamValue &value)
 {
@@ -1353,6 +1416,13 @@ inline gl::SemaphoreID *GetParamVal<ParamType::TSemaphoreIDPointer, gl::Semaphor
     const ParamValue &value)
 {
     return value.SemaphoreIDPointerVal;
+}
+
+template <>
+inline gl::ShaderParameter GetParamVal<ParamType::TShaderParameter, gl::ShaderParameter>(
+    const ParamValue &value)
+{
+    return value.ShaderParameterVal;
 }
 
 template <>
@@ -1387,6 +1457,13 @@ inline gl::ShadingModel GetParamVal<ParamType::TShadingModel, gl::ShadingModel>(
     const ParamValue &value)
 {
     return value.ShadingModelVal;
+}
+
+template <>
+inline gl::ShadingRate GetParamVal<ParamType::TShadingRate, gl::ShadingRate>(
+    const ParamValue &value)
+{
+    return value.ShadingRateVal;
 }
 
 template <>
@@ -1436,6 +1513,13 @@ inline gl::TextureID *GetParamVal<ParamType::TTextureIDPointer, gl::TextureID *>
 }
 
 template <>
+inline gl::TextureImageParameter
+GetParamVal<ParamType::TTextureImageParameter, gl::TextureImageParameter>(const ParamValue &value)
+{
+    return value.TextureImageParameterVal;
+}
+
+template <>
 inline gl::TextureTarget GetParamVal<ParamType::TTextureTarget, gl::TextureTarget>(
     const ParamValue &value)
 {
@@ -1482,6 +1566,13 @@ inline gl::UniformBlockIndex GetParamVal<ParamType::TUniformBlockIndex, gl::Unif
     const ParamValue &value)
 {
     return value.UniformBlockIndexVal;
+}
+
+template <>
+inline gl::UniformBlockParameter
+GetParamVal<ParamType::TUniformBlockParameter, gl::UniformBlockParameter>(const ParamValue &value)
+{
+    return value.UniformBlockParameterVal;
 }
 
 template <>
@@ -1923,6 +2014,14 @@ inline cl_image_format *GetParamVal<ParamType::Tcl_image_formatPointer, cl_image
 }
 
 template <>
+inline const cl_import_properties_arm *
+GetParamVal<ParamType::Tcl_import_properties_armConstPointer, const cl_import_properties_arm *>(
+    const ParamValue &value)
+{
+    return value.cl_import_properties_armConstPointerVal;
+}
+
+template <>
 inline cl_int GetParamVal<ParamType::Tcl_int, cl_int>(const ParamValue &value)
 {
     return value.cl_intVal;
@@ -2095,6 +2194,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TBufferIDConstPointer, T>(value);
         case ParamType::TBufferIDPointer:
             return GetParamVal<ParamType::TBufferIDPointer, T>(value);
+        case ParamType::TBufferParam:
+            return GetParamVal<ParamType::TBufferParam, T>(value);
         case ParamType::TBufferUsage:
             return GetParamVal<ParamType::TBufferUsage, T>(value);
         case ParamType::TClientVertexArrayType:
@@ -2103,6 +2204,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TClipDepthMode, T>(value);
         case ParamType::TClipOrigin:
             return GetParamVal<ParamType::TClipOrigin, T>(value);
+        case ParamType::TCombinerOp:
+            return GetParamVal<ParamType::TCombinerOp, T>(value);
         case ParamType::TCommandQueueInfo:
             return GetParamVal<ParamType::TCommandQueueInfo, T>(value);
         case ParamType::TCommandQueueProperties:
@@ -2337,6 +2440,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TObjectType, T>(value);
         case ParamType::TPipeInfo:
             return GetParamVal<ParamType::TPipeInfo, T>(value);
+        case ParamType::TPlaneParameter:
+            return GetParamVal<ParamType::TPlaneParameter, T>(value);
         case ParamType::TPlatformInfo:
             return GetParamVal<ParamType::TPlatformInfo, T>(value);
         case ParamType::TPointParameter:
@@ -2365,6 +2470,10 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TQueryIDConstPointer, T>(value);
         case ParamType::TQueryIDPointer:
             return GetParamVal<ParamType::TQueryIDPointer, T>(value);
+        case ParamType::TQueryObjectParameter:
+            return GetParamVal<ParamType::TQueryObjectParameter, T>(value);
+        case ParamType::TQueryParameter:
+            return GetParamVal<ParamType::TQueryParameter, T>(value);
         case ParamType::TQueryType:
             return GetParamVal<ParamType::TQueryType, T>(value);
         case ParamType::TRenderbufferID:
@@ -2383,12 +2492,16 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TSamplerIDPointer, T>(value);
         case ParamType::TSamplerInfo:
             return GetParamVal<ParamType::TSamplerInfo, T>(value);
+        case ParamType::TSamplerParameter:
+            return GetParamVal<ParamType::TSamplerParameter, T>(value);
         case ParamType::TSemaphoreID:
             return GetParamVal<ParamType::TSemaphoreID, T>(value);
         case ParamType::TSemaphoreIDConstPointer:
             return GetParamVal<ParamType::TSemaphoreIDConstPointer, T>(value);
         case ParamType::TSemaphoreIDPointer:
             return GetParamVal<ParamType::TSemaphoreIDPointer, T>(value);
+        case ParamType::TShaderParameter:
+            return GetParamVal<ParamType::TShaderParameter, T>(value);
         case ParamType::TShaderProgramID:
             return GetParamVal<ParamType::TShaderProgramID, T>(value);
         case ParamType::TShaderProgramIDConstPointer:
@@ -2399,6 +2512,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TShaderType, T>(value);
         case ParamType::TShadingModel:
             return GetParamVal<ParamType::TShadingModel, T>(value);
+        case ParamType::TShadingRate:
+            return GetParamVal<ParamType::TShadingRate, T>(value);
         case ParamType::TSurfaceID:
             return GetParamVal<ParamType::TSurfaceID, T>(value);
         case ParamType::TSyncID:
@@ -2413,6 +2528,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TTextureIDConstPointer, T>(value);
         case ParamType::TTextureIDPointer:
             return GetParamVal<ParamType::TTextureIDPointer, T>(value);
+        case ParamType::TTextureImageParameter:
+            return GetParamVal<ParamType::TTextureImageParameter, T>(value);
         case ParamType::TTextureTarget:
             return GetParamVal<ParamType::TTextureTarget, T>(value);
         case ParamType::TTextureType:
@@ -2427,6 +2544,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::TTransformFeedbackIDPointer, T>(value);
         case ParamType::TUniformBlockIndex:
             return GetParamVal<ParamType::TUniformBlockIndex, T>(value);
+        case ParamType::TUniformBlockParameter:
+            return GetParamVal<ParamType::TUniformBlockParameter, T>(value);
         case ParamType::TUniformLocation:
             return GetParamVal<ParamType::TUniformLocation, T>(value);
         case ParamType::TVertexArrayID:
@@ -2481,6 +2600,8 @@ T AccessParamValue(ParamType paramType, const ParamValue &value)
             return GetParamVal<ParamType::Tcl_image_formatConstPointer, T>(value);
         case ParamType::Tcl_image_formatPointer:
             return GetParamVal<ParamType::Tcl_image_formatPointer, T>(value);
+        case ParamType::Tcl_import_properties_armConstPointer:
+            return GetParamVal<ParamType::Tcl_import_properties_armConstPointer, T>(value);
         case ParamType::Tcl_int:
             return GetParamVal<ParamType::Tcl_int, T>(value);
         case ParamType::Tcl_intPointer:
@@ -2596,6 +2717,12 @@ inline void SetParamVal<ParamType::TBufferIDPointer>(gl::BufferID *valueIn, Para
 }
 
 template <>
+inline void SetParamVal<ParamType::TBufferParam>(gl::BufferParam valueIn, ParamValue *valueOut)
+{
+    valueOut->BufferParamVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::TBufferUsage>(gl::BufferUsage valueIn, ParamValue *valueOut)
 {
     valueOut->BufferUsageVal = valueIn;
@@ -2618,6 +2745,12 @@ template <>
 inline void SetParamVal<ParamType::TClipOrigin>(gl::ClipOrigin valueIn, ParamValue *valueOut)
 {
     valueOut->ClipOriginVal = valueIn;
+}
+
+template <>
+inline void SetParamVal<ParamType::TCombinerOp>(gl::CombinerOp valueIn, ParamValue *valueOut)
+{
+    valueOut->CombinerOpVal = valueIn;
 }
 
 template <>
@@ -3240,6 +3373,13 @@ inline void SetParamVal<ParamType::TObjectType>(egl::ObjectType valueIn, ParamVa
 }
 
 template <>
+inline void SetParamVal<ParamType::TPlaneParameter>(gl::PlaneParameter valueIn,
+                                                    ParamValue *valueOut)
+{
+    valueOut->PlaneParameterVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::TPointParameter>(gl::PointParameter valueIn,
                                                     ParamValue *valueOut)
 {
@@ -3308,6 +3448,20 @@ inline void SetParamVal<ParamType::TQueryIDPointer>(gl::QueryID *valueIn, ParamV
 }
 
 template <>
+inline void SetParamVal<ParamType::TQueryObjectParameter>(gl::QueryObjectParameter valueIn,
+                                                          ParamValue *valueOut)
+{
+    valueOut->QueryObjectParameterVal = valueIn;
+}
+
+template <>
+inline void SetParamVal<ParamType::TQueryParameter>(gl::QueryParameter valueIn,
+                                                    ParamValue *valueOut)
+{
+    valueOut->QueryParameterVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::TQueryType>(gl::QueryType valueIn, ParamValue *valueOut)
 {
     valueOut->QueryTypeVal = valueIn;
@@ -3354,6 +3508,13 @@ inline void SetParamVal<ParamType::TSamplerIDPointer>(gl::SamplerID *valueIn, Pa
 }
 
 template <>
+inline void SetParamVal<ParamType::TSamplerParameter>(gl::SamplerParameter valueIn,
+                                                      ParamValue *valueOut)
+{
+    valueOut->SamplerParameterVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::TSemaphoreID>(gl::SemaphoreID valueIn, ParamValue *valueOut)
 {
     valueOut->SemaphoreIDVal = valueIn;
@@ -3371,6 +3532,13 @@ inline void SetParamVal<ParamType::TSemaphoreIDPointer>(gl::SemaphoreID *valueIn
                                                         ParamValue *valueOut)
 {
     valueOut->SemaphoreIDPointerVal = valueIn;
+}
+
+template <>
+inline void SetParamVal<ParamType::TShaderParameter>(gl::ShaderParameter valueIn,
+                                                     ParamValue *valueOut)
+{
+    valueOut->ShaderParameterVal = valueIn;
 }
 
 template <>
@@ -3404,6 +3572,12 @@ template <>
 inline void SetParamVal<ParamType::TShadingModel>(gl::ShadingModel valueIn, ParamValue *valueOut)
 {
     valueOut->ShadingModelVal = valueIn;
+}
+
+template <>
+inline void SetParamVal<ParamType::TShadingRate>(gl::ShadingRate valueIn, ParamValue *valueOut)
+{
+    valueOut->ShadingRateVal = valueIn;
 }
 
 template <>
@@ -3452,6 +3626,13 @@ inline void SetParamVal<ParamType::TTextureIDPointer>(gl::TextureID *valueIn, Pa
 }
 
 template <>
+inline void SetParamVal<ParamType::TTextureImageParameter>(gl::TextureImageParameter valueIn,
+                                                           ParamValue *valueOut)
+{
+    valueOut->TextureImageParameterVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::TTextureTarget>(gl::TextureTarget valueIn, ParamValue *valueOut)
 {
     valueOut->TextureTargetVal = valueIn;
@@ -3496,6 +3677,13 @@ inline void SetParamVal<ParamType::TUniformBlockIndex>(gl::UniformBlockIndex val
                                                        ParamValue *valueOut)
 {
     valueOut->UniformBlockIndexVal = valueIn;
+}
+
+template <>
+inline void SetParamVal<ParamType::TUniformBlockParameter>(gl::UniformBlockParameter valueIn,
+                                                           ParamValue *valueOut)
+{
+    valueOut->UniformBlockParameterVal = valueIn;
 }
 
 template <>
@@ -3923,6 +4111,14 @@ inline void SetParamVal<ParamType::Tcl_image_formatPointer>(cl_image_format *val
 }
 
 template <>
+inline void SetParamVal<ParamType::Tcl_import_properties_armConstPointer>(
+    const cl_import_properties_arm *valueIn,
+    ParamValue *valueOut)
+{
+    valueOut->cl_import_properties_armConstPointerVal = valueIn;
+}
+
+template <>
 inline void SetParamVal<ParamType::Tcl_int>(cl_int valueIn, ParamValue *valueOut)
 {
     valueOut->cl_intVal = valueIn;
@@ -4102,6 +4298,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
         case ParamType::TBufferIDPointer:
             SetParamVal<ParamType::TBufferIDPointer>(valueIn, valueOut);
             break;
+        case ParamType::TBufferParam:
+            SetParamVal<ParamType::TBufferParam>(valueIn, valueOut);
+            break;
         case ParamType::TBufferUsage:
             SetParamVal<ParamType::TBufferUsage>(valueIn, valueOut);
             break;
@@ -4113,6 +4312,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
             break;
         case ParamType::TClipOrigin:
             SetParamVal<ParamType::TClipOrigin>(valueIn, valueOut);
+            break;
+        case ParamType::TCombinerOp:
+            SetParamVal<ParamType::TCombinerOp>(valueIn, valueOut);
             break;
         case ParamType::TCommandQueueInfo:
             SetParamVal<ParamType::TCommandQueueInfo>(valueIn, valueOut);
@@ -4465,6 +4667,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
         case ParamType::TPipeInfo:
             SetParamVal<ParamType::TPipeInfo>(valueIn, valueOut);
             break;
+        case ParamType::TPlaneParameter:
+            SetParamVal<ParamType::TPlaneParameter>(valueIn, valueOut);
+            break;
         case ParamType::TPlatformInfo:
             SetParamVal<ParamType::TPlatformInfo>(valueIn, valueOut);
             break;
@@ -4507,6 +4712,12 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
         case ParamType::TQueryIDPointer:
             SetParamVal<ParamType::TQueryIDPointer>(valueIn, valueOut);
             break;
+        case ParamType::TQueryObjectParameter:
+            SetParamVal<ParamType::TQueryObjectParameter>(valueIn, valueOut);
+            break;
+        case ParamType::TQueryParameter:
+            SetParamVal<ParamType::TQueryParameter>(valueIn, valueOut);
+            break;
         case ParamType::TQueryType:
             SetParamVal<ParamType::TQueryType>(valueIn, valueOut);
             break;
@@ -4534,6 +4745,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
         case ParamType::TSamplerInfo:
             SetParamVal<ParamType::TSamplerInfo>(valueIn, valueOut);
             break;
+        case ParamType::TSamplerParameter:
+            SetParamVal<ParamType::TSamplerParameter>(valueIn, valueOut);
+            break;
         case ParamType::TSemaphoreID:
             SetParamVal<ParamType::TSemaphoreID>(valueIn, valueOut);
             break;
@@ -4542,6 +4756,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
             break;
         case ParamType::TSemaphoreIDPointer:
             SetParamVal<ParamType::TSemaphoreIDPointer>(valueIn, valueOut);
+            break;
+        case ParamType::TShaderParameter:
+            SetParamVal<ParamType::TShaderParameter>(valueIn, valueOut);
             break;
         case ParamType::TShaderProgramID:
             SetParamVal<ParamType::TShaderProgramID>(valueIn, valueOut);
@@ -4557,6 +4774,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
             break;
         case ParamType::TShadingModel:
             SetParamVal<ParamType::TShadingModel>(valueIn, valueOut);
+            break;
+        case ParamType::TShadingRate:
+            SetParamVal<ParamType::TShadingRate>(valueIn, valueOut);
             break;
         case ParamType::TSurfaceID:
             SetParamVal<ParamType::TSurfaceID>(valueIn, valueOut);
@@ -4579,6 +4799,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
         case ParamType::TTextureIDPointer:
             SetParamVal<ParamType::TTextureIDPointer>(valueIn, valueOut);
             break;
+        case ParamType::TTextureImageParameter:
+            SetParamVal<ParamType::TTextureImageParameter>(valueIn, valueOut);
+            break;
         case ParamType::TTextureTarget:
             SetParamVal<ParamType::TTextureTarget>(valueIn, valueOut);
             break;
@@ -4599,6 +4822,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
             break;
         case ParamType::TUniformBlockIndex:
             SetParamVal<ParamType::TUniformBlockIndex>(valueIn, valueOut);
+            break;
+        case ParamType::TUniformBlockParameter:
+            SetParamVal<ParamType::TUniformBlockParameter>(valueIn, valueOut);
             break;
         case ParamType::TUniformLocation:
             SetParamVal<ParamType::TUniformLocation>(valueIn, valueOut);
@@ -4680,6 +4906,9 @@ void InitParamValue(ParamType paramType, T valueIn, ParamValue *valueOut)
             break;
         case ParamType::Tcl_image_formatPointer:
             SetParamVal<ParamType::Tcl_image_formatPointer>(valueIn, valueOut);
+            break;
+        case ParamType::Tcl_import_properties_armConstPointer:
+            SetParamVal<ParamType::Tcl_import_properties_armConstPointer>(valueIn, valueOut);
             break;
         case ParamType::Tcl_int:
             SetParamVal<ParamType::Tcl_int>(valueIn, valueOut);

@@ -8,6 +8,10 @@
 //    to Metal enums and so on.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/metal/mtl_utils.h"
 
 #include <Availability.h>
@@ -387,7 +391,7 @@ static angle::Result InitializeCompressedTextureContents(const gl::Context *cont
     else
     {
         mtl::BufferRef zeroBuffer;
-        ANGLE_TRY(mtl::Buffer::MakeBuffer(contextMtl, bytesPerImage, nullptr, &zeroBuffer));
+        ANGLE_TRY(mtl::Buffer::MakeBuffer(contextMtl, bytesPerImage, &zeroBuffer));
         mtl::BlitCommandEncoder *blitEncoder = contextMtl->getBlitCommandEncoder();
         for (NSUInteger d = 0; d < static_cast<NSUInteger>(extents.depth); ++d)
         {
@@ -681,7 +685,7 @@ angle::Result ReadTexturePerSliceBytes(const gl::Context *context,
                                        const gl::Rectangle &fromRegion,
                                        const MipmapNativeLevel &mipLevel,
                                        uint32_t sliceOrDepth,
-                                       uint8_t *dataOut)
+                                       angle::Span<uint8_t> dataOut)
 {
     ASSERT(texture && texture->valid());
     ContextMtl *contextMtl = mtl::GetImpl(context);
@@ -856,12 +860,7 @@ static MTLLanguageVersion GetUserSetOrHighestMSLVersion(const MTLLanguageVersion
                     case 3:
                         return MTLLanguageVersion2_3;
                     case 4:
-                        if (@available(macOS 12.0, *))
-                        {
-                            return MTLLanguageVersion2_4;
-                        }
-                        assert(0 && "MSL 2.4 requires macOS 12.");
-                        break;
+                        return MTLLanguageVersion2_4;
                     default:
                         assert(0 && "Unsupported MSL Minor Language Version.");
                 }
@@ -895,9 +894,37 @@ angle::ObjCPtr<id<MTLLibrary>> CreateShaderLibrary(
         // Mark all positions in VS with attribute invariant as non-optimizable
         options.get().preserveInvariance = usesInvariance;
 
-        if (disableFastMath)
+// mathMode and mathFloatingPointFunctions are only available with macOS 15+ and iPhoneOS 18+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000 || __IPHONE_OS_VERSION_MAX_ALLOWED >= 180000 || \
+    __TV_OS_VERSION_MAX_ALLOWED >= 180000 || TARGET_OS_VISION
+        if (@available(macOS 15.0, iOS 18.0, *))
         {
-            options.get().fastMathEnabled = false;
+            if (disableFastMath)
+            {
+                options.get().mathMode                   = MTLMathModeSafe;
+                options.get().mathFloatingPointFunctions = MTLMathFloatingPointFunctionsPrecise;
+            }
+            else
+            {
+                options.get().mathMode                   = MTLMathModeFast;
+                options.get().mathFloatingPointFunctions = MTLMathFloatingPointFunctionsFast;
+            }
+        }
+        else
+#endif
+        {
+            // Suppress `fastMathEnabled` deprecation warnings. The
+            // `fastMathEnabled` property must be used as a fallback in
+            // case the user is running an OS that is less than MacOS15.0
+            // or iOS18.0. There is no way to use compile-time guards to
+            // both avoid suppressing the warning and provide the API as
+            // a fallback.
+            // TODO (crbug.com/383994655): Remove deprecation supression
+            // once `fastMathEnabled` is no longer needed as a fallback.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            options.get().fastMathEnabled = !disableFastMath;
+#pragma clang diagnostic pop
         }
 
         options.get().languageVersion =
@@ -931,28 +958,9 @@ angle::ObjCPtr<id<MTLLibrary>> CreateShaderLibrary(
     return result;
 }
 
-angle::ObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromBinary(id<MTLDevice> metalDevice,
-                                                             const uint8_t *data,
-                                                             size_t length,
-                                                             angle::ObjCPtr<NSError> *errorOut)
-{
-    angle::ObjCPtr<id<MTLLibrary>> result;
-    ANGLE_MTL_OBJC_SCOPE
-    {
-        NSError *nsError = nil;
-        angle::ObjCPtr binaryData = angle::adoptObjCPtr(
-            dispatch_data_create(data, length, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT));
-        result    = angle::adoptObjCPtr([metalDevice newLibraryWithData:binaryData.get()
-                                                               error:&nsError]);
-        *errorOut = std::move(nsError);
-    }
-    return result;
-}
-
 angle::ObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromStaticBinary(
     id<MTLDevice> metalDevice,
-    const uint8_t *data,
-    size_t length,
+    angle::Span<const uint8_t> data,
     angle::ObjCPtr<NSError> *errorOut)
 {
     angle::ObjCPtr<id<MTLLibrary>> result;
@@ -960,9 +968,10 @@ angle::ObjCPtr<id<MTLLibrary>> CreateShaderLibraryFromStaticBinary(
     {
         NSError *nsError = nil;
         dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
-        angle::ObjCPtr binaryData = angle::adoptObjCPtr(dispatch_data_create(data, length, queue,
-                                                                             ^{
-                                                                             }));
+        angle::ObjCPtr binaryData =
+            angle::adoptObjCPtr(dispatch_data_create(data.data(), data.size_bytes(), queue,
+                                                     ^{
+                                                     }));
         result    = angle::adoptObjCPtr([metalDevice newLibraryWithData:binaryData.get()
                                                                error:&nsError]);
         *errorOut = std::move(nsError);
@@ -1173,13 +1182,6 @@ MTLWinding GetFrontfaceWinding(GLenum frontFaceMode, bool invert)
             UNREACHABLE();
             return MTLWindingClockwise;
     }
-}
-
-MTLPrimitiveTopologyClass GetPrimitiveTopologyClass(gl::PrimitiveMode mode)
-{
-    // NOTE(hqle): Support layered renderring in future.
-    // In non-layered rendering mode, unspecified is enough.
-    return MTLPrimitiveTopologyClassUnspecified;
 }
 
 MTLPrimitiveType GetPrimitiveType(gl::PrimitiveMode mode)

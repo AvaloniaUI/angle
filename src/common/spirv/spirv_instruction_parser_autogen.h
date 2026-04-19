@@ -1049,7 +1049,7 @@ void ParseGroupNonUniformBroadcast(const uint32_t *_instruction,
                                    IdResult *idResult2,
                                    IdScope *execution,
                                    IdRef *value,
-                                   IdRef *id);
+                                   IdRef *invocationId);
 void ParseGroupNonUniformBroadcastFirst(const uint32_t *_instruction,
                                         IdResultType *idResultType1,
                                         IdResult *idResult2,
@@ -1092,7 +1092,7 @@ void ParseGroupNonUniformShuffle(const uint32_t *_instruction,
                                  IdResult *idResult2,
                                  IdScope *execution,
                                  IdRef *value,
-                                 IdRef *id);
+                                 IdRef *invocationId);
 void ParseGroupNonUniformShuffleXor(const uint32_t *_instruction,
                                     IdResultType *idResultType1,
                                     IdResult *idResult2,
@@ -1249,6 +1249,9 @@ void ParsePtrNotEqual(const uint32_t *_instruction,
                       IdResult *idResult2,
                       IdRef *operand1,
                       IdRef *operand2);
+void ParseIsHelperInvocationEXT(const uint32_t *_instruction,
+                                IdResultType *idResultType1,
+                                IdResult *idResult2);
 
 }  // namespace spirv
 }  // namespace angle

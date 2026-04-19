@@ -4,6 +4,11 @@
 // found in the LICENSE file.
 //
 // CLContextVk.cpp: Implements the class methods for CLContextVk.
+//
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_libc_calls
+#endif
 
 #include "libANGLE/renderer/vulkan/CLContextVk.h"
 #include "common/PackedEnums.h"
@@ -12,12 +17,12 @@
 #include "libANGLE/renderer/vulkan/CLMemoryVk.h"
 #include "libANGLE/renderer/vulkan/CLProgramVk.h"
 #include "libANGLE/renderer/vulkan/CLSamplerVk.h"
-#include "libANGLE/renderer/vulkan/DisplayVk.h"
 #include "libANGLE/renderer/vulkan/vk_cache_utils.h"
 #include "libANGLE/renderer/vulkan/vk_renderer.h"
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
 #include "libANGLE/CLBuffer.h"
+#include "libANGLE/CLCommandQueue.h"
 #include "libANGLE/CLContext.h"
 #include "libANGLE/CLEvent.h"
 #include "libANGLE/CLImage.h"
@@ -126,77 +131,70 @@ angle::Result CLContextVk::createImage(const cl::Image &image,
     return angle::Result::Continue;
 }
 
-VkFormat CLContextVk::getVkFormatFromCL(cl_image_format format)
-{
-    angle::FormatID formatID;
-    switch (format.image_channel_order)
-    {
-        case CL_R:
-            formatID = angle::Format::CLRFormatToID(format.image_channel_data_type);
-            break;
-        case CL_RG:
-            formatID = angle::Format::CLRGFormatToID(format.image_channel_data_type);
-            break;
-        case CL_RGB:
-            formatID = angle::Format::CLRGBFormatToID(format.image_channel_data_type);
-            break;
-        case CL_RGBA:
-            formatID = angle::Format::CLRGBAFormatToID(format.image_channel_data_type);
-            break;
-        case CL_BGRA:
-            formatID = angle::Format::CLBGRAFormatToID(format.image_channel_data_type);
-            break;
-        case CL_sRGBA:
-            formatID = angle::Format::CLsRGBAFormatToID(format.image_channel_data_type);
-            break;
-        default:
-            return VK_FORMAT_UNDEFINED;
-    }
-    return getPlatform()->getRenderer()->getFormat(formatID).getActualRenderableImageVkFormat(
-        getPlatform()->getRenderer());
-}
-
 angle::Result CLContextVk::getSupportedImageFormats(cl::MemFlags flags,
                                                     cl::MemObjectType imageType,
                                                     cl_uint numEntries,
                                                     cl_image_format *imageFormats,
                                                     cl_uint *numImageFormats)
 {
-    VkPhysicalDevice physicalDevice = getPlatform()->getRenderer()->getPhysicalDevice();
-    std::vector<cl_image_format> supportedFormats;
-    std::vector<cl_image_format> minSupportedFormats;
-    if (flags.intersects((CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)))
+    // Required Vulkan features from OpenCL flags
+    VkFormatFeatureFlags requiredFeatures = 0;
+
+    if (flags.intersects(CL_MEM_READ_ONLY) != 0)
     {
-        minSupportedFormats.insert(minSupportedFormats.end(),
-                                   std::begin(kMinSupportedFormatsReadOrWrite),
-                                   std::end(kMinSupportedFormatsReadOrWrite));
+        requiredFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
     }
-    else
+
+    if (flags.intersects(CL_MEM_WRITE_ONLY | CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_READ_WRITE) != 0)
     {
-        minSupportedFormats.insert(minSupportedFormats.end(),
-                                   std::begin(kMinSupportedFormatsReadAndWrite),
-                                   std::end(kMinSupportedFormatsReadAndWrite));
+        requiredFeatures |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
     }
-    for (cl_image_format format : minSupportedFormats)
+
+    std::vector<cl_image_format> finalSupportedFormats;
+
+    for (const auto &clFmt : kSupportedFormats)
     {
-        VkFormatProperties formatProperties;
-        VkFormat vkFormat = getVkFormatFromCL(format);
-        ASSERT(vkFormat != VK_FORMAT_UNDEFINED);
-        vkGetPhysicalDeviceFormatProperties(physicalDevice, vkFormat, &formatProperties);
-        if (formatProperties.optimalTilingFeatures != 0)
+        if (cl::IsDepthOrder(clFmt.image_channel_order))
         {
-            supportedFormats.push_back(format);
+            continue;
+        }
+
+        const angle::FormatID id = cl::GetImageAngleFormat(clFmt);
+        if (id != angle::FormatID::NONE &&
+            mRenderer->hasImageFormatFeatureBits(id, requiredFeatures))
+        {
+            finalSupportedFormats.push_back(clFmt);
         }
     }
-    if (numImageFormats != nullptr)
+
+    if (cl::Is2DImage(imageType))
     {
-        *numImageFormats = static_cast<cl_uint>(supportedFormats.size());
+        CLExtensions::SupportedDepthOrderTypes supportedDepthOrderTypesUnion;
+        for (const cl::DevicePtr &device : mContext.getDevices())
+        {
+            // clGetSupportedImageFormats returns a union of image formats supported by all devices
+            // in the context
+            supportedDepthOrderTypesUnion |= device->getInfo().supportedDepthOrderTypes;
+        }
+        for (const cl::ImageChannelType imageChannelType : angle::AllEnums<cl::ImageChannelType>())
+        {
+            if (supportedDepthOrderTypesUnion.test(imageChannelType))
+            {
+                finalSupportedFormats.push_back({CL_DEPTH, cl::ToCLenum(imageChannelType)});
+            }
+        }
     }
-    if (imageFormats != nullptr)
+
+    if (numImageFormats)
     {
-        memcpy(imageFormats, supportedFormats.data(),
-               sizeof(cl_image_format) *
-                   std::min(static_cast<cl_uint>(supportedFormats.size()), numEntries));
+        *numImageFormats = static_cast<cl_uint>(finalSupportedFormats.size());
+    }
+
+    if (imageFormats && numEntries)
+    {
+        const cl_uint finalNumEntries =
+            std::min(numEntries, static_cast<cl_uint>(finalSupportedFormats.size()));
+        std::copy_n(finalSupportedFormats.begin(), finalNumEntries, imageFormats);
     }
 
     return angle::Result::Continue;
@@ -333,8 +331,8 @@ angle::Result CLContextVk::linkProgram(const cl::Program &program,
 
 angle::Result CLContextVk::createUserEvent(const cl::Event &event, CLEventImpl::Ptr *eventOut)
 {
-    *eventOut = CLEventImpl::Ptr(
-        new (std::nothrow) CLEventVk(event, cl::ExecutionStatus::Submitted, QueueSerial()));
+    *eventOut =
+        CLEventImpl::Ptr(new (std::nothrow) CLEventVk(event, cl::ExecutionStatus::Submitted));
     if (*eventOut == nullptr)
     {
         ANGLE_CL_RETURN_ERROR(CL_OUT_OF_HOST_MEMORY);
@@ -372,6 +370,42 @@ angle::Result CLContextVk::allocateDescriptorSet(
     std::lock_guard<angle::SimpleMutex> lock(mDescriptorSetMutex);
 
     return kernelVk->allocateDescriptorSet(index, layoutIndex, computePassCommands);
+}
+
+angle::Result CLContextVk::initializeDescriptorPools(CLKernelVk *kernelVk)
+{
+    std::lock_guard<angle::SimpleMutex> lock(mDescriptorSetMutex);
+
+    return kernelVk->initializeDescriptorPools();
+}
+
+void CLContextVk::addCommandBufferDiagnostics(const std::string &commandBufferDiagnostics)
+{
+    mCommandBufferDiagnostics.push_back(commandBufferDiagnostics);
+}
+
+void CLContextVk::dumpCommandStreamDiagnostics()
+{
+    std::ostream &out = std::cout;
+    if (mCommandBufferDiagnostics.empty())
+    {
+        return;
+    }
+
+    out << "digraph {\n" << "    node [shape=box fontname=\"Consolas\"]\n";
+
+    for (size_t index = 0; index < mCommandBufferDiagnostics.size(); ++index)
+    {
+        std::string_view payload = mCommandBufferDiagnostics[index];
+        out << "    cb" << index << " [label =\"" << payload << "\"];\n";
+    }
+    for (size_t index = 0; index < mCommandBufferDiagnostics.size() - 1; ++index)
+    {
+        out << "    cb" << index << " -> cb" << index + 1 << "\n";
+    }
+    mCommandBufferDiagnostics.clear();
+
+    out << "}\n";
 }
 
 }  // namespace rx

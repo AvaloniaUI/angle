@@ -18,6 +18,7 @@ namespace gl
 {
 class Context;
 class PrivateState;
+class PrivateStateCache;
 class ErrorSet;
 
 bool ValidateActiveTexture(const PrivateState &state,
@@ -210,7 +211,8 @@ bool ValidateDisable(const PrivateState &state,
                      ErrorSet *errors,
                      angle::EntryPoint entryPoint,
                      GLenum cap);
-bool ValidateDisableVertexAttribArray(const Context *context,
+bool ValidateDisableVertexAttribArray(const PrivateState &state,
+                                      ErrorSet *errors,
                                       angle::EntryPoint entryPoint,
                                       GLuint index);
 bool ValidateDrawArrays(const Context *context,
@@ -228,7 +230,8 @@ bool ValidateEnable(const PrivateState &state,
                     ErrorSet *errors,
                     angle::EntryPoint entryPoint,
                     GLenum cap);
-bool ValidateEnableVertexAttribArray(const Context *context,
+bool ValidateEnableVertexAttribArray(const PrivateState &state,
+                                     ErrorSet *errors,
                                      angle::EntryPoint entryPoint,
                                      GLuint index);
 bool ValidateFinish(const Context *context, angle::EntryPoint entryPoint);
@@ -304,7 +307,7 @@ bool ValidateGetBooleanv(const Context *context,
 bool ValidateGetBufferParameteriv(const Context *context,
                                   angle::EntryPoint entryPoint,
                                   BufferBinding targetPacked,
-                                  GLenum pname,
+                                  BufferParam pnamePacked,
                                   const GLint *params);
 bool ValidateGetError(const Context *context, angle::EntryPoint entryPoint);
 bool ValidateGetFloatv(const Context *context,
@@ -358,7 +361,7 @@ bool ValidateGetShaderSource(const Context *context,
 bool ValidateGetShaderiv(const Context *context,
                          angle::EntryPoint entryPoint,
                          ShaderProgramID shaderPacked,
-                         GLenum pname,
+                         ShaderParameter pnamePacked,
                          const GLint *params);
 bool ValidateGetString(const Context *context, angle::EntryPoint entryPoint, GLenum name);
 bool ValidateGetTexParameterfv(const Context *context,

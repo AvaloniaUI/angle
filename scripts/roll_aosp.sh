@@ -74,10 +74,19 @@ function generate_Android_bp_file() {
             # Use system lib(std)c++, since the Chromium library breaks std::string
             "use_custom_libcxx = false"
 
-            # TODO(b/279980674): re-enable end2end tests
-            "build_angle_end2end_tests_aosp = true"
-            "build_angle_trace_tests = false"
+            # Test the system EGL loader
             "angle_test_enable_system_egl = true"
+            "build_angle_end2end_tests_library = true"
+            "build_angle_trace_tests = false"
+
+            # This has no effect in Android.bp file, but is listed here to make the point.
+            # The actual flags are added in generate_android_bp.py file.
+            # Enable link time optimization.
+            #"use_thin_lto = true"
+            #"thin_lto_enable_optimizations = true"
+
+            # Uncomment when we are ready to test IR in Android
+            # "angle_ir = true"
         )
 
         if [[ "$1" == "--enableApiTrace" ]]; then
@@ -87,6 +96,16 @@ function generate_Android_bp_file() {
                 "angle_enable_trace_android_logcat = true"
             )
         fi
+
+        # This has no effect in Android.bp file, but is listed here to make the point.
+        # The actual flags are added in generate_android_bp.py file.
+        # Disable CFI.
+        #if [[ "$abi" == "arm64" ]]; then
+        #    gn_args=(
+        #        "${gn_args[@]}"
+        #        "arm_control_flow_integrity = \"none\""
+        #    )
+        #fi
 
         gn gen ${GN_OUTPUT_DIRECTORY} --args="${gn_args[*]}"
         gn desc ${GN_OUTPUT_DIRECTORY} --format=json "*" > ${GN_OUTPUT_DIRECTORY}/desc.$abi.json
@@ -161,6 +180,7 @@ copy_to_aosp_paths=(
     "build"
     "third_party/abseil-cpp"
     "third_party/glslang/src"
+    "third_party/re2/src"
     "third_party/rapidjson/src"
     "third_party/spirv-headers/src"
     "third_party/spirv-tools/src"
@@ -176,9 +196,9 @@ delete_after_codegen_paths=(
    "third_party/android_system_sdk"
    "third_party/android_toolchain"
    "third_party/bazel"
+   "third_party/clspv/gn"
    "third_party/colorama"
    "third_party/jdk/current"  # subdirs only to keep third_party/jdk/BUILD.gn (not pulled by gclient as it comes from ANGLE repo)
-   "third_party/jdk/extras"
    "third_party/llvm-build"
    "third_party/proguard"
    "third_party/r8"

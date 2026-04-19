@@ -10,10 +10,10 @@
 #include "libANGLE/HandleAllocator.h"
 
 #include <algorithm>
-#include <functional>
 #include <limits>
 
 #include "common/debug.h"
+#include "common/mathutil.h"
 
 namespace gl
 {
@@ -23,47 +23,37 @@ struct HandleAllocator::HandleRangeComparator
     bool operator()(const HandleRange &range, GLuint handle) const { return (range.end < handle); }
 };
 
-HandleAllocator::HandleAllocator()
-    : mBaseValue(1),
-      mNextValue(1),
-      mMaxValue(std::numeric_limits<GLuint>::max()),
-      mLoggingEnabled(false)
-{
-    mUnallocatedList.push_back(HandleRange(1, mMaxValue));
-}
-
 HandleAllocator::HandleAllocator(GLuint maximumHandleValue)
-    : mBaseValue(1), mNextValue(1), mMaxValue(maximumHandleValue), mLoggingEnabled(false)
+    : mMaxValue(maximumHandleValue), mLoggingEnabled(false)
 {
     mUnallocatedList.push_back(HandleRange(1, mMaxValue));
 }
 
 HandleAllocator::~HandleAllocator() {}
 
-void HandleAllocator::setBaseHandle(GLuint value)
+bool HandleAllocator::allocate(GLuint *outId)
 {
-    ASSERT(mBaseValue == mNextValue);
-    mBaseValue = value;
-    mNextValue = value;
-}
-
-GLuint HandleAllocator::allocate()
-{
-    ASSERT(!mUnallocatedList.empty() || !mReleasedList.empty());
-
-    // Allocate from released list, logarithmic time for pop_heap.
+    // Allocate from released list, constant time for FIFO pop_front.
     if (!mReleasedList.empty())
     {
-        std::pop_heap(mReleasedList.begin(), mReleasedList.end(), std::greater<GLuint>());
-        GLuint reusedHandle = mReleasedList.back();
-        mReleasedList.pop_back();
+        GLuint reusedHandle = mReleasedList.front();
+        mReleasedList.pop_front();
 
         if (mLoggingEnabled)
         {
             WARN() << "HandleAllocator::allocate reusing " << reusedHandle << std::endl;
         }
 
-        return reusedHandle;
+        if (outId)
+        {
+            *outId = reusedHandle;
+        }
+        return true;
+    }
+
+    if (mUnallocatedList.empty())
+    {
+        return false;
     }
 
     // Allocate from unallocated list, constant time.
@@ -78,7 +68,9 @@ GLuint HandleAllocator::allocate()
     }
     else
     {
-        listIt->begin++;
+        angle::CheckedNumeric<GLuint> checkedBegin = listIt->begin;
+        checkedBegin++;
+        listIt->begin = checkedBegin.ValueOrDie();
     }
 
     if (mLoggingEnabled)
@@ -86,7 +78,11 @@ GLuint HandleAllocator::allocate()
         WARN() << "HandleAllocator::allocate allocating " << freeListHandle << std::endl;
     }
 
-    return freeListHandle;
+    if (outId)
+    {
+        *outId = freeListHandle;
+    }
+    return true;
 }
 
 void HandleAllocator::release(GLuint handle)
@@ -96,25 +92,33 @@ void HandleAllocator::release(GLuint handle)
         WARN() << "HandleAllocator::release releasing " << handle << std::endl;
     }
 
+    if (handle >= mMaxValue)
+    {
+        // Handle is outside the range of allocated handles, do not reclaim it.
+        return;
+    }
+
     // Try consolidating the ranges first.
     for (HandleRange &handleRange : mUnallocatedList)
     {
-        if (handleRange.begin - 1 == handle)
+        angle::CheckedNumeric<GLuint> checkedBegin = handleRange.begin;
+        angle::CheckedNumeric<GLuint> checkedEnd   = handleRange.end;
+
+        if ((checkedBegin - 1).ValueOrDie() == handle)
         {
-            handleRange.begin--;
+            handleRange.begin = (checkedBegin - 1).ValueOrDie();
             return;
         }
 
-        if (handleRange.end == handle - 1)
+        if (checkedEnd.ValueOrDie() == (handle - 1))
         {
-            handleRange.end++;
+            handleRange.end = (checkedEnd + 1).ValueOrDie();
             return;
         }
     }
 
-    // Add to released list, logarithmic time for push_heap.
+    // Add to released list, constant time for FIFO push_back.
     mReleasedList.push_back(handle);
-    std::push_heap(mReleasedList.begin(), mReleasedList.end(), std::greater<GLuint>());
 }
 
 void HandleAllocator::reserve(GLuint handle)
@@ -124,6 +128,13 @@ void HandleAllocator::reserve(GLuint handle)
         WARN() << "HandleAllocator::reserve reserving " << handle << std::endl;
     }
 
+    if (handle >= mMaxValue)
+    {
+        // Handle being reserved is outside the range of allocated handles. Allow this and don't
+        // update the tracking.
+        return;
+    }
+
     // Clear from released list -- might be a slow operation.
     if (!mReleasedList.empty())
     {
@@ -131,7 +142,6 @@ void HandleAllocator::reserve(GLuint handle)
         if (releasedIt != mReleasedList.end())
         {
             mReleasedList.erase(releasedIt);
-            std::make_heap(mReleasedList.begin(), mReleasedList.end(), std::greater<GLuint>());
             return;
         }
     }
@@ -176,8 +186,6 @@ void HandleAllocator::reset()
     mUnallocatedList.clear();
     mUnallocatedList.push_back(HandleRange(1, mMaxValue));
     mReleasedList.clear();
-    mBaseValue = 1;
-    mNextValue = 1;
 }
 
 bool HandleAllocator::anyHandleAvailableForAllocation() const

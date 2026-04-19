@@ -243,11 +243,12 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                 const vk::Format *imageUniformFormat,
                                 const gl::SamplerBinding *samplerBinding,
                                 bool isImage,
-                                const vk::BufferView **viewOut);
+                                const vk::BufferView **viewOut,
+                                VkFormat *viewVkFormatOut);
 
     // A special view used for texture copies that shouldn't perform swizzle.
     const vk::ImageView &getCopyImageView() const;
-    angle::Result getStorageImageView(vk::ErrorContext *context,
+    angle::Result getStorageImageView(ContextVk *contextVk,
                                       const gl::ImageUnit &binding,
                                       const vk::ImageView **imageViewOut);
 
@@ -390,8 +391,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                         gl::TextureType imageType,
                         uint32_t imageLevelOffset,
                         uint32_t imageLayerOffset,
-                        bool selfOwned,
-                        UniqueSerial siblingSerial);
+                        bool selfOwned);
 
     vk::ImageViewHelper &getImageViews() { return mImageView; }
     const vk::ImageViewHelper &getImageViews() const { return mImageView; }
@@ -465,7 +465,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                                   gl::LevelIndex sourceLevelGL,
                                                   uint32_t layerCount,
                                                   const gl::Box &sourceArea,
-                                                  RenderPassClosureReason reason,
+                                                  QueueSubmitReason reason,
                                                   vk::BufferHelper *copyBuffer,
                                                   uint8_t **outDataPtr);
 
@@ -563,7 +563,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                               gl::LevelIndex level,
                                               GLuint layerIndex,
                                               GLuint layerCount);
-    angle::Result getLevelLayerImageView(vk::ErrorContext *context,
+    angle::Result getLevelLayerImageView(ContextVk *contextVk,
                                          gl::LevelIndex levelGL,
                                          size_t layer,
                                          const vk::ImageView **imageViewOut);
@@ -594,7 +594,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                               GLuint imageHeightPixels,
                               const vk::Format &vkFormat,
                               size_t offset,
-                              const vk::Format &bufferVkFormat) const;
+                              const vk::Format &bufferVkFormat,
+                              GLenum type) const;
 
     bool updateMustBeStaged(gl::LevelIndex textureLevelIndexGL, angle::FormatID dstFormatID) const;
     bool updateMustBeFlushed(gl::LevelIndex textureLevelIndexGL, angle::FormatID dstFormatID) const;
@@ -623,7 +624,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     void handleImmutableSamplerTransition(const vk::ImageHelper *previousImage,
                                           const vk::ImageHelper *nextImage);
 
-    vk::ImageAccess getRequiredImageAccess() const { return mRequiredImageAccess; }
+    vk::ImageFormatSupport getRequiredFormatSupport() const { return mRequiredFormatSupport; }
 
     void stageSelfAsSubresourceUpdates(ContextVk *contextVk);
 
@@ -646,11 +647,9 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                  const vk::Format &format);
 
     bool mOwnsImage;
-    // Generated from ImageVk if EGLImage target, or from throw-away generator if Surface target.
-    UniqueSerial mImageSiblingSerial;
 
-    bool mRequiresMutableStorage;
-    vk::ImageAccess mRequiredImageAccess;
+    vk::ImageFormatReinterpretability mFormatReinterpretability;
+    vk::ImageFormatSupport mRequiredFormatSupport;
     bool mImmutableSamplerDirty;
 
     // Only valid if this texture is an "EGLImage target" and the associated EGL Image was
@@ -683,6 +682,11 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     using MultiSampleImageViews =
         gl::RenderToTextureImageMap<gl::TexLevelArray<vk::ImageViewHelper>>;
     std::unique_ptr<MultiSampleImageViews> mMultisampledImageViews;
+
+    // Implicit RGB image to be used in YUV rendering when
+    // nullColorAttachmentWithExternalFormatResolve is not supported.
+    std::unique_ptr<vk::ImageHelper> mRgbDrawImageForYuvResolve;
+    std::unique_ptr<vk::ImageViewHelper> mRgbDrawImageViewsForYuvResolve;
 
     // Texture buffers create texel buffer views instead.  |BufferViewHelper| contains the views
     // corresponding to the attached buffer range.

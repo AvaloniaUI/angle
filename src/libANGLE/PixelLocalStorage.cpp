@@ -8,6 +8,10 @@
 // gl::PixelLocalStorage and gl::PixelLocalStoragePlane for
 // ANGLE_shader_pixel_local_storage.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/PixelLocalStorage.h"
 
 #include <numeric>
@@ -223,11 +227,15 @@ void PixelLocalStoragePlane::deinitialize(Context *context)
         mMemoryless     = false;
         mTextureID      = TextureID();
         mTextureObserver.reset();
+        mTextureImageIndex = ImageIndex();
+        mUsage             = 0;
     }
     ASSERT(isDeinitialized());
 }
 
-void PixelLocalStoragePlane::setMemoryless(Context *context, GLenum internalformat)
+void PixelLocalStoragePlane::setMemoryless(Context *context,
+                                           GLenum internalformat,
+                                           GLbitfield usage)
 {
     deinitialize(context);
     mInternalformat = internalformat;
@@ -235,9 +243,14 @@ void PixelLocalStoragePlane::setMemoryless(Context *context, GLenum internalform
     // The backing texture will get allocated lazily, once we know what dimensions it should be.
     ASSERT(mTextureID.value == 0);
     mTextureImageIndex = ImageIndex::MakeFromType(TextureType::_2D, 0, 0);
+    mUsage             = usage;
 }
 
-void PixelLocalStoragePlane::setTextureBacked(Context *context, Texture *tex, int level, int layer)
+void PixelLocalStoragePlane::setTextureBacked(Context *context,
+                                              Texture *tex,
+                                              int level,
+                                              int layer,
+                                              GLbitfield usage)
 {
     deinitialize(context);
     ASSERT(tex->getImmutableFormat());
@@ -246,6 +259,7 @@ void PixelLocalStoragePlane::setTextureBacked(Context *context, Texture *tex, in
     mTextureID      = tex->id();
     mTextureObserver.bind(tex);
     mTextureImageIndex = ImageIndex::MakeFromType(tex->getType(), level, layer);
+    mUsage             = usage;
 }
 
 void PixelLocalStoragePlane::onSubjectStateChange(angle::SubjectIndex index,
@@ -276,27 +290,6 @@ bool PixelLocalStoragePlane::isDeinitialized() const
         return true;
     }
     return false;
-}
-
-GLint PixelLocalStoragePlane::getIntegeri(GLenum target) const
-{
-    if (!isDeinitialized())
-    {
-        switch (target)
-        {
-            case GL_PIXEL_LOCAL_FORMAT_ANGLE:
-                return mInternalformat;
-            case GL_PIXEL_LOCAL_TEXTURE_NAME_ANGLE:
-                return isMemoryless() ? 0 : mTextureID.value;
-            case GL_PIXEL_LOCAL_TEXTURE_LEVEL_ANGLE:
-                return isMemoryless() ? 0 : mTextureImageIndex.getLevelIndex();
-            case GL_PIXEL_LOCAL_TEXTURE_LAYER_ANGLE:
-                return isMemoryless() ? 0 : mTextureImageIndex.getLayerIndex();
-        }
-    }
-    // Since GL_NONE == 0, PLS queries all return 0 when the plane is deinitialized.
-    static_assert(GL_NONE == 0, "Expecting GL_NONE to be zero.");
-    return 0;
 }
 
 bool PixelLocalStoragePlane::getTextureImageExtents(const Context *context, Extents *extents) const
@@ -340,11 +333,16 @@ void PixelLocalStoragePlane::ensureBackingTextureIfMemoryless(Context *context, 
         static_cast<GLsizei>(tex->getHeight(TextureTarget::_2D, 0)) != plsExtents.height)
     {
         // Call setMemoryless() to release our current data, if any.
-        setMemoryless(context, mInternalformat);
+        setMemoryless(context, mInternalformat, mUsage);
         ASSERT(mTextureID.value == 0);
 
         // Create a new texture that backs the memoryless plane.
-        mTextureID = context->createTexture();
+        if (!context->createTexture(&mTextureID))
+        {
+            context->handleExhaustionError(angle::EntryPoint::GLBeginPixelLocalStorageANGLE);
+            return;
+        }
+
         {
             ScopedBindTexture2D scopedBindTexture2D(context, mTextureID);
             context->bindTexture(TextureType::_2D, mTextureID);
@@ -434,12 +432,16 @@ void PixelLocalStoragePlane::issueClearCommand(ClearCommands *clearCommands,
             break;
         }
         case GL_RGBA8I:
+        case GL_R32I:
         {
             std::array<GLint, 4> clearValue = {0, 0, 0, 0};
             if (loadop == GL_LOAD_OP_CLEAR_ANGLE)
             {
                 clearValue = mClearValuei;
-                ClampArray(clearValue, -128, 127);
+                if (mInternalformat == GL_RGBA8I)
+                {
+                    ClampArray(clearValue, -128, 127);
+                }
             }
             clearCommands->cleariv(target, clearValue.data());
             break;
@@ -551,6 +553,9 @@ void PixelLocalStorage::deleteContextObjects(Context *context)
 
 void PixelLocalStorage::begin(Context *context, GLsizei n, const GLenum loadops[])
 {
+    ASSERT(mPLSOptions.type == ShPixelLocalStorageType::ImageLoadStore ||
+           mPLSOptions.type == ShPixelLocalStorageType::FramebufferFetch);
+
     // Find the pixel local storage rendering dimensions.
     Extents plsExtents;
     bool hasPLSExtents = false;
@@ -573,11 +578,7 @@ void PixelLocalStorage::begin(Context *context, GLsizei n, const GLenum loadops[
     for (GLsizei i = 0; i < n; ++i)
     {
         PixelLocalStoragePlane &plane = mPlanes[i];
-        if (mPLSOptions.type == ShPixelLocalStorageType::ImageLoadStore ||
-            mPLSOptions.type == ShPixelLocalStorageType::FramebufferFetch)
-        {
-            plane.ensureBackingTextureIfMemoryless(context, plsExtents);
-        }
+        plane.ensureBackingTextureIfMemoryless(context, plsExtents);
         plane.markActive(true);
     }
 
@@ -596,8 +597,10 @@ void PixelLocalStorage::end(Context *context, GLsizei n, const GLenum storeops[]
 
 void PixelLocalStorage::barrier(Context *context)
 {
-    ASSERT(!context->getExtensions().shaderPixelLocalStorageCoherentANGLE);
-    onBarrier(context);
+    if (mPLSOptions.supportsNoncoherent)
+    {
+        onBarrier(context);
+    }
 }
 
 void PixelLocalStorage::interrupt(Context *context)
@@ -679,7 +682,7 @@ class PixelLocalStorageImageLoadStore : public PixelLocalStorage
         }
 
         Framebuffer *framebuffer = state.getDrawFramebuffer();
-        if (mPLSOptions.renderPassNeedsAMDRasterOrderGroupsWorkaround)
+        if (context->getLimitations().noRasterOrderGroupWithoutAttachmentZero)
         {
             // anglebug.com/42266263 -- Metal [[raster_order_group()]] does not work for read_write
             // textures on AMD when the render pass doesn't have a color attachment on slot 0. To
@@ -826,7 +829,7 @@ class PixelLocalStorageImageLoadStore : public PixelLocalStorage
         }
         mSavedImageBindings.clear();
 
-        if (mPLSOptions.renderPassNeedsAMDRasterOrderGroupsWorkaround)
+        if (context->getLimitations().noRasterOrderGroupWithoutAttachmentZero)
         {
             if (!mHadColorAttachment0)
             {
@@ -957,12 +960,9 @@ class PixelLocalStorageFramebufferFetch : public PixelLocalStorage
             }
         }
 
-        if (!context->getExtensions().shaderPixelLocalStorageCoherentANGLE)
-        {
-            // Insert a barrier if we aren't coherent, since the textures may have been rendered to
-            // previously.
-            barrier(context);
-        }
+        // Insert a barrier in case the app performs any noncoherent accesses, since the textures
+        // may have been accessed as attachments immediately before this call.
+        barrier(context);
     }
 
     void onEnd(Context *context, GLsizei n, const GLenum storeops[]) override
@@ -1005,6 +1005,10 @@ class PixelLocalStorageFramebufferFetch : public PixelLocalStorage
         context->drawBuffers(static_cast<GLsizei>(mSavedDrawBuffers.size()),
                              mSavedDrawBuffers.data());
         mSavedDrawBuffers.clear();
+
+        // Insert a barrier in case the app performed any noncoherent accesses, since the textures
+        // may be accessed as attachments immediately after this call.
+        barrier(context);
     }
 
     void onBarrier(Context *context) override { context->framebufferFetchBarrier(); }

@@ -24,7 +24,17 @@ ANGLE_INLINE bool ValidateDrawArrays(const Context *context,
                                      GLint first,
                                      GLsizei count)
 {
-    return ValidateDrawArraysCommon(context, entryPoint, mode, first, count, 1);
+    if (!ValidateDrawArraysCommon(context, entryPoint, mode, first, count, 1))
+    {
+        return false;
+    }
+
+    if (!ValidateDrawArraysTransformFeedbackBufferSize(context, entryPoint, &count, nullptr, 1))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 ANGLE_INLINE bool ValidateUniform1f(const Context *context,
@@ -345,7 +355,7 @@ ANGLE_INLINE bool ValidateGenBuffers(const Context *context,
                                      GLint n,
                                      const BufferID *buffers)
 {
-    return ValidateGenOrDelete(context, entryPoint, n, buffers);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n, buffers);
 }
 
 ANGLE_INLINE bool ValidateGenFramebuffers(const Context *context,
@@ -353,7 +363,8 @@ ANGLE_INLINE bool ValidateGenFramebuffers(const Context *context,
                                           GLint n,
                                           const FramebufferID *framebuffers)
 {
-    return ValidateGenOrDelete(context, entryPoint, n, framebuffers);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               framebuffers);
 }
 
 ANGLE_INLINE bool ValidateGenRenderbuffers(const Context *context,
@@ -361,7 +372,8 @@ ANGLE_INLINE bool ValidateGenRenderbuffers(const Context *context,
                                            GLint n,
                                            const RenderbufferID *renderbuffers)
 {
-    return ValidateGenOrDelete(context, entryPoint, n, renderbuffers);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               renderbuffers);
 }
 
 ANGLE_INLINE bool ValidateGenTextures(const Context *context,
@@ -369,7 +381,7 @@ ANGLE_INLINE bool ValidateGenTextures(const Context *context,
                                       GLint n,
                                       const TextureID *textures)
 {
-    return ValidateGenOrDelete(context, entryPoint, n, textures);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n, textures);
 }
 
 ANGLE_INLINE bool ValidateGenerateMipmap(const Context *context,
@@ -381,11 +393,11 @@ ANGLE_INLINE bool ValidateGenerateMipmap(const Context *context,
 
 ANGLE_INLINE bool ValidateGetBufferParameteriv(const Context *context,
                                                angle::EntryPoint entryPoint,
-                                               BufferBinding target,
-                                               GLenum pname,
+                                               BufferBinding targetPacked,
+                                               BufferParam pnamePacked,
                                                const GLint *params)
 {
-    return ValidateGetBufferParameterBase(context, entryPoint, target, pname, false, nullptr);
+    return ValidateGetBufferParameterBase(context, entryPoint, targetPacked, pnamePacked, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetRenderbufferParameteriv(const Context *context,
@@ -399,53 +411,47 @@ ANGLE_INLINE bool ValidateGetRenderbufferParameteriv(const Context *context,
 
 ANGLE_INLINE bool ValidateGetShaderiv(const Context *context,
                                       angle::EntryPoint entryPoint,
-                                      ShaderProgramID shader,
-                                      GLenum pname,
+                                      ShaderProgramID shaderPacked,
+                                      ShaderParameter pnamePacked,
                                       const GLint *params)
 {
-    if (params == nullptr)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, err::kPLSParamsNULL);
-        return false;
-    }
-
-    return ValidateGetShaderivBase(context, entryPoint, shader, pname, nullptr);
+    return ValidateGetShaderivBase(context, entryPoint, shaderPacked, pnamePacked, params, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetTexParameterfv(const Context *context,
                                             angle::EntryPoint entryPoint,
-                                            TextureType target,
+                                            TextureType targetPacked,
                                             GLenum pname,
                                             const GLfloat *params)
 {
-    return ValidateGetTexParameterBase(context, entryPoint, target, pname, nullptr);
+    return ValidateGetTexParameterBase(context, entryPoint, targetPacked, pname, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetTexParameteriv(const Context *context,
                                             angle::EntryPoint entryPoint,
-                                            TextureType target,
+                                            TextureType targetPacked,
                                             GLenum pname,
                                             const GLint *params)
 {
-    return ValidateGetTexParameterBase(context, entryPoint, target, pname, nullptr);
+    return ValidateGetTexParameterBase(context, entryPoint, targetPacked, pname, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetUniformfv(const Context *context,
                                        angle::EntryPoint entryPoint,
-                                       ShaderProgramID program,
-                                       UniformLocation location,
+                                       ShaderProgramID programPacked,
+                                       UniformLocation locationPacked,
                                        const GLfloat *params)
 {
-    return ValidateGetUniformBase(context, entryPoint, program, location);
+    return ValidateGetUniformBase(context, entryPoint, programPacked, locationPacked);
 }
 
 ANGLE_INLINE bool ValidateGetUniformiv(const Context *context,
                                        angle::EntryPoint entryPoint,
-                                       ShaderProgramID program,
-                                       UniformLocation location,
+                                       ShaderProgramID programPacked,
+                                       UniformLocation locationPacked,
                                        const GLint *params)
 {
-    return ValidateGetUniformBase(context, entryPoint, program, location);
+    return ValidateGetUniformBase(context, entryPoint, programPacked, locationPacked);
 }
 
 ANGLE_INLINE bool ValidateGetVertexAttribfv(const Context *context,
@@ -454,7 +460,7 @@ ANGLE_INLINE bool ValidateGetVertexAttribfv(const Context *context,
                                             GLenum pname,
                                             const GLfloat *params)
 {
-    return ValidateGetVertexAttribBase(context, entryPoint, index, pname, nullptr, false);
+    return ValidateGetVertexAttribBase(context, entryPoint, index, pname, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetVertexAttribiv(const Context *context,
@@ -463,7 +469,7 @@ ANGLE_INLINE bool ValidateGetVertexAttribiv(const Context *context,
                                             GLenum pname,
                                             const GLint *params)
 {
-    return ValidateGetVertexAttribBase(context, entryPoint, index, pname, nullptr, false);
+    return ValidateGetVertexAttribBase(context, entryPoint, index, pname, nullptr);
 }
 
 ANGLE_INLINE bool ValidateGetVertexAttribPointerv(const Context *context,
@@ -472,7 +478,7 @@ ANGLE_INLINE bool ValidateGetVertexAttribPointerv(const Context *context,
                                                   GLenum pname,
                                                   void *const *pointer)
 {
-    return ValidateGetVertexAttribBase(context, entryPoint, index, pname, nullptr, true);
+    return ValidateGetVertexAttribPointerBase(context, entryPoint, index, pname, nullptr);
 }
 
 ANGLE_INLINE bool ValidateReadPixels(const Context *context,
@@ -491,38 +497,38 @@ ANGLE_INLINE bool ValidateReadPixels(const Context *context,
 
 ANGLE_INLINE bool ValidateTexParameterf(const Context *context,
                                         angle::EntryPoint entryPoint,
-                                        TextureType target,
+                                        TextureType targetPacked,
                                         GLenum pname,
                                         GLfloat param)
 {
-    return ValidateTexParameterBase(context, entryPoint, target, pname, -1, false, &param);
+    return ValidateTexParameterBase(context, entryPoint, targetPacked, pname, &param);
 }
 
 ANGLE_INLINE bool ValidateTexParameterfv(const Context *context,
                                          angle::EntryPoint entryPoint,
-                                         TextureType target,
+                                         TextureType targetPacked,
                                          GLenum pname,
                                          const GLfloat *params)
 {
-    return ValidateTexParameterBase(context, entryPoint, target, pname, -1, true, params);
+    return ValidateTexParameterBase(context, entryPoint, targetPacked, pname, params);
 }
 
 ANGLE_INLINE bool ValidateTexParameteri(const Context *context,
                                         angle::EntryPoint entryPoint,
-                                        TextureType target,
+                                        TextureType targetPacked,
                                         GLenum pname,
                                         GLint param)
 {
-    return ValidateTexParameterBase(context, entryPoint, target, pname, -1, false, &param);
+    return ValidateTexParameterBase(context, entryPoint, targetPacked, pname, &param);
 }
 
 ANGLE_INLINE bool ValidateTexParameteriv(const Context *context,
                                          angle::EntryPoint entryPoint,
-                                         TextureType target,
+                                         TextureType targetPacked,
                                          GLenum pname,
                                          const GLint *params)
 {
-    return ValidateTexParameterBase(context, entryPoint, target, pname, -1, true, params);
+    return ValidateTexParameterBase(context, entryPoint, targetPacked, pname, params);
 }
 
 ANGLE_INLINE bool ValidateBindBuffer(const Context *context,
@@ -532,7 +538,7 @@ ANGLE_INLINE bool ValidateBindBuffer(const Context *context,
 {
     if (!context->isValidBufferBinding(target))
     {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, err::kInvalidBufferTypes);
+        ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, err::kInvalidBufferTarget);
         return false;
     }
 
@@ -565,7 +571,9 @@ ANGLE_INLINE bool ValidateVertexAttribPointer(const Context *context,
                                               GLsizei stride,
                                               const void *ptr)
 {
-    if (!ValidateFloatVertexFormat(context, entryPoint, index, size, type))
+    if (!ValidateFloatVertexFormat(context->getPrivateState(), context->getPrivateStateCache(),
+                                   context->getMutableErrorSetForValidation(), entryPoint, index,
+                                   size, type))
     {
         return false;
     }

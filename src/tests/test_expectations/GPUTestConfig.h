@@ -58,6 +58,8 @@ struct GPUTestConfig
         kConditionVMWare,
         kConditionApple,
         kConditionQualcomm,
+        kConditionARM,
+        kConditionSamsung,
         kConditionRelease,
         kConditionDebug,
         kConditionD3D9,
@@ -73,6 +75,7 @@ struct GPUTestConfig
         kConditionPixel4OrXL,
         kConditionPixel6,
         kConditionPixel7,
+        kConditionPixel10,
         kConditionFlipN2,
         kConditionMaliG710,
         kConditionGalaxyA23,
@@ -95,6 +98,7 @@ struct GPUTestConfig
         kConditionASan,
         kConditionTSan,
         kConditionUBSan,
+        kConditionIR,
 
         kNumberOfConditions,
     };

@@ -9,6 +9,10 @@
 #ifndef LIBANGLE_ANGLETYPES_H_
 #define LIBANGLE_ANGLETYPES_H_
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <anglebase/sha1.h>
 #include "common/Color.h"
 #include "common/FixedVector.h"
@@ -16,7 +20,7 @@
 #include "common/PackedEnums.h"
 #include "common/bitset_utils.h"
 #include "common/hash_utils.h"
-#include "common/vector_utils.h"
+#include "common/span.h"
 #include "libANGLE/Constants.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/RefCountObject.h"
@@ -35,8 +39,9 @@ namespace angle
 template <typename T>
 struct Extents
 {
-    Extents() : width(0), height(0), depth(0) {}
-    Extents(T width_, T height_, T depth_) : width(width_), height(height_), depth(depth_) {}
+    constexpr Extents() : width(0), height(0), depth(0) {}
+    constexpr Extents(T width_, T height_, T depth_) : width(width_), height(height_), depth(depth_)
+    {}
 
     Extents(const Extents &other)            = default;
     Extents &operator=(const Extents &other) = default;
@@ -108,6 +113,7 @@ enum class Command
     Invalidate,
     ReadPixels,
     TexImage,
+    GetMultisample,
     Other,
 };
 
@@ -116,6 +122,8 @@ enum CommandBlitBuffer
     CommandBlitBufferColor   = 0x1,
     CommandBlitBufferDepth   = 0x2,
     CommandBlitBufferStencil = 0x4,
+
+    CommandBlitBufferDepthStencil = CommandBlitBufferDepth | CommandBlitBufferStencil,
 };
 
 enum class InitState
@@ -427,6 +435,10 @@ class SamplerState final
 
     bool setMaxLod(GLfloat maxLod);
 
+    GLfloat getLodBias() const { return mSampleLodBias; }
+
+    bool setLodBias(GLfloat lodBias);
+
     GLenum getCompareMode() const { return mCompareMode; }
 
     bool setCompareMode(GLenum compareMode);
@@ -463,6 +475,7 @@ class SamplerState final
 
     GLfloat mMinLod;
     GLfloat mMaxLod;
+    GLfloat mSampleLodBias;
 
     GLenum mCompareMode;
     GLenum mCompareFunc;
@@ -538,6 +551,40 @@ struct PixelPackState : PixelStoreStateBase
     bool reverseRowOrder = false;
 };
 
+struct SupportedSampleSet
+{
+  public:
+    // Set a sample count as being supported. Must be a power of 2 and no greater than
+    // IMPLEMENTATION_MAX_SAMPLES
+    void insert(GLuint sampleCount);
+
+    // Reset supported sample counts.
+    void clear();
+
+    // Get the number of supported samples that is at least as many as requested.  Returns 0 if
+    // there are no sample counts available
+    GLuint getNearestSamples(GLuint requestedSamples) const;
+
+    // Get the maximum number of samples supported
+    GLuint getMaxSamples() const;
+
+    // The number of supported sample counts
+    size_t size() const;
+
+    // Generate a list of supported sample counts
+    std::vector<GLint> sampleCounts() const;
+
+    SupportedSampleSet operator&(const SupportedSampleSet &other) const;
+
+  private:
+    // Bitfield of supported sample counts, each bit is represents the next power of 2. An extra bit
+    // is added for the '0' sample count.
+    static constexpr size_t kRequiredBitCount =
+        log2(static_cast<int>(IMPLEMENTATION_MAX_SAMPLES)) + 1;
+    using SupportedSamplesBitSet = angle::BitSet<kRequiredBitCount>;
+    SupportedSamplesBitSet mSupportedSamples;
+};
+
 // Used in VertexArray. For ease of tracking, we add vertex array element buffer to the end of
 // vertex array buffer bindings.
 constexpr uint32_t kElementArrayBufferIndex = MAX_VERTEX_ATTRIB_BINDINGS;
@@ -545,13 +592,31 @@ using VertexArrayBufferBindingMask          = angle::BitSet<kElementArrayBufferI
 
 // Used in Program and VertexArray.
 using AttributesMask = angle::BitSet<MAX_VERTEX_ATTRIBS>;
+using BufferBindingMask = angle::BitSet<MAX_VERTEX_ATTRIB_BINDINGS>;
 
 // Used in Program
-using ProgramUniformBlockMask = angle::BitSet<IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS>;
+static_assert(IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS >
+                  IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS,
+              "maxCombinedShaderStorageBlocks must be greater than maxCombinedUniformBlocks");
+using ProgramBufferBlockMask  = angle::BitSet<IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS>;
+using ProgramUniformBlockMask = ProgramBufferBlockMask;
+using ProgramStorageBlockMask = ProgramBufferBlockMask;
 template <typename T>
 using ProgramUniformBlockArray = std::array<T, IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS>;
 template <typename T>
 using UniformBufferBindingArray = std::array<T, IMPLEMENTATION_MAX_UNIFORM_BUFFER_BINDINGS>;
+
+// Fine grained dirty type for buffers updates.
+enum class BufferDirtyType
+{
+    Binding,
+    Offset,
+    Size,
+
+    InvalidEnum,
+    EnumCount = InvalidEnum,
+};
+using BufferDirtyTypeBitMask = angle::PackedEnumBitSet<BufferDirtyType>;
 
 // Used in Framebuffer / Program
 using DrawBufferMask = angle::BitSet8<IMPLEMENTATION_MAX_DRAW_BUFFERS>;
@@ -996,10 +1061,10 @@ ANGLE_INLINE DrawBufferMask GetComponentTypeMaskDiff(ComponentTypeMask mask1,
     return DrawBufferMask(static_cast<uint8_t>(diff | (diff >> gl::kMaxComponentTypeMaskIndex)));
 }
 
-bool ValidateComponentTypeMasks(unsigned long outputTypes,
-                                unsigned long inputTypes,
-                                unsigned long outputMask,
-                                unsigned long inputMask);
+bool ValidateComponentTypeMasks(uint64_t outputTypes,
+                                uint64_t inputTypes,
+                                uint64_t outputMask,
+                                uint64_t inputMask);
 
 // Helpers for performing WebGL 2.0 clear validation
 // Extracted component type has always one of these four values:
@@ -1116,8 +1181,6 @@ using ActiveTextureTypeArray = ActiveTextureArray<TextureType>;
 
 using ImageUnitMask = angle::BitSet<IMPLEMENTATION_MAX_IMAGE_UNITS>;
 
-using SupportedSampleSet = std::set<GLuint>;
-
 template <typename T>
 using TransformFeedbackBuffersArray =
     std::array<T, gl::IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS>;
@@ -1126,6 +1189,7 @@ using ClipDistanceEnableBits = angle::BitSet32<IMPLEMENTATION_MAX_CLIP_DISTANCES
 
 template <typename T>
 using QueryTypeMap = angle::PackedEnumMap<QueryType, T>;
+using QueryTypeBitSet = angle::PackedEnumBitSet<QueryType, uint8_t>;
 
 constexpr size_t kBarrierVectorDefaultSize = 16;
 
@@ -1289,10 +1353,19 @@ struct FeatureOverrides
     bool allDisabled = false;
 };
 
-// 160-bit SHA-1 hash key used for hasing a program.  BlobCache opts in using fixed keys for
-// simplicity and efficiency.
+#if defined ANGLE_USE_CRYPTO_HASHER
+// Key is a 160-bit SHA-1 hash. Using fixed keys for simplicity and efficiency.
 static constexpr size_t kBlobCacheKeyLength = angle::base::kSHA1Length;
-using BlobCacheKey                          = std::array<uint8_t, kBlobCacheKeyLength>;
+// The hasher used is a SHA-1 hasher.
+using BlobCacheHasher = angle::base::SecureHashAlgorithm;
+#else
+// Key is a 128-bit XXH3 hash. Using fixed keys for simplicity and efficiency.
+static constexpr size_t kBlobCacheKeyLength = angle::StreamingHasher::kHashSize;
+// The hasher used is an XXH3 streaming hasher.
+using BlobCacheHasher = angle::StreamingHasher;
+#endif  // ANGLE_USE_CRYPTO_HASHER
+
+using BlobCacheKey = std::array<uint8_t, kBlobCacheKeyLength>;
 class BlobCacheValue  // To be replaced with std::span when C++20 is required
 {
   public:
@@ -1333,7 +1406,7 @@ struct hash<angle::BlobCacheKey>
     // Simple routine to hash four ints.
     size_t operator()(const angle::BlobCacheKey &key) const
     {
-        return angle::ComputeGenericHash(key.data(), key.size());
+        return angle::ComputeGenericHash(key);
     }
 };
 }  // namespace std
@@ -1463,6 +1536,9 @@ class DestroyThenDelete
 
 template <typename ObjT, typename ContextT>
 using UniqueObjectPointer = std::unique_ptr<ObjT, DestroyThenDelete<ObjT, ContextT>>;
+
+using ShadingRateSet = PackedEnumBitSet<gl::ShadingRate, uint16_t>;
+using ShadingRateMap = PackedEnumMap<gl::ShadingRate, uint16_t>;
 
 }  // namespace angle
 

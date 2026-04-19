@@ -6,6 +6,10 @@
 
 // TextureParameterTest.cpp: Tests GLES1-specific usage of glTexParameter.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -75,9 +79,13 @@ TEST_P(TextureParameterTest, NegativeEnum)
     glGetTexParameteriv(GL_TEXTURE_2D, 0, nullptr);
     EXPECT_GL_ERROR(GL_INVALID_ENUM);
 
-    // Not enough buffer
+    // Non-vector command for a vector param
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
-    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
 
     // Not supported in GLES1
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);

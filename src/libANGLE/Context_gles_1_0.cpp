@@ -6,8 +6,13 @@
 
 // Context_gles_1_0.cpp: Implements the GLES1-specific parts of Context.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/Context.h"
 #include "libANGLE/Context.inl.h"
+#include "libANGLE/context_private_call.inl.h"
 
 #include "common/mathutil.h"
 #include "common/utilities.h"
@@ -36,36 +41,41 @@ void Context::colorPointer(GLint size, VertexAttribType type, GLsizei stride, co
 void Context::disableClientState(ClientVertexArrayType clientState)
 {
     getMutableGLES1State()->setClientStateEnabled(clientState, false);
-    disableVertexAttribArray(vertexArrayIndex(clientState));
+    ContextPrivateDisableVertexAttribArray(getMutablePrivateState(), getMutablePrivateStateCache(),
+                                           vertexArrayIndex(clientState));
     mStateCache.onGLES1ClientStateChange(this);
 }
 
 void Context::enableClientState(ClientVertexArrayType clientState)
 {
     getMutableGLES1State()->setClientStateEnabled(clientState, true);
-    enableVertexAttribArray(vertexArrayIndex(clientState));
+    ContextPrivateEnableVertexAttribArray(getMutablePrivateState(), getMutablePrivateStateCache(),
+                                          vertexArrayIndex(clientState));
     mStateCache.onGLES1ClientStateChange(this);
 }
 
-void Context::getFixedv(GLenum pname, GLfixed *params)
+void Context::getFixedv(GLenum pname, GLfixed *data)
 {
     GLenum nativeType;
-    unsigned int numParams = 0;
+    unsigned int numParams;
+    const bool paramFound = getQueryParameterInfo(pname, &nativeType, &numParams);
+    if (ANGLE_UNLIKELY(!paramFound))
+    {
+        return;  // Avoid crashing with invalid apps running with no validation.
+    }
 
-    getQueryParameterInfo(pname, &nativeType, &numParams);
-
-    std::vector<GLfloat> paramsf(numParams, 0);
-    CastStateValues(this, nativeType, pname, numParams, paramsf.data());
+    std::vector<GLfloat> dataf(numParams, 0);
+    CastStateValues(this, nativeType, pname, numParams, dataf.data());
 
     for (unsigned int i = 0; i < numParams; i++)
     {
-        params[i] = ConvertFloatToFixed(paramsf[i]);
+        data[i] = ConvertFloatToFixed(dataf[i]);
     }
 }
 
-void Context::getTexParameterxv(TextureType target, GLenum pname, GLfixed *params)
+void Context::getTexParameterxv(TextureType targetPacked, GLenum pname, GLfixed *params)
 {
-    const Texture *const texture = getTextureByType(target);
+    const Texture *const texture = getTextureByType(targetPacked);
     QueryTexParameterxv(this, texture, pname, params);
 }
 
@@ -81,15 +91,15 @@ void Context::texCoordPointer(GLint size, VertexAttribType type, GLsizei stride,
                         stride, ptr);
 }
 
-void Context::texParameterx(TextureType target, GLenum pname, GLfixed param)
+void Context::texParameterx(TextureType targetPacked, GLenum pname, GLfixed param)
 {
-    Texture *const texture = getTextureByType(target);
+    Texture *const texture = getTextureByType(targetPacked);
     SetTexParameterx(this, texture, pname, param);
 }
 
-void Context::texParameterxv(TextureType target, GLenum pname, const GLfixed *params)
+void Context::texParameterxv(TextureType targetPacked, GLenum pname, const GLfixed *params)
 {
-    Texture *const texture = getTextureByType(target);
+    Texture *const texture = getTextureByType(targetPacked);
     SetTexParameterxv(this, texture, pname, params);
 }
 

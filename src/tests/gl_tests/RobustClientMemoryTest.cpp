@@ -152,64 +152,6 @@ TEST_P(RobustClientMemoryTest, TexImage2D)
     }
 }
 
-// Test basic usage and validation of glCompressedTexImage2DRobustANGLE
-// and glCompressedTexSubImage2DRobustANGLE
-TEST_P(RobustClientMemoryTest, CompressedTexImage2D)
-{
-    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ANGLE_robust_client_memory"));
-
-    // Either ETC1 or BC1 should be supported everywhere
-    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_texture_compression_dxt1") &&
-                       !IsGLExtensionEnabled("GL_OES_compressed_ETC1_RGB8_texture"));
-
-    const GLenum format = IsGLExtensionEnabled("GL_EXT_texture_compression_dxt1")
-                              ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
-                              : GL_ETC1_RGB8_OES;
-
-    // Both ETC1 and BC1 use 4x4 blocks of 8 bytes
-    constexpr GLint smallDimension = 4;
-    std::array<GLubyte, smallDimension * smallDimension / 2> smallData;
-
-    constexpr GLint largeDimension = 1024;
-    constexpr GLint largeSize      = 1024 * 1024 / 2;
-
-    // Test the regular case
-    {
-        GLTexture tex;
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glCompressedTexImage2DRobustANGLE(GL_TEXTURE_2D, 0, format, smallDimension, smallDimension,
-                                          0, smallData.size(), smallData.size(), smallData.data());
-        EXPECT_GL_NO_ERROR();
-
-        glCompressedTexSubImage2DRobustANGLE(GL_TEXTURE_2D, 0, 0, 0, smallDimension, smallDimension,
-                                             format, smallData.size(), smallData.size(),
-                                             smallData.data());
-        EXPECT_GL_NO_ERROR();
-    }
-
-    // Test creating a large texture with small data size
-    {
-        GLTexture tex;
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glCompressedTexImage2DRobustANGLE(GL_TEXTURE_2D, 0, format, largeDimension, largeDimension,
-                                          0, largeSize, smallData.size(), smallData.data());
-        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
-    }
-
-    // Test updating a large texture with small data size
-    {
-        GLTexture tex;
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glCompressedTexImage2D(GL_TEXTURE_2D, 0, format, largeDimension, largeDimension, 0,
-                               largeSize, nullptr);
-        ASSERT_GL_NO_ERROR();
-
-        glCompressedTexImage2DRobustANGLE(GL_TEXTURE_2D, 0, format, largeDimension, largeDimension,
-                                          0, largeSize, smallData.size(), smallData.data());
-        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
-    }
-}
-
 // Test basic usage and validation of glReadPixelsRobustANGLE
 TEST_P(RobustClientMemoryTest, ReadPixels)
 {
@@ -259,8 +201,75 @@ TEST_P(RobustClientMemoryTest, ReadPixels)
     }
 }
 
+class RobustClientMemoryNoExtensionsTest : public RobustClientMemoryTest
+{
+  protected:
+    RobustClientMemoryNoExtensionsTest() : RobustClientMemoryTest() { setExtensionsEnabled(false); }
+};
+
+// Test with empty result
+TEST_P(RobustClientMemoryNoExtensionsTest, GetEmpty)
+{
+    GLint numFormats = 10;
+    glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &numFormats);
+    ASSERT_GL_NO_ERROR();
+    ASSERT_EQ(numFormats, 0);  // Must be zero on unextended OpenGL ES 2.0
+
+    GLsizei length = 1;
+    std::vector<GLint> resultBuf(2, 3);
+
+    // Test non-robust with empty response
+    {
+        glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, resultBuf.data());
+        EXPECT_GL_NO_ERROR();
+
+        // Must not touch the buffer
+        EXPECT_TRUE(std::all_of(resultBuf.begin(), resultBuf.end(),
+                                [](GLint value) { return value == 3; }));
+    }
+
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_robust_client_memory"));
+
+    // Test robust with empty response
+    {
+        glGetIntegervRobustANGLE(GL_COMPRESSED_TEXTURE_FORMATS, resultBuf.size(), &length,
+                                 resultBuf.data());
+        EXPECT_GL_NO_ERROR();
+
+        // Must update length
+        EXPECT_EQ(length, 0);
+
+        // Must not touch the buffer
+        EXPECT_TRUE(std::all_of(resultBuf.begin(), resultBuf.end(),
+                                [](GLint value) { return value == 3; }));
+    }
+
+    // Test robust with empty response and null length
+    {
+        glGetIntegervRobustANGLE(GL_COMPRESSED_TEXTURE_FORMATS, resultBuf.size(), nullptr,
+                                 resultBuf.data());
+        EXPECT_GL_NO_ERROR();
+
+        // Must not touch the buffer
+        EXPECT_TRUE(std::all_of(resultBuf.begin(), resultBuf.end(),
+                                [](GLint value) { return value == 3; }));
+    }
+
+    // Test robust with empty response, zero buffer size, and null length
+    {
+        glGetIntegervRobustANGLE(GL_COMPRESSED_TEXTURE_FORMATS, 0, nullptr, resultBuf.data());
+        EXPECT_GL_NO_ERROR();
+
+        // Must not touch the buffer
+        EXPECT_TRUE(std::all_of(resultBuf.begin(), resultBuf.end(),
+                                [](GLint value) { return value == 3; }));
+    }
+}
+
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these
 // tests should be run against.
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(RobustClientMemoryTest);
+
+ANGLE_INSTANTIATE_TEST_ES2(RobustClientMemoryNoExtensionsTest);
 
 }  // namespace angle

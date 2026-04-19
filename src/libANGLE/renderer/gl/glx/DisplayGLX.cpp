@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 // DisplayGLX.cpp: GLX implementation of egl::Display
 
 #include <algorithm>
@@ -52,9 +56,13 @@ static int IgnoreX11Errors(Display *, XErrorEvent *)
 class FunctionsGLGLX : public FunctionsGL
 {
   public:
-    FunctionsGLGLX(PFNGETPROCPROC getProc) : mGetProc(getProc) {}
+    FunctionsGLGLX(PFNGETPROCPROC getProc, const char *screenDriver)
+        : mGetProc(getProc), mScreenDriver(screenDriver != nullptr ? screenDriver : "")
+    {}
 
     ~FunctionsGLGLX() override {}
+
+    const char *getDriverName() const override { return mScreenDriver.c_str(); }
 
   private:
     void *loadProcAddress(const std::string &function) const override
@@ -63,6 +71,7 @@ class FunctionsGLGLX : public FunctionsGL
     }
 
     PFNGETPROCPROC mGetProc;
+    std::string mScreenDriver;
 };
 
 DisplayGLX::DisplayGLX(const egl::DisplayState &state)
@@ -290,7 +299,8 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
                           "Could not make the initialization pbuffer current.");
     }
 
-    std::unique_ptr<FunctionsGL> functionsGL(new FunctionsGLGLX(mGLX.getProc));
+    std::unique_ptr<FunctionsGL> functionsGL(
+        new FunctionsGLGLX(mGLX.getProc, mGLX.getScreenDriver()));
     functionsGL->initialize(eglAttributes);
     if (mHasNVRobustnessVideoMemoryPurge)
     {
@@ -300,9 +310,10 @@ egl::Error DisplayGLX::initialize(egl::Display *display)
             return egl::Error(EGL_NOT_INITIALIZED, "Context lost for unknown reason.");
         }
     }
-    // TODO(cwallez, angleproject:1303) Disable the OpenGL ES backend on Linux NVIDIA and Intel as
-    // it has problems on our automated testing. An OpenGL ES backend might not trigger this test if
-    // there is no Desktop OpenGL support, but that's not the case in our automated testing.
+    // TODO(cwallez, http://anglebug.com/42260314) Disable the OpenGL ES backend on Linux NVIDIA and
+    // Intel as it has problems on our automated testing. An OpenGL ES backend might not trigger
+    // this test if there is no Desktop OpenGL support, but that's not the case in our automated
+    // testing.
     VendorID vendor = GetVendorID(functionsGL.get());
     bool isOpenGLES =
         eglAttributes.get(EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE) ==

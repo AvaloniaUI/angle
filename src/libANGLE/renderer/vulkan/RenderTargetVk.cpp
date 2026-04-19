@@ -33,7 +33,6 @@ RenderTargetVk::RenderTargetVk(RenderTargetVk &&other)
       mImageViews(other.mImageViews),
       mResolveImage(other.mResolveImage),
       mResolveImageViews(other.mResolveImageViews),
-      mImageSiblingSerial(other.mImageSiblingSerial),
       mLevelIndexGL(other.mLevelIndexGL),
       mLayerIndex(other.mLayerIndex),
       mLayerCount(other.mLayerCount),
@@ -46,17 +45,22 @@ void RenderTargetVk::init(vk::ImageHelper *image,
                           vk::ImageViewHelper *imageViews,
                           vk::ImageHelper *resolveImage,
                           vk::ImageViewHelper *resolveImageViews,
-                          UniqueSerial imageSiblingSerial,
                           gl::LevelIndex levelIndexGL,
                           uint32_t layerIndex,
                           uint32_t layerCount,
                           RenderTargetTransience transience)
 {
+    // If this comes from SurfaceVk, the usage bit will be 0 (image init are deferred).
+    ASSERT(image->getUsage() == 0 ||
+           (image->getUsage() & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0);
+    // image and resolveImage can't both uses tile memory.
+    ASSERT(image == nullptr || resolveImage == nullptr || !image->useTileMemory() ||
+           !resolveImage->useTileMemory());
     mImage              = image;
     mImageViews         = imageViews;
     mResolveImage       = resolveImage;
     mResolveImageViews  = resolveImageViews;
-    mImageSiblingSerial = imageSiblingSerial;
     mLevelIndexGL       = levelIndexGL;
     mLayerIndex         = layerIndex;
     mLayerCount         = layerCount;
@@ -70,7 +74,6 @@ void RenderTargetVk::reset()
     mImageViews         = nullptr;
     mResolveImage       = nullptr;
     mResolveImageViews  = nullptr;
-    mImageSiblingSerial = {};
     mLevelIndexGL       = gl::LevelIndex(0);
     mLayerIndex         = 0;
     mLayerCount         = 0;
@@ -107,7 +110,7 @@ void RenderTargetVk::onColorDraw(ContextVk *contextVk,
     ASSERT(framebufferLayerCount <= mLayerCount);
 
     contextVk->onColorDraw(mLevelIndexGL, mLayerIndex, framebufferLayerCount, mImage, mResolveImage,
-                           mImageSiblingSerial, packedAttachmentIndex);
+                           packedAttachmentIndex);
 
     // Multisampled render to texture framebuffers cannot be layered.
     ASSERT(mResolveImage == nullptr || framebufferLayerCount == 1);
@@ -126,7 +129,7 @@ void RenderTargetVk::onColorResolve(ContextVk *contextVk,
     // render target.  Ask the context to add this image as the resolve attachment to the read
     // framebuffer's render pass, at the given color index.
     contextVk->onColorResolve(mLevelIndexGL, mLayerIndex, framebufferLayerCount, mImage,
-                              view.getHandle(), mImageSiblingSerial, readColorIndexGL);
+                              view.getHandle(), readColorIndexGL);
 }
 
 void RenderTargetVk::onDepthStencilDraw(ContextVk *contextVk, uint32_t framebufferLayerCount)
@@ -136,7 +139,7 @@ void RenderTargetVk::onDepthStencilDraw(ContextVk *contextVk, uint32_t framebuff
     ASSERT(framebufferLayerCount <= mLayerCount);
 
     contextVk->onDepthStencilDraw(mLevelIndexGL, mLayerIndex, framebufferLayerCount, mImage,
-                                  mResolveImage, mImageSiblingSerial);
+                                  mResolveImage);
 }
 
 void RenderTargetVk::onDepthStencilResolve(ContextVk *contextVk,
@@ -149,7 +152,7 @@ void RenderTargetVk::onDepthStencilResolve(ContextVk *contextVk,
     ASSERT(mResolveImage == nullptr);
 
     contextVk->onDepthStencilResolve(mLevelIndexGL, mLayerIndex, framebufferLayerCount, aspects,
-                                     mImage, view.getHandle(), mImageSiblingSerial);
+                                     mImage, view.getHandle());
 }
 
 vk::ImageHelper &RenderTargetVk::getImageForRenderPass()
@@ -176,7 +179,7 @@ const vk::ImageHelper &RenderTargetVk::getResolveImageForRenderPass() const
     return *mResolveImage;
 }
 
-angle::Result RenderTargetVk::getImageViewImpl(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getImageViewImpl(ContextVk *contextVk,
                                                const vk::ImageHelper &image,
                                                vk::ImageViewHelper *imageViews,
                                                const vk::ImageView **imageViewOut) const
@@ -185,68 +188,68 @@ angle::Result RenderTargetVk::getImageViewImpl(vk::ErrorContext *context,
     vk::LevelIndex levelVk = image.toVkLevel(getLevelIndexForImage(image));
     if (mLayerCount == 1)
     {
-        return imageViews->getLevelLayerDrawImageView(context, image, levelVk, mLayerIndex,
+        return imageViews->getLevelLayerDrawImageView(contextVk, image, levelVk, mLayerIndex,
                                                       imageViewOut);
     }
 
     // Layered render targets view the whole level or a handful of layers in case of multiview.
-    return imageViews->getLevelDrawImageView(context, image, levelVk, mLayerIndex, mLayerCount,
+    return imageViews->getLevelDrawImageView(contextVk, image, levelVk, mLayerIndex, mLayerCount,
                                              imageViewOut);
 }
 
-angle::Result RenderTargetVk::getImageView(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getImageView(ContextVk *contextVk,
                                            const vk::ImageView **imageViewOut) const
 {
     ASSERT(mImage);
-    return getImageViewImpl(context, *mImage, mImageViews, imageViewOut);
+    return getImageViewImpl(contextVk, *mImage, mImageViews, imageViewOut);
 }
 
-angle::Result RenderTargetVk::getImageViewWithColorspace(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getImageViewWithColorspace(ContextVk *contextVk,
                                                          gl::SrgbWriteControlMode mode,
                                                          const vk::ImageView **imageViewOut) const
 {
     ASSERT(mImage);
-    mImageViews->updateSrgbWiteControlMode(*mImage, mode);
-    return getImageViewImpl(context, *mImage, mImageViews, imageViewOut);
+    mImageViews->updateSrgbWriteControlMode(*mImage, mode);
+    return getImageViewImpl(contextVk, *mImage, mImageViews, imageViewOut);
 }
 
-angle::Result RenderTargetVk::getResolveImageView(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getResolveImageView(ContextVk *contextVk,
                                                   const vk::ImageView **imageViewOut) const
 {
     ASSERT(mResolveImage);
-    return getImageViewImpl(context, *mResolveImage, mResolveImageViews, imageViewOut);
+    return getImageViewImpl(contextVk, *mResolveImage, mResolveImageViews, imageViewOut);
 }
 
-angle::Result RenderTargetVk::getDepthOrStencilImageView(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getDepthOrStencilImageView(ContextVk *contextVk,
                                                          VkImageAspectFlagBits aspect,
                                                          const vk::ImageView **imageViewOut) const
 {
     ASSERT(mImage);
-    return getDepthOrStencilImageViewImpl(context, *mImage, mImageViews, aspect, imageViewOut);
+    return getDepthOrStencilImageViewImpl(contextVk, *mImage, mImageViews, aspect, imageViewOut);
 }
 
 angle::Result RenderTargetVk::getDepthOrStencilImageViewForCopy(
-    vk::ErrorContext *context,
+    ContextVk *contextVk,
     VkImageAspectFlagBits aspect,
     const vk::ImageView **imageViewOut) const
 {
     return isResolveImageOwnerOfData()
-               ? getResolveDepthOrStencilImageView(context, aspect, imageViewOut)
-               : getDepthOrStencilImageView(context, aspect, imageViewOut);
+               ? getResolveDepthOrStencilImageView(contextVk, aspect, imageViewOut)
+               : getDepthOrStencilImageView(contextVk, aspect, imageViewOut);
 }
 
 angle::Result RenderTargetVk::getResolveDepthOrStencilImageView(
-    vk::ErrorContext *context,
+    ContextVk *contextVk,
     VkImageAspectFlagBits aspect,
     const vk::ImageView **imageViewOut) const
 {
     ASSERT(mResolveImage);
-    return getDepthOrStencilImageViewImpl(context, *mResolveImage, mResolveImageViews, aspect,
+    return getDepthOrStencilImageViewImpl(contextVk, *mResolveImage, mResolveImageViews, aspect,
                                           imageViewOut);
 }
 
 angle::Result RenderTargetVk::getDepthOrStencilImageViewImpl(
-    vk::ErrorContext *context,
+    ContextVk *contextVk,
     const vk::ImageHelper &image,
     vk::ImageViewHelper *imageViews,
     VkImageAspectFlagBits aspect,
@@ -255,7 +258,7 @@ angle::Result RenderTargetVk::getDepthOrStencilImageViewImpl(
     // If the image has only one aspect, the usual view is sufficient.
     if (image.getAspectFlags() == aspect)
     {
-        return getImageViewImpl(context, image, imageViews, imageViewOut);
+        return getImageViewImpl(contextVk, image, imageViews, imageViewOut);
     }
 
     // Otherwise, for images with both the depth and stencil aspects, need to create special views
@@ -264,12 +267,12 @@ angle::Result RenderTargetVk::getDepthOrStencilImageViewImpl(
     vk::LevelIndex levelVk = image.toVkLevel(getLevelIndexForImage(image));
     if (mLayerCount == 1)
     {
-        return imageViews->getLevelLayerDepthOrStencilImageView(context, image, levelVk,
+        return imageViews->getLevelLayerDepthOrStencilImageView(contextVk, image, levelVk,
                                                                 mLayerIndex, aspect, imageViewOut);
     }
 
     // Layered render targets view the whole level or a handful of layers in case of multiview.
-    return imageViews->getLevelDepthOrStencilImageView(context, image, levelVk, mLayerIndex,
+    return imageViews->getLevelDepthOrStencilImageView(contextVk, image, levelVk, mLayerIndex,
                                                        mLayerCount, aspect, imageViewOut);
 }
 
@@ -286,7 +289,7 @@ vk::ImageHelper *RenderTargetVk::getOwnerOfData() const
     return isResolveImageOwnerOfData() ? mResolveImage : mImage;
 }
 
-angle::Result RenderTargetVk::getCopyImageView(vk::ErrorContext *context,
+angle::Result RenderTargetVk::getCopyImageView(ContextVk *contextVk,
                                                const vk::ImageView **imageViewOut) const
 {
     const vk::ImageViewHelper *imageViews =
@@ -303,8 +306,8 @@ angle::Result RenderTargetVk::getCopyImageView(vk::ErrorContext *context,
     // Otherwise, this must come from the surface, in which case the image is 2D, so the image view
     // used to draw is just as good for fetching.  If resolve attachment is present, fetching is
     // done from that.
-    return isResolveImageOwnerOfData() ? getResolveImageView(context, imageViewOut)
-                                       : getImageView(context, imageViewOut);
+    return isResolveImageOwnerOfData() ? getResolveImageView(contextVk, imageViewOut)
+                                       : getImageView(contextVk, imageViewOut);
 }
 
 angle::FormatID RenderTargetVk::getImageActualFormatID() const
@@ -357,7 +360,6 @@ void RenderTargetVk::updateSwapchainImage(vk::ImageHelper *image,
                                           vk::ImageViewHelper *resolveImageViews)
 {
     ASSERT(image && image->valid() && imageViews);
-    ASSERT(!mImageSiblingSerial.valid());
     ASSERT(mLevelIndexGL == gl::LevelIndex(0));
     ASSERT(mLayerIndex == 0);
     mImage             = image;

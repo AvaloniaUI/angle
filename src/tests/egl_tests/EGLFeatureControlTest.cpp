@@ -6,6 +6,10 @@
 // Tests the eglQueryStringiANGLE and eglQueryDisplayAttribANGLE functions exposed by the
 // extension EGL_ANGLE_feature_control.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <gtest/gtest.h>
 #include <optional>
 
@@ -38,7 +42,7 @@ class EGLFeatureControlTest : public ANGLETest<>
             return false;
 
         EGLAttrib dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(), EGL_NONE};
-        mDisplay              = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+        mDisplay              = eglGetPlatformDisplay(GetEglPlatform(),
                                                       reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
         EXPECT_NE(mDisplay, EGL_NO_DISPLAY);
 
@@ -178,7 +182,7 @@ void EGLFeatureControlTest::testOverrideFeatures(FeatureNameModifier modifyName)
                              EGL_FEATURE_OVERRIDES_DISABLED_ANGLE,
                              reinterpret_cast<EGLAttrib>(disabled.data()),
                              EGL_NONE};
-    mDisplay              = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+    mDisplay              = eglGetPlatformDisplay(GetEglPlatform(),
                                                   reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
     ASSERT_EGL_SUCCESS();
     ASSERT_NE(mDisplay, EGL_NO_DISPLAY);
@@ -222,7 +226,7 @@ TEST_P(EGLFeatureControlTest, OverrideFeaturesWildcard)
         // Note that we don't use the broader 'prefer_*' here because
         // prefer_monolithic_pipelines_over_libraries may affect other feature
         // flags.
-        std::vector<const char *> featuresToOverride = {"prefer_d*", nullptr};
+        std::vector<const char *> featuresToOverride = {"allow_host_image*", nullptr};
 
         std::vector<std::string> featureNameStorage;
         std::vector<bool> shouldBe;
@@ -236,7 +240,7 @@ TEST_P(EGLFeatureControlTest, OverrideFeaturesWildcard)
             std::transform(featureName.begin(), featureName.end(), featureName.begin(),
                            [](unsigned char c) { return std::tolower(c); });
 
-            const bool featureMatch = strncmp(featureName.c_str(), "preferd", 7) == 0;
+            const bool featureMatch = strncmp(featureName.c_str(), "allowhostimage", 14) == 0;
 
             std::optional<bool> overrideState;
             if (featureMatch)
@@ -258,7 +262,7 @@ TEST_P(EGLFeatureControlTest, OverrideFeaturesWildcard)
                                  testEnableOverride ? EGL_FEATURE_OVERRIDES_ENABLED_ANGLE
                                                     : EGL_FEATURE_OVERRIDES_DISABLED_ANGLE,
                                  reinterpret_cast<EGLAttrib>(featuresToOverride.data()), EGL_NONE};
-        mDisplay              = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+        mDisplay              = eglGetPlatformDisplay(GetEglPlatform(),
                                                       reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
         ASSERT_EGL_SUCCESS();
         ASSERT_NE(mDisplay, EGL_NO_DISPLAY);
@@ -296,10 +300,26 @@ TEST_P(EGLFeatureControlTest, OverrideFeaturesDependent)
         GetFeatureName(Feature::SupportsImage2dViewOf3d),
 
         // Features that must become disabled as a result of the above
+        // depends on SupportsRenderpass2
         GetFeatureName(Feature::SupportsDepthStencilResolve),
-        GetFeatureName(Feature::SupportsDepthStencilIndependentResolveNone),
-        GetFeatureName(Feature::SupportsSampler2dViewOf3d),
+        // depends on SupportsRenderpass2
+        GetFeatureName(Feature::SupportsMultisampledRenderToSingleSampled),
+        // depends on SupportsRenderpass2
         GetFeatureName(Feature::SupportsFragmentShadingRate),
+        // depends on SupportsImage2dViewOf3d
+        GetFeatureName(Feature::SupportsSampler2dViewOf3d),
+
+        // Features that must become disabled as a result of the above
+        // depends on supportsDepthStencilResolve
+        GetFeatureName(Feature::SupportsDepthStencilIndependentResolveNone),
+        // depends on SupportsMultisampledRenderToSingleSampled
+        GetFeatureName(Feature::PreferMSRTSSFlagByDefault),
+        // depends on SupportsMultisampledRenderToSingleSampled
+        GetFeatureName(Feature::SupportsMultiviewMultisampleRenderToTexture),
+        // depends on SupportsFragmentShadingRate
+        GetFeatureName(Feature::SupportFragmentShadingRateExtExtensions),
+        // depends on SupportsFragmentShadingRate
+        GetFeatureName(Feature::SupportsFoveatedRendering),
     };
 
     // Features that could be different on some vendors
@@ -348,7 +368,7 @@ TEST_P(EGLFeatureControlTest, OverrideFeaturesDependent)
     EGLAttrib dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(),
                              EGL_FEATURE_OVERRIDES_DISABLED_ANGLE,
                              reinterpret_cast<EGLAttrib>(featuresDisabled.data()), EGL_NONE};
-    mDisplay              = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+    mDisplay              = eglGetPlatformDisplay(GetEglPlatform(),
                                                   reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
     ASSERT_EGL_SUCCESS();
     ASSERT_NE(mDisplay, EGL_NO_DISPLAY);

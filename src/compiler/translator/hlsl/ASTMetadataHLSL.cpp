@@ -47,8 +47,6 @@ class PullGradient : public TIntermTraverser
         mGradientBuiltinFunctions.insert(ImmutableString("textureProj"));
         mGradientBuiltinFunctions.insert(ImmutableString("textureOffset"));
         mGradientBuiltinFunctions.insert(ImmutableString("textureProjOffset"));
-
-        // ESSL 310 doesn't add builtin gradient functions
     }
 
     void traverse(TIntermFunctionDefinition *node)
@@ -114,8 +112,12 @@ class PullGradient : public TIntermTraverser
             }
             else if (BuiltInGroup::IsBuiltIn(node->getOp()) && !BuiltInGroup::IsMath(node->getOp()))
             {
+                // Texture sample functions that operate on shadow samplers bottom out in the HLSL
+                // SampleCmp function which does not have an LOD parameter. These functions need
+                // gradients.
                 if (mGradientBuiltinFunctions.find(node->getFunction()->name()) !=
-                    mGradientBuiltinFunctions.end())
+                        mGradientBuiltinFunctions.end() ||
+                    isShadowSamplerTextureCall(node))
                 {
                     onGradient();
                 }
@@ -126,6 +128,23 @@ class PullGradient : public TIntermTraverser
     }
 
   private:
+    bool isShadowSamplerTextureCall(TIntermAggregate *node) const
+    {
+        if (!node->getFunction())
+        {
+            return false;
+        }
+
+        if (node->getFunction()->name() != "textureLod")
+        {
+            return false;
+        }
+
+        TIntermSequence *arguments = node->getSequence();
+        TBasicType samplerType     = (*arguments)[0]->getAsTyped()->getType().getBasicType();
+        return IsShadowSampler(samplerType);
+    }
+
     MetadataList *mMetadataList;
     ASTMetadataHLSL *mMetadata;
     size_t mIndex;
@@ -217,7 +236,18 @@ class PullComputeDiscontinuousAndGradientLoops : public TIntermTraverser
 
     bool visitBranch(Visit visit, TIntermBranch *node) override
     {
-        if (visit == PreVisit)
+        // A branch directly in the body of a loop does not turn it into a discontinuous loop as all
+        // lanes would take that branch.  For example a loop like the following is not
+        // discontinuous:
+        //
+        //     for (int i = 0; i < 10; ++i)
+        //     {
+        //         ...
+        //         continue;
+        //     }
+        const bool isDirectlyInLoopBody = getParentNode()->getAsBlock() != nullptr &&
+                                          getAncestorNode(1)->getAsLoopNode() != nullptr;
+        if (visit == PreVisit && !isDirectlyInLoopBody)
         {
             switch (node->getFlowOp())
             {

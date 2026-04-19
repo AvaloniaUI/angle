@@ -33,7 +33,8 @@ class CLDeviceVk : public CLDeviceImpl
     angle::Result getInfoSizeT(cl::DeviceInfo name, size_t *value) const override;
     angle::Result getInfoStringLength(cl::DeviceInfo name, size_t *value) const override;
     angle::Result getInfoString(cl::DeviceInfo name, size_t size, char *value) const override;
-
+    bool supportsExternalMemoryFd() const;
+    bool supportsExternalMemoryDmaBuf() const;
     angle::Result createSubDevices(const cl_device_partition_property *properties,
                                    cl_uint numDevices,
                                    CreateFuncs &subDevices,
@@ -44,6 +45,13 @@ class CLDeviceVk : public CLDeviceImpl
 
     spv_target_env getSpirvVersion() const { return mSpirvVersion; }
 
+  public:
+    // WGS creation strategies when user leaves this up to the driver
+    static cl::WorkgroupSize CalculateSimplePow2WGS(const cl::NDRange &ndrange,
+                                                    const uint32_t maxSize);
+    static cl::WorkgroupSize CalculateUniformFitWGS(const cl::NDRange &ndrange,
+                                                    const uint32_t maxSize);
+
   private:
     vk::Renderer *mRenderer;
     spv_target_env mSpirvVersion;
@@ -51,6 +59,13 @@ class CLDeviceVk : public CLDeviceImpl
     angle::HashMap<cl::DeviceInfo, cl_ulong> mInfoULong;
     angle::HashMap<cl::DeviceInfo, size_t> mInfoSizeT;
     angle::HashMap<cl::DeviceInfo, std::string> mInfoString;
+    cl_device_integer_dot_product_capabilities_khr getIntegerDotProductCapabilities() const;
+    cl_device_integer_dot_product_acceleration_properties_khr
+    getIntegerDotProductAccelerationProperties8Bit() const;
+    cl_device_integer_dot_product_acceleration_properties_khr
+    getIntegerDotProductAccelerationProperties4x8BitPacked() const;
+    bool populateSupportedExternalMemoryHandleTypes(Info &info) const;
+    bool setupAndReportDepthImageSupport(Info &info) const;
 };
 
 }  // namespace rx

@@ -7,6 +7,10 @@
 //   Performance test for index buffer management.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "ANGLEPerfTest.h"
 
 #include <gmock/gmock.h>
@@ -62,7 +66,7 @@ class MockBufferFactoryD3D : public rx::BufferFactoryD3D
                                      const gl::VertexBinding &,
                                      size_t,
                                      GLsizei,
-                                     GLuint,
+                                     uint64_t,
                                      unsigned int *));
 
     // Dependency injection

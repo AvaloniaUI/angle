@@ -43,6 +43,7 @@ bool IsValidPlatformTypeForPlatformDisplayConnection(EGLAttrib platformType)
     switch (platformType)
     {
         case EGL_PLATFORM_SURFACELESS_MESA:
+        case EGL_PLATFORM_GBM_KHR:
             return true;
         default:
             break;
@@ -113,7 +114,9 @@ struct FunctionsEGL::EGLDispatchTable
 
           queryDeviceAttribEXTPtr(nullptr),
           queryDeviceStringEXTPtr(nullptr),
-          queryDisplayAttribEXTPtr(nullptr)
+          queryDisplayAttribEXTPtr(nullptr),
+
+          getDisplayDriverNamePtr(nullptr)
     {}
 
     // 1.0
@@ -185,6 +188,9 @@ struct FunctionsEGL::EGLDispatchTable
     PFNEGLQUERYDEVICEATTRIBEXTPROC queryDeviceAttribEXTPtr;
     PFNEGLQUERYDEVICESTRINGEXTPROC queryDeviceStringEXTPtr;
     PFNEGLQUERYDISPLAYATTRIBEXTPROC queryDisplayAttribEXTPtr;
+
+    // EGL_MESA_query_driver
+    PFNEGLGETDISPLAYDRIVERNAMEPROC getDisplayDriverNamePtr;
 };
 
 FunctionsEGL::FunctionsEGL()
@@ -246,7 +252,10 @@ egl::Error FunctionsEGL::initialize(EGLAttrib platformType, EGLNativeDisplayType
     queryExtensions();
 
 #if defined(ANGLE_HAS_LIBDRM)
-    mEGLDisplay = getPreferredDisplay(&majorVersion, &minorVersion);
+    if (platformType != EGL_PLATFORM_GBM_KHR || !nativeDisplay)
+    {
+        mEGLDisplay = getPreferredDisplay(&majorVersion, &minorVersion);
+    }
 #endif  // defined(ANGLE_HAS_LIBDRM)
 
     if (mEGLDisplay == EGL_NO_DISPLAY)
@@ -375,6 +384,11 @@ egl::Error FunctionsEGL::initialize(EGLAttrib platformType, EGLNativeDisplayType
         mExtensions.push_back("EGL_EXT_device_query");
     }
 
+    if (hasExtension("EGL_MESA_query_driver"))
+    {
+        ANGLE_GET_PROC_OR_ERROR(&mFnPtrs->getDisplayDriverNamePtr, eglGetDisplayDriverName);
+    }
+
 #undef ANGLE_GET_PROC_OR_ERROR
 
     return egl::NoError();
@@ -419,6 +433,12 @@ EGLDisplay FunctionsEGL::getPlatformDisplay(EGLAttrib platformType,
         case EGL_PLATFORM_SURFACELESS_MESA:
             if (!hasExtension("EGL_MESA_platform_surfaceless"))
                 return EGL_NO_DISPLAY;
+            break;
+        case EGL_PLATFORM_GBM_KHR:
+            if (!hasExtension("EGL_KHR_platform_gbm") && !hasExtension("EGL_MESA_platform_gbm"))
+            {
+                return EGL_NO_DISPLAY;
+            }
             break;
         default:
             UNREACHABLE();
@@ -592,9 +612,13 @@ EGLDisplay FunctionsEGL::getPreferredDisplay(int *major, int *minor)
 class FunctionsGLEGL : public FunctionsGL
 {
   public:
-    FunctionsGLEGL(const FunctionsEGL &egl) : mEGL(egl) {}
+    FunctionsGLEGL(const FunctionsEGL &egl, const char *displayDriverName)
+        : mEGL(egl), mDisplayDriverName(displayDriverName != nullptr ? displayDriverName : "")
+    {}
 
     ~FunctionsGLEGL() override {}
+
+    const char *getDriverName() const override { return mDisplayDriverName.c_str(); }
 
   private:
     void *loadProcAddress(const std::string &function) const override
@@ -603,11 +627,12 @@ class FunctionsGLEGL : public FunctionsGL
     }
 
     const FunctionsEGL &mEGL;
+    std::string mDisplayDriverName;
 };
 
 FunctionsGL *FunctionsEGL::makeFunctionsGL(void) const
 {
-    return new FunctionsGLEGL(*this);
+    return new FunctionsGLEGL(*this, getDisplayDriverName());
 }
 
 bool FunctionsEGL::hasExtension(const char *extension) const
@@ -858,6 +883,15 @@ const char *FunctionsEGL::queryDeviceStringEXT(EGLDeviceEXT device, EGLint name)
 EGLBoolean FunctionsEGL::queryDisplayAttribEXT(EGLint attribute, EGLAttrib *value) const
 {
     return mFnPtrs->queryDisplayAttribEXTPtr(mEGLDisplay, attribute, value);
+}
+
+const char *FunctionsEGL::getDisplayDriverName() const
+{
+    if (mFnPtrs->getDisplayDriverNamePtr != nullptr)
+    {
+        return mFnPtrs->getDisplayDriverNamePtr(mEGLDisplay);
+    }
+    return nullptr;
 }
 
 }  // namespace rx

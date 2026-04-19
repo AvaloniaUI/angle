@@ -24,12 +24,22 @@ namespace
 // To know when to call sh::Initialize and sh::Finalize.
 size_t gActiveCompilers = 0;
 
+ShShaderOutput GetShaderOutputType(const State &state, const rx::CompilerImpl *impl)
+{
+    if (state.usesPassthroughShaders())
+    {
+        return SH_NULL_OUTPUT;
+    }
+
+    return impl->getTranslatorOutputType();
+}
+
 }  // anonymous namespace
 
 Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Display *display)
     : mImplementation(implFactory->createCompiler()),
       mSpec(SelectShaderSpec(state)),
-      mOutputType(mImplementation->getTranslatorOutputType()),
+      mOutputType(GetShaderOutputType(state, mImplementation.get())),
       mResources()
 {
     ASSERT(state.getClientVersion() >= ES_1_0 && state.getClientVersion() <= ES_3_2);
@@ -82,14 +92,21 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     // OES_shader_multisample_interpolation
     mResources.OES_shader_multisample_interpolation = extensions.shaderMultisampleInterpolationOES;
     mResources.OES_shader_image_atomic              = extensions.shaderImageAtomicOES;
-    // TODO: use shader precision caps to determine if high precision is supported?
-    mResources.FragmentPrecisionHigh = 1;
     mResources.EXT_frag_depth        = extensions.fragDepthEXT;
 
     // OVR_multiview / OVR_multiview2
     mResources.OVR_multiview = extensions.multiviewOVR;
     mResources.OVR_multiview2 = extensions.multiview2OVR;
     mResources.MaxViewsOVR    = caps.maxViews;
+
+    // Hashing and prefixing
+    mResources.HashFunction = nullptr;
+    if (mOutputType == SH_NULL_OUTPUT)
+    {
+        // Disable user variable prefixing if using the null output type. The untranslated source
+        // shader is used so make sure the mapped names match the input names.
+        mResources.UserVariableNamePrefix = '\0';
+    }
 
     // EXT_multisampled_render_to_texture and EXT_multisampled_render_to_texture2
     mResources.EXT_multisampled_render_to_texture  = extensions.multisampledRenderToTextureEXT;
@@ -150,6 +167,8 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxFragmentInputVectors = caps.maxFragmentInputComponents / 4;
     mResources.MinProgramTexelOffset   = caps.minProgramTexelOffset;
     mResources.MaxProgramTexelOffset   = caps.maxProgramTexelOffset;
+    mResources.MaxFragmentUniformBlocks = caps.maxShaderUniformBlocks[gl::ShaderType::Fragment];
+    mResources.MaxVertexUniformBlocks   = caps.maxShaderUniformBlocks[gl::ShaderType::Vertex];
 
     // EXT_blend_func_extended
     mResources.EXT_blend_func_extended  = extensions.blendFuncExtendedEXT;
@@ -167,6 +186,10 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxPixelLocalStoragePlanes = caps.maxPixelLocalStoragePlanes;
     mResources.MaxCombinedDrawBuffersAndPixelLocalStoragePlanes =
         caps.maxCombinedDrawBuffersAndPixelLocalStoragePlanes;
+
+    // EXT_fragment_shading_rate
+    mResources.EXT_fragment_shading_rate = extensions.fragmentShadingRateEXT;
+    mResources.EXT_fragment_shading_rate_primitive = extensions.fragmentShadingRatePrimitiveEXT;
 
     // OES_sample_variables
     mResources.OES_sample_variables = extensions.sampleVariablesOES;
@@ -188,6 +211,7 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxCombinedImageUniforms         = caps.maxCombinedImageUniforms;
     mResources.MaxCombinedShaderOutputResources = caps.maxCombinedShaderOutputResources;
     mResources.MaxUniformLocations              = caps.maxUniformLocations;
+    mResources.MaxComputeUniformBlocks = caps.maxShaderUniformBlocks[gl::ShaderType::Compute];
 
     for (size_t index = 0u; index < 3u; ++index)
     {
@@ -229,7 +253,6 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.EXT_geometry_shader          = extensions.geometryShaderEXT;
     mResources.OES_geometry_shader          = extensions.geometryShaderOES;
     mResources.MaxGeometryUniformComponents = caps.maxShaderUniformComponents[ShaderType::Geometry];
-    mResources.MaxGeometryUniformBlocks     = caps.maxShaderUniformBlocks[ShaderType::Geometry];
     mResources.MaxGeometryInputComponents   = caps.maxGeometryInputComponents;
     mResources.MaxGeometryOutputComponents  = caps.maxGeometryOutputComponents;
     mResources.MaxGeometryOutputVertices    = caps.maxGeometryOutputVertices;
@@ -239,9 +262,9 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxGeometryAtomicCounterBuffers =
         caps.maxShaderAtomicCounterBuffers[ShaderType::Geometry];
     mResources.MaxGeometryAtomicCounters      = caps.maxShaderAtomicCounters[ShaderType::Geometry];
-    mResources.MaxGeometryShaderStorageBlocks = caps.maxShaderStorageBlocks[ShaderType::Geometry];
     mResources.MaxGeometryShaderInvocations   = caps.maxGeometryShaderInvocations;
     mResources.MaxGeometryImageUniforms       = caps.maxShaderImageUniforms[ShaderType::Geometry];
+    mResources.MaxGeometryUniformBlocks = caps.maxShaderUniformBlocks[gl::ShaderType::Geometry];
 
     // Tessellation Shader constants
     mResources.EXT_tessellation_shader        = extensions.tessellationShaderEXT;
@@ -257,6 +280,8 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
     mResources.MaxTessControlAtomicCounters = caps.maxShaderAtomicCounters[ShaderType::TessControl];
     mResources.MaxTessControlAtomicCounterBuffers =
         caps.maxShaderAtomicCounterBuffers[ShaderType::TessControl];
+    mResources.MaxTessControlUniformBlocks =
+        caps.maxShaderUniformBlocks[gl::ShaderType::TessControl];
 
     mResources.MaxTessPatchComponents = caps.maxTessPatchComponents;
     mResources.MaxPatchVertices       = caps.maxPatchVertices;
@@ -274,9 +299,8 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const State &state, egl::Disp
         caps.maxShaderAtomicCounters[ShaderType::TessEvaluation];
     mResources.MaxTessEvaluationAtomicCounterBuffers =
         caps.maxShaderAtomicCounterBuffers[ShaderType::TessEvaluation];
-
-    // Subpixel bits.
-    mResources.SubPixelBits = static_cast<int>(caps.subPixelBits);
+    mResources.MaxTessEvaluationUniformBlocks =
+        caps.maxShaderUniformBlocks[gl::ShaderType::TessEvaluation];
 }
 
 Compiler::~Compiler() = default;
@@ -344,7 +368,7 @@ ShShaderSpec Compiler::SelectShaderSpec(const State &state)
                 ASSERT(!isWebGL);
                 return SH_GLES3_2_SPEC;
             case 1:
-                return isWebGL ? SH_WEBGL3_SPEC : SH_GLES3_1_SPEC;
+                return SH_GLES3_1_SPEC;
             case 0:
                 return isWebGL ? SH_WEBGL2_SPEC : SH_GLES3_SPEC;
             default:

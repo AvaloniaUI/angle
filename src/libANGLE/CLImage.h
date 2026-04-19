@@ -37,7 +37,7 @@ class Image final : public Memory
     const cl_image_format &getFormat() const;
     const ImageDescriptor &getDescriptor() const;
 
-    bool isRegionValid(const cl::MemOffsets &origin, const cl::Coordinate &region) const;
+    bool isRegionValid(const cl::Offset &origin, const cl::Extents &region) const;
 
     size_t getElementSize() const;
     size_t getRowSize() const;
@@ -46,6 +46,9 @@ class Image final : public Memory
     size_t getWidth() const { return mDesc.width; }
     size_t getHeight() const { return mDesc.height; }
     size_t getDepth() const { return mDesc.depth; }
+    PixelColor packPixels(const void *fillColor) const;
+
+    static Image *Cast(cl_mem memobj);
 
   private:
     Image(Context &context,
@@ -95,6 +98,12 @@ inline size_t Image::getRowSize() const
 inline size_t Image::getSliceSize() const
 {
     return mDesc.slicePitch != 0u ? mDesc.slicePitch : getRowSize() * getHeight();
+}
+
+inline Image *Image::Cast(cl_mem memobj)
+{
+    ASSERT(cl::IsImageType(Memory::Cast(memobj)->getType()));
+    return static_cast<Image *>(memobj);
 }
 
 }  // namespace cl

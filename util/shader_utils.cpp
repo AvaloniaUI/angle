@@ -6,11 +6,13 @@
 
 #include "util/shader_utils.h"
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <vector>
 
+#include "common/span.h"
 #include "common/utilities.h"
 #include "util/test_utils.h"
 
@@ -246,17 +248,17 @@ GLuint CheckLinkStatusAndReturnProgram(GLuint program, bool outputErrorMessages)
 
 GLuint GetProgramShader(GLuint program, GLint requestedType)
 {
-    static constexpr GLsizei kMaxShaderCount = 16;
-    GLuint attachedShaders[kMaxShaderCount]  = {0u};
-    GLsizei count                            = 0;
-    glGetAttachedShaders(program, kMaxShaderCount, &count, attachedShaders);
-    for (int i = 0; i < count; ++i)
+    GLsizei count                           = 0;
+    std::array<GLuint, 16u> attachedShaders = {};
+    glGetAttachedShaders(program, attachedShaders.size(), &count, attachedShaders.data());
+
+    for (GLuint shader : angle::Span(attachedShaders).first(count))
     {
         GLint type = 0;
-        glGetShaderiv(attachedShaders[i], GL_SHADER_TYPE, &type);
+        glGetShaderiv(shader, GL_SHADER_TYPE, &type);
         if (type == requestedType)
         {
-            return attachedShaders[i];
+            return shader;
         }
     }
 
@@ -578,18 +580,6 @@ void main()
 })";
 }
 
-const char *Texture2DArray()
-{
-    return R"(#version 300 es
-out vec2 v_texCoord;
-in vec4 a_position;
-void main()
-{
-    gl_Position = vec4(a_position.xy, 0.0, 1.0);
-    v_texCoord = (a_position.xy * 0.5) + 0.5;
-})";
-}
-
 }  // namespace vs
 
 namespace fs
@@ -687,20 +677,6 @@ void main()
 })";
 }
 
-const char *Texture2DArray()
-{
-    return R"(#version 300 es
-precision highp float;
-uniform highp sampler2DArray tex2DArray;
-uniform int slice;
-in vec2 v_texCoord;
-out vec4 fragColor;
-void main()
-{
-    fragColor = texture(tex2DArray, vec3(v_texCoord, float(slice)));
-})";
-}
-
 }  // namespace fs
 }  // namespace essl1_shaders
 
@@ -785,6 +761,18 @@ void main()
 })";
 }
 
+const char *Texture2DArray()
+{
+    return R"(#version 300 es
+out vec2 v_texCoord;
+in vec4 a_position;
+void main()
+{
+    gl_Position = vec4(a_position.xy, 0.0, 1.0);
+    v_texCoord = (a_position.xy * 0.5) + 0.5;
+})";
+}
+
 }  // namespace vs
 
 namespace fs
@@ -839,6 +827,20 @@ out vec4 my_FragColor;
 void main()
 {
     my_FragColor = textureLod(u_tex2D, v_texCoord, u_lod);
+})";
+}
+
+const char *Texture2DArray()
+{
+    return R"(#version 300 es
+precision highp float;
+uniform highp sampler2DArray tex2DArray;
+uniform int slice;
+in vec2 v_texCoord;
+out vec4 fragColor;
+void main()
+{
+    fragColor = texture(tex2DArray, vec3(v_texCoord, float(slice)));
 })";
 }
 

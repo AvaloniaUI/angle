@@ -6,6 +6,11 @@
 // validationCL.cpp: Validation functions for generic CL entry point parameters
 // based on the OpenCL Specification V3.0.7, see https://www.khronos.org/registry/OpenCL/
 // Each used CL error code is preceeded by a citation of the relevant rule in the spec.
+//
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
 
 #include "libANGLE/cl_utils.h"
 #include "libANGLE/validationCL_autogen.h"
@@ -162,18 +167,158 @@ bool ValidateMapFlags(MapFlags flags, const Platform &platform)
     return true;
 }
 
-bool ValidateMemoryProperties(const cl_mem_properties *properties)
+cl_int ValidateMemoryProperties(cl_context context,
+                                MemFlags flags,
+                                const cl_mem_properties *properties,
+                                const void *host_ptr)
 {
-    if (properties != nullptr)
+    // first, get/validate supported properties
+    const NameValueProperty *startOfProperties =
+        reinterpret_cast<const NameValueProperty *>(properties);
+    const NameValueProperty *propertiesIterator = startOfProperties;
+    while (propertiesIterator->name != 0)
     {
-        // OpenCL 3.0 does not define any optional properties.
-        // This function is reserved for extensions and future use.
-        if (*properties != 0)
+        switch (propertiesIterator->name)
         {
-            return false;
+            case CL_MEM_DEVICE_HANDLE_LIST_KHR:
+            case CL_MEM_DEVICE_HANDLE_LIST_END_KHR:
+            case CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR:
+            case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_FD_KHR:
+                break;
+            default:
+                // CL_INVALID_PROPERTY if a property name in properties is not a supported property
+                // name
+                return CL_INVALID_PROPERTY;
+        }
+        propertiesIterator++;
+    }
+
+    // next, get/validate the memory type/handle from properties (that we support)
+    const NameValueProperty *pMemoryHandle = nullptr;
+    propertiesIterator                     = startOfProperties;
+    while (propertiesIterator->name != 0)
+    {
+        switch (propertiesIterator->name)
+        {
+            case CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR:
+            case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_FD_KHR:
+                if (pMemoryHandle)
+                {
+                    // CL_INVALID_PROPERTY if properties includes more than one external memory
+                    // handle
+                    return CL_INVALID_PROPERTY;
+                }
+                pMemoryHandle = propertiesIterator;
+                break;
+            default:
+                break;
+        }
+        propertiesIterator++;
+    }
+    if (!pMemoryHandle)
+    {
+        // CL_INVALID_PROPERTY if properties does not include a supported external memory handle
+        return CL_INVALID_PROPERTY;
+    }
+    else
+    {
+        switch (pMemoryHandle->name)
+        {
+            case CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR:
+            case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_FD_KHR:
+            {
+                // just validate the basics for dma_buf and posix fd for now
+                uint32_t fdDmaBuf = *reinterpret_cast<uint32_t *>(pMemoryHandle->value);
+                if (host_ptr != nullptr)
+                {
+                    // CL_INVALID_HOST_PTR if properties includes a supported external memory handle
+                    // and host_ptr is not NULL
+                    return CL_INVALID_HOST_PTR;
+                }
+                if (fdDmaBuf < 0)
+                {
+                    return CL_INVALID_PROPERTY;
+                }
+                break;
+            }
+            default:
+            {
+                ASSERT(false);  // should not reach here
+                return CL_INVALID_PROPERTY;
+            }
         }
     }
-    return true;
+
+    // next, get/validate the device sub-list from properties
+    std::vector<Device *> devices;
+    bool isDeviceListDefined = false;
+    cl::Context &ctx         = context->cast<Context>();
+    propertiesIterator       = startOfProperties;
+    while (propertiesIterator->name != 0)
+    {
+        if (propertiesIterator->name == CL_MEM_DEVICE_HANDLE_LIST_KHR)
+        {
+            if (isDeviceListDefined)
+            {
+                // CL_INVALID_PROPERTY if the same property name is specified more than once
+                return CL_INVALID_PROPERTY;
+            }
+            isDeviceListDefined = true;
+            cl_device_id device = reinterpret_cast<cl_device_id>(propertiesIterator->value);
+            while (device != CL_MEM_DEVICE_HANDLE_LIST_END_KHR)
+            {
+                if (!Device::IsValid(device) || !ctx.hasDevice(device))
+                {
+                    // CL_INVALID_DEVICE if a device identified by the property
+                    // CL_MEM_DEVICE_HANDLE_LIST_KHR is not a valid device or is not associated
+                    // with context
+                    return CL_INVALID_DEVICE;
+                }
+                devices.push_back(&device->cast<Device>());
+                device++;
+            }
+        }
+        propertiesIterator++;
+    }
+    if (!devices.empty())
+    {
+        for (const auto &device : devices)
+        {
+            if (!device->getInfo().externalMemoryHandleSupport.test(
+                    FromCLenum<ExternalMemoryHandle>(static_cast<CLenum>(pMemoryHandle->name))))
+            {
+                // CL_INVALID_DEVICE if a device identified by property
+                // CL_MEM_DEVICE_HANDLE_LIST_KHR cannot import the requested external memory object
+                // type
+                return CL_INVALID_DEVICE;
+            }
+        }
+    }
+    else
+    {
+        // there was no device list defined in properties, use associated devices with context
+        for (const auto &devicePtr : ctx.getDevices())
+        {
+            if (!devicePtr->getInfo().externalMemoryHandleSupport.test(
+                    FromCLenum<ExternalMemoryHandle>(static_cast<CLenum>(pMemoryHandle->name))))
+            {
+                // if CL_MEM_DEVICE_HANDLE_LIST_KHR is not specified as part of properties and one
+                // or more devices in context cannot import the requested external memory object
+                // type
+                return CL_INVALID_DEVICE;
+            }
+        }
+    }
+
+    // When a buffer or image is created from an external memory handle,
+    // the flags used to specify usage information for the buffer or image must not include
+    // CL_MEM_USE_HOST_PTR, CL_MEM_ALLOC_HOST_PTR, or CL_MEM_COPY_HOST_PTR
+    if (flags.intersects(CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR))
+    {
+        return CL_INVALID_VALUE;
+    }
+
+    return CL_SUCCESS;
 }
 
 cl_int ValidateCommandQueueAndEventWaitList(cl_command_queue commandQueue,
@@ -447,8 +592,8 @@ cl_int ValidateImageForDevice(const Image &image,
     // CL_INVALID_VALUE if the region being read or written
     // specified by origin and region is out of bounds.
 
-    if (!image.isRegionValid(cl::MemOffsets{origin[0], origin[1], origin[2]},
-                             cl::Coordinate{region[0], region[1], region[2]}))
+    if (!image.isRegionValid(cl::Offset{origin[0], origin[1], origin[2]},
+                             cl::Extents{region[0], region[1], region[2]}))
     {
         return CL_INVALID_VALUE;
     }
@@ -558,6 +703,9 @@ cl_int ValidateGetPlatformInfo(cl_platform_id platform,
             // All remaining possible values for param_name are valid for all versions.
             break;
     }
+
+    // TODO: we need to validate cl_khr_external_memory enum queries here as well
+    // http://anglebug.com/439565645
 
     return CL_SUCCESS;
 }
@@ -689,12 +837,21 @@ cl_int ValidateGetDeviceInfo(cl_device_id device,
             ANGLE_VALIDATE_VERSION_OR_EXTENSION(version, 1, 2, info.khrFP64);
             break;
 
+        case DeviceInfo::IntegerDotProductCapabilities:
+        case DeviceInfo::IntegerDotProductAccelerationProperties8bit:
+        case DeviceInfo::IntegerDotProductAccelerationProperties4x8bitPacked:
+            ANGLE_VALIDATE_VERSION_OR_EXTENSION(version, 3, 0, info.khrIntegerDotProduct);
+            break;
+
         case DeviceInfo::InvalidEnum:
             return CL_INVALID_VALUE;
         default:
             // All remaining possible values for param_name are valid for all versions.
             break;
     }
+
+    // TODO: we need to validate cl_khr_external_memory enum queries here as well
+    // http://anglebug.com/439565645
 
     return CL_SUCCESS;
 }
@@ -2596,6 +2753,19 @@ cl_int ValidateCreateCommandQueue(cl_context context,
         return CL_INVALID_VALUE;
     }
 
+    // CL_INVALID_QUEUE_PROPERTIES if values specified in properties are valid but are not supported
+    // by the device.
+    cl_command_queue_properties supportedQueueProperties;
+    angle::Result getInfoResult = device->cast<Device>().getInfo(
+        DeviceInfo::QueueOnHostProperties, sizeof(cl_command_queue_properties),
+        &supportedQueueProperties, nullptr);
+    ASSERT(!IsError(getInfoResult));
+
+    if (properties.hasOtherBitsThan(supportedQueueProperties))
+    {
+        return CL_INVALID_QUEUE_PROPERTIES;
+    }
+
     return CL_SUCCESS;
 }
 
@@ -2990,6 +3160,12 @@ cl_int ValidateCreateImage(cl_context context,
     }
     const Context &ctx = context->cast<Context>();
 
+    // CL_INVALID_OPERATION if there are no devices in context that support images.
+    if (!ctx.supportsImages())
+    {
+        return CL_INVALID_OPERATION;
+    }
+
     // CL_INVALID_VALUE if values specified in flags are not valid.
     if (!ValidateMemoryFlags(flags, ctx.getPlatform()))
     {
@@ -3066,10 +3242,38 @@ cl_int ValidateCreateImage(cl_context context,
         default:
             return CL_INVALID_IMAGE_DESCRIPTOR;
     }
+
+    // CL_INVALID_IMAGE_SIZE if image dimensions specified in image_desc exceed the maximum
+    // image dimensions described in the Device Queries table for all devices in context.
+    const DevicePtrs &devices = ctx.getDevices();
+    if (std::find_if(devices.cbegin(), devices.cend(), [&](const DevicePtr &ptr) {
+            return ptr->supportsNativeImageDimensions(*image_desc);
+        }) == devices.cend())
+    {
+        return CL_INVALID_IMAGE_SIZE;
+    }
+    unsigned int maxDeviceImagePitchAlignment = 0u;
+    for (const DevicePtr &device : devices)
+    {
+        maxDeviceImagePitchAlignment =
+            std::max(maxDeviceImagePitchAlignment, device->getInfo().imagePitchAlignment);
+    }
+
+    // CL_INVALID_OPERATION if no devices in context support creating a 2D image from a
+    // buffer.
+    const bool isImage2dFromBuffer = image_desc->image_type == CL_MEM_OBJECT_IMAGE2D &&
+                                     image_desc->buffer != NULL &&
+                                     Buffer::IsValid(image_desc->buffer);
+    if (isImage2dFromBuffer && !ctx.supportsImage2DFromBuffer())
+    {
+        return CL_INVALID_OPERATION;
+    }
+
     if (image_desc->image_row_pitch != 0u)
     {
-        // image_row_pitch must be 0 if host_ptr is NULL.
-        if (host_ptr == nullptr)
+        // image_row_pitch must be 0 if host_ptr is NULL, and the image is not a 2D image created
+        // from a buffer
+        if (host_ptr == nullptr && image_desc->buffer == nullptr)
         {
             return CL_INVALID_IMAGE_DESCRIPTOR;
         }
@@ -3083,6 +3287,14 @@ cl_int ValidateCreateImage(cl_context context,
         if ((image_desc->image_row_pitch % elemSize) != 0u)
         {
             return CL_INVALID_IMAGE_DESCRIPTOR;
+        }
+        // CL_INVALID_IMAGE_FORMAT_DESCRIPTOR
+        // if image is being created from buffer, image_row_pitch
+        // must be a multiple of the maximum of the CL_DEVICE_IMAGE_PITCH_ALIGNMENT value of all
+        // devices in the context that supports images.
+        if (isImage2dFromBuffer && image_desc->image_row_pitch % maxDeviceImagePitchAlignment != 0u)
+        {
+            return CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         }
     }
     if (image_desc->image_slice_pitch != 0u)
@@ -3122,29 +3334,34 @@ cl_int ValidateCreateImage(cl_context context,
         return CL_INVALID_IMAGE_DESCRIPTOR;
     }
 
-    // CL_INVALID_OPERATION if there are no devices in context that support images.
-    if (!ctx.supportsImages())
-    {
-        return CL_INVALID_OPERATION;
-    }
-
-    // Returns CL_INVALID_OPERATION if no devices in context support creating a 2D image from a
+    // CL_INVALID_IMAGE_FORMAT_DESCRIPTOR if a 2D image is created from a buffer and the row pitch
+    // and base address alignment does not follow the rules described for creating a 2D image from a
     // buffer.
-    const bool isImage2dFromBuffer =
-        image_desc->image_type == CL_MEM_OBJECT_IMAGE2D && image_desc->mem_object != NULL;
-    if (isImage2dFromBuffer && !ctx.supportsImage2DFromBuffer())
+    if (isImage2dFromBuffer && (image_desc->image_row_pitch * image_desc->image_height) >
+                                   Buffer::Cast(image_desc->buffer)->getSize())
     {
-        return CL_INVALID_OPERATION;
+        return CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     }
 
-    // CL_INVALID_IMAGE_SIZE if image dimensions specified in image_desc exceed the maximum
-    // image dimensions described in the Device Queries table for all devices in context.
-    const DevicePtrs &devices = ctx.getDevices();
-    if (std::find_if(devices.cbegin(), devices.cend(), [&](const DevicePtr &ptr) {
-            return ptr->supportsNativeImageDimensions(*image_desc);
-        }) == devices.cend())
+    // CL_INVALID_IMAGE_DESCRIPTOR
+    // if 2D image created from another image object, the values in
+    // image descriptor except for mem_object must match the image descriptor information associated
+    // with mem_object
+    if (image_desc->mem_object != nullptr && Image::IsValid(image_desc->mem_object))
     {
-        return CL_INVALID_IMAGE_SIZE;
+        const ImageDescriptor imageDesc = {FromCLenum<MemObjectType>(image_desc->image_type),
+                                           image_desc->image_width,
+                                           image_desc->image_height,
+                                           image_desc->image_depth,
+                                           image_desc->image_array_size,
+                                           image_desc->image_row_pitch,
+                                           image_desc->image_slice_pitch,
+                                           image_desc->num_mip_levels,
+                                           image_desc->num_samples};
+        if (imageDesc != Image::Cast(image_desc->mem_object)->getDescriptor())
+        {
+            return CL_INVALID_IMAGE_DESCRIPTOR;
+        }
     }
 
     // CL_INVALID_HOST_PTR
@@ -3636,8 +3853,15 @@ cl_int ValidateCreateCommandQueueWithProperties(cl_context context,
     // CL_INVALID_VALUE if values specified in properties are not valid.
     if (properties != nullptr)
     {
-        bool isQueueOnDevice = false;
-        bool hasQueueSize    = false;
+        cl_command_queue_properties supportedQueueProperties;
+        angle::Result getInfoResult = device->cast<Device>().getInfo(
+            DeviceInfo::QueueOnHostProperties, sizeof(cl_command_queue_properties),
+            &supportedQueueProperties, nullptr);
+        ASSERT(!IsError(getInfoResult));
+
+        bool isQueueOnDevice  = false;
+        bool hasQueueSize     = false;
+        bool hasQueuePriority = false;
         while (*properties != 0)
         {
             switch (*properties++)
@@ -3659,6 +3883,14 @@ cl_int ValidateCreateCommandQueueWithProperties(cl_context context,
                     {
                         return CL_INVALID_VALUE;
                     }
+
+                    // CL_INVALID_QUEUE_PROPERTIES if values specified in properties are valid but
+                    // are not supported by the device.
+                    if (props.hasOtherBitsThan(supportedQueueProperties))
+                    {
+                        return CL_INVALID_QUEUE_PROPERTIES;
+                    }
+
                     isQueueOnDevice = props.intersects(CL_QUEUE_ON_DEVICE);
                     break;
                 }
@@ -3672,6 +3904,18 @@ cl_int ValidateCreateCommandQueueWithProperties(cl_context context,
                     hasQueueSize = true;
                     break;
                 }
+                case CL_QUEUE_PRIORITY_KHR:
+                {
+                    if (*properties != CL_QUEUE_PRIORITY_HIGH_KHR &&
+                        *properties != CL_QUEUE_PRIORITY_MED_KHR &&
+                        *properties != CL_QUEUE_PRIORITY_LOW_KHR)
+                    {
+                        return CL_INVALID_VALUE;
+                    }
+                    hasQueuePriority = true;
+                    properties++;
+                    break;
+                }
                 default:
                     return CL_INVALID_VALUE;
             }
@@ -3681,6 +3925,14 @@ cl_int ValidateCreateCommandQueueWithProperties(cl_context context,
         if (hasQueueSize && !isQueueOnDevice)
         {
             return CL_INVALID_VALUE;
+        }
+
+        // CL_INVALID_QUEUE_PROPERTIES if the cl_khr_priority_hints extension is supported, the
+        // CL_QUEUE_PRIORITY_KHR property is specified, and the queue is a CL_QUEUE_ON_DEVICE.
+        if (device->cast<Device>().getInfo().khrPriorityHints && hasQueuePriority &&
+            isQueueOnDevice)
+        {
+            return CL_INVALID_QUEUE_PROPERTIES;
         }
     }
 
@@ -3911,6 +4163,95 @@ cl_int ValidateGetKernelSubGroupInfo(cl_kernel kernel,
                                      const void *param_value,
                                      const size_t *param_value_size_ret)
 {
+    if (!Kernel::IsValid(kernel))
+    {
+        // CL_INVALID_KERNEL if kernel is a not a valid kernel object.
+        return CL_INVALID_KERNEL;
+    }
+    const Kernel &krnl = kernel->cast<Kernel>();
+
+    if (!krnl.getProgram().hasDevice(device) ||
+        (device == nullptr && krnl.getProgram().getDevices().size() > 1))
+    {
+        // CL_INVALID_DEVICE if device is not in the list of devices associated with kernel or if
+        // device is NULL but there is more than one device associated with kernel.
+        return CL_INVALID_DEVICE;
+    }
+
+    if (Device::IsValid(device) && !device->cast<Device>().getInfo().khrSubgroups)
+    {
+        // CL_INVALID_OPERATION if device does not support sub-groups.
+        return CL_INVALID_OPERATION;
+    }
+
+    // CL_INVALID_VALUE if the size in bytes specified by param_value_size is less than
+    // size of the return type specified in the Kernel Object Sub-group Queries table
+    // and param_value is not NULL.
+    size_t maxWorkItemDimensions = 0;
+    angle::Result getInfoResult  = device->cast<Device>().getInfo(
+        DeviceInfo::MaxWorkItemDimensions, sizeof(size_t), &maxWorkItemDimensions, nullptr);
+    ASSERT(!IsError(getInfoResult));  // MaxWorkItemDimensions is always handled
+    switch (param_name)
+    {
+        case KernelSubGroupInfo::SubGroupCountForNdrange:
+        case KernelSubGroupInfo::MaxSubGroupSizeForNdrange:
+            if (param_value_size < sizeof(size_t))
+            {
+                return CL_INVALID_VALUE;
+            }
+            break;
+        case KernelSubGroupInfo::LocalSizeForSubGroupCount:
+        {
+            const size_t dims     = param_value_size / sizeof(size_t);
+            const bool isMultiple = (param_value_size % sizeof(size_t) == 0);
+            if (!param_value || !isMultiple || dims > maxWorkItemDimensions)
+            {
+                return CL_INVALID_VALUE;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    switch (param_name)
+    {
+        case KernelSubGroupInfo::SubGroupCountForNdrange:
+        case KernelSubGroupInfo::LocalSizeForSubGroupCount:
+        case KernelSubGroupInfo::MaxSubGroupSizeForNdrange:
+            if (input_value == nullptr)
+            {
+                // CL_INVALID_VALUE if input_value is NULL
+                return CL_INVALID_VALUE;
+            }
+
+            if (param_name == KernelSubGroupInfo::LocalSizeForSubGroupCount)
+            {
+                if (input_value_size != sizeof(size_t))
+                {
+                    // CL_INVALID_VALUE if param_name is CL_KERNEL_LOCAL_SIZE_FOR_SUB_GROUP_COUNT
+                    // and the size in bytes specified by input_value_size is not valid
+                    return CL_INVALID_VALUE;
+                }
+            }
+            else
+            {
+                const size_t dims     = input_value_size / sizeof(size_t);
+                const bool isMultiple = (input_value_size % sizeof(size_t) == 0);
+                if (!isMultiple || dims == 0 || dims > maxWorkItemDimensions)
+                {
+                    // CL_INVALID_VALUE if param_name is CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE,
+                    // CL_KERNEL_SUB_GROUP_COUNT_FOR_NDRANGE and the size in bytes specified by
+                    // input_value_size is not valid
+                    return CL_INVALID_VALUE;
+                }
+            }
+            break;
+        default:
+            // CL_INVALID_VALUE if param_name is not one of the supported values
+            return CL_INVALID_VALUE;
+    }
+
     return CL_SUCCESS;
 }
 
@@ -3969,9 +4310,9 @@ cl_int ValidateCreateBufferWithProperties(cl_context context,
     // CL_INVALID_PROPERTY if a property name in properties is not a supported property name,
     // if the value specified for a supported property name is not valid,
     // or if the same property name is specified more than once.
-    if (!ValidateMemoryProperties(properties))
+    if ((properties != nullptr) && (properties[0] != 0))
     {
-        return CL_INVALID_PROPERTY;
+        return ValidateMemoryProperties(context, flags, properties, host_ptr);
     }
 
     return CL_SUCCESS;
@@ -3995,12 +4336,173 @@ cl_int ValidateCreateImageWithProperties(cl_context context,
     // CL_INVALID_PROPERTY if a property name in properties is not a supported property name,
     // if the value specified for a supported property name is not valid,
     // or if the same property name is specified more than once.
-    if (!ValidateMemoryProperties(properties))
+    if ((properties != nullptr) && (properties[0] != 0))
     {
-        return CL_INVALID_PROPERTY;
+        return ValidateMemoryProperties(context, flags, properties, host_ptr);
     }
 
     return CL_SUCCESS;
+}
+
+// cl_khr_external_memory
+cl_int ValidateExternalMemObjectsKHR(cl_command_queue command_queue,
+                                     cl_uint num_mem_objects,
+                                     const cl_mem *mem_objects,
+                                     cl_uint num_events_in_wait_list,
+                                     const cl_event *event_wait_list)
+{
+    // CL_INVALID_VALUE if num_mem_objects is zero and mem_objects is not a NULL value,
+    // or if num_mem_objects is greater than 0 and mem_objects is NULL.
+    if ((num_mem_objects == 0u && mem_objects != nullptr) ||
+        (num_mem_objects > 0u && mem_objects == nullptr))
+    {
+        return CL_INVALID_VALUE;
+    }
+
+    for (cl_uint i = 0u; i < num_mem_objects; ++i)
+    {
+        // CL_INVALID_MEM_OBJECT if any of the memory objects
+        // in mem_objects is not a valid memory object.
+        if (!Memory::IsValid(mem_objects[i]))
+        {
+            return CL_INVALID_MEM_OBJECT;
+        }
+    }
+
+    // CL_INVALID_COMMAND_QUEUE if command_queue is not a valid command-queue
+    ANGLE_VALIDATE(ValidateCommandQueueAndEventWaitList(command_queue, false,
+                                                        num_events_in_wait_list, event_wait_list));
+    if (!command_queue->cast<CommandQueue>().getContext().getPlatform().isVersionOrNewer(3u, 0u))
+    {
+        return CL_INVALID_COMMAND_QUEUE;
+    }
+
+    // CL_INVALID_COMMAND_QUEUE if device associated with command_queue is not one of the devices
+    // specified by CL_MEM_DEVICE_HANDLE_LIST_KHR at the time of creating one or more of
+    // mem_objects,
+    const CommandQueue &queue       = command_queue->cast<CommandQueue>();
+    const cl_device_id devFromQueue = const_cast<cl_device_id>(queue.getDevice().getNative());
+    bool isCmdQueueDevAssociatedWithMemObj = false;
+    bool isDevHandleMentionedInProp        = false;
+    for (cl_uint i = 0u; i < num_mem_objects; ++i)
+    {
+        const cl_mem_properties *properties = mem_objects[i]->cast<Memory>().getProperties().data();
+        const NameValueProperty *propertiesIterator =
+            reinterpret_cast<const NameValueProperty *>(properties);
+        // Process all NameValueProperty, [name, value] in properties
+        while (propertiesIterator->name != 0)
+        {
+            if (propertiesIterator->name == CL_MEM_DEVICE_HANDLE_LIST_KHR)
+            {
+                isDevHandleMentionedInProp = true;
+                cl_device_id devFromProp =
+                    reinterpret_cast<cl_device_id>(propertiesIterator->value);
+                if (devFromProp == devFromQueue)
+                {
+                    isCmdQueueDevAssociatedWithMemObj = true;
+                    break;
+                }
+            }
+            propertiesIterator++;
+        }
+
+        if (isDevHandleMentionedInProp && !isCmdQueueDevAssociatedWithMemObj)
+        {
+            return CL_INVALID_COMMAND_QUEUE;
+        }
+    }
+
+    // CL_INVALID_COMMAND_QUEUE if one or more of mem_objects belong to a context
+    // that does not contain a device associated with command_queue
+    for (cl_uint i = 0u; i < num_mem_objects; ++i)
+    {
+        const Context &ctx = mem_objects[i]->cast<Memory>().getContext();
+        if (!ctx.hasDevice(devFromQueue))
+        {
+            return CL_INVALID_COMMAND_QUEUE;
+        }
+    }
+
+    return CL_SUCCESS;
+}
+
+// cl_arm_import_memory
+cl_int ValidateImportMemoryARM(cl_context context,
+                               MemFlags flags,
+                               const cl_import_properties_arm *properties,
+                               const void *memory,
+                               size_t size)
+{
+    // CL_INVALID_VALUE if memory is NULL.
+    if (memory == nullptr)
+    {
+        return CL_INVALID_VALUE;
+    }
+
+    // CL_INVALID_PROPERTY when invalid properties or combination of properties are passed.
+    const NameValueProperty *propertiesIterator =
+        reinterpret_cast<const NameValueProperty *>(properties);
+    bool foundImportType = false;
+    if (propertiesIterator != nullptr)
+    {
+        for (; propertiesIterator->name != 0; ++propertiesIterator)
+        {
+            if (propertiesIterator->name == CL_IMPORT_TYPE_ARM)
+            {
+                foundImportType = true;
+                if (propertiesIterator->value != CL_IMPORT_TYPE_HOST_ARM &&
+                    propertiesIterator->value != CL_IMPORT_TYPE_DMA_BUF_ARM &&
+                    propertiesIterator->value != CL_IMPORT_TYPE_ANDROID_HARDWARE_BUFFER_ARM)
+                {
+                    return CL_INVALID_PROPERTY;
+                }
+            }
+            else if (propertiesIterator->name == CL_IMPORT_TYPE_PROTECTED_ARM)
+            {
+                if (propertiesIterator->value == CL_TRUE)
+                {
+                    // we can allow non-protected memory, throw error otherwise
+                    // (until cl_khr_external_memory can support this in some way)
+                    WARN()
+                        << "CL_IMPORT_TYPE_PROTECTED_ARM not supported since cl_arm_import_memory "
+                           "is layered on cl_khr_external_memory (currently no equivalent)";
+                    return CL_INVALID_OPERATION;
+                }
+            }
+        }
+        if (!foundImportType)
+        {
+            return CL_INVALID_PROPERTY;
+        }
+    }
+
+    // Redirect to ValidateCreateBufferWithProperties as it is implemented on top of
+    // cl_khr_external_memory
+    Memory::PropArray convertedProperties = Context::ConvertArmMemPropToMemProp(properties, memory);
+    return ValidateCreateBufferWithProperties(context, convertedProperties.data(), flags, size,
+                                              nullptr);
+}
+
+cl_int ValidateEnqueueAcquireExternalMemObjectsKHR(cl_command_queue command_queue,
+                                                   cl_uint num_mem_objects,
+                                                   const cl_mem *mem_objects,
+                                                   cl_uint num_events_in_wait_list,
+                                                   const cl_event *event_wait_list,
+                                                   const cl_event *event)
+{
+    return ValidateExternalMemObjectsKHR(command_queue, num_mem_objects, mem_objects,
+                                         num_events_in_wait_list, event_wait_list);
+}
+
+cl_int ValidateEnqueueReleaseExternalMemObjectsKHR(cl_command_queue command_queue,
+                                                   cl_uint num_mem_objects,
+                                                   const cl_mem *mem_objects,
+                                                   cl_uint num_events_in_wait_list,
+                                                   const cl_event *event_wait_list,
+                                                   const cl_event *event)
+{
+    return ValidateExternalMemObjectsKHR(command_queue, num_mem_objects, mem_objects,
+                                         num_events_in_wait_list, event_wait_list);
 }
 
 // cl_khr_icd
@@ -4014,6 +4516,30 @@ cl_int ValidateIcdGetPlatformIDsKHR(cl_uint num_entries,
         return CL_INVALID_VALUE;
     }
     return CL_SUCCESS;
+}
+
+cl_int ValidateIcdGetFunctionAddressForPlatformKHR(cl_platform_id platform, const char *func_name)
+{
+    return CL_SUCCESS;
+}
+
+cl_int ValidateIcdSetPlatformDispatchDataKHR(cl_platform_id platform, const void *dispatch_data)
+{
+    return CL_SUCCESS;
+}
+
+cl_int ValidateGetKernelSubGroupInfoKHR(cl_kernel kernel,
+                                        cl_device_id device,
+                                        KernelSubGroupInfo param_namePacked,
+                                        size_t input_value_size,
+                                        const void *input_value,
+                                        size_t param_value_size,
+                                        const void *param_value,
+                                        const size_t *param_value_size_ret)
+{
+    return ValidateGetKernelSubGroupInfo(kernel, device, param_namePacked, input_value_size,
+                                         input_value, param_value_size, param_value,
+                                         param_value_size_ret);
 }
 
 }  // namespace cl

@@ -7,6 +7,10 @@
 //   Some tests for shader inspection
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <memory>
 
 #include "GLSLANG/ShaderLang.h"
@@ -48,8 +52,7 @@ class CollectVariablesTest : public testing::Test
 
     virtual void initTranslator(const ShBuiltInResources &resources)
     {
-        mTranslator.reset(
-            new TranslatorGLSL(mShaderType, SH_GLES3_SPEC, SH_GLSL_COMPATIBILITY_OUTPUT));
+        mTranslator.reset(new TranslatorGLSL(mShaderType, SH_GLES3_SPEC, SH_GLSL_150_CORE_OUTPUT));
         ASSERT_TRUE(mTranslator->Init(resources));
     }
 
@@ -58,7 +61,7 @@ class CollectVariablesTest : public testing::Test
     {
         const char *shaderStrings[]     = {shaderString.c_str()};
         ShCompileOptions compileOptions = {};
-        ASSERT_TRUE(mTranslator->compile(shaderStrings, 1, compileOptions));
+        ASSERT_TRUE(mTranslator->compile(shaderStrings, compileOptions));
 
         const std::vector<ShaderVariable> &uniforms = mTranslator->getUniforms();
         ASSERT_EQ(1u, uniforms.size());
@@ -109,7 +112,7 @@ class CollectVariablesTest : public testing::Test
     {
         const char *shaderStrings[]     = {shaderString.c_str()};
         ShCompileOptions compileOptions = {};
-        ASSERT_TRUE(mTranslator->compile(shaderStrings, 1, compileOptions))
+        ASSERT_TRUE(mTranslator->compile(shaderStrings, compileOptions))
             << mTranslator->getInfoSink().info.str();
 
         const auto &outputVariables = mTranslator->getOutputVariables();
@@ -125,7 +128,7 @@ class CollectVariablesTest : public testing::Test
     void compile(const std::string &shaderString, ShCompileOptions *compileOptions)
     {
         const char *shaderStrings[] = {shaderString.c_str()};
-        ASSERT_TRUE(mTranslator->compile(shaderStrings, 1, *compileOptions));
+        ASSERT_TRUE(mTranslator->compile(shaderStrings, *compileOptions));
     }
 
     void compile(const std::string &shaderString)
@@ -170,7 +173,7 @@ class CollectVariablesTestES31 : public CollectVariablesTest
     void initTranslator(const ShBuiltInResources &resources) override
     {
         mTranslator.reset(
-            new TranslatorGLSL(mShaderType, SH_GLES3_1_SPEC, SH_GLSL_COMPATIBILITY_OUTPUT));
+            new TranslatorGLSL(mShaderType, SH_GLES3_1_SPEC, SH_GLSL_150_CORE_OUTPUT));
         ASSERT_TRUE(mTranslator->Init(resources));
     }
 };
@@ -226,7 +229,7 @@ class CollectFragmentVariablesEXTGeometryShaderTest : public CollectVariablesEXT
     void initTranslator(const ShBuiltInResources &resources)
     {
         mTranslator.reset(
-            new TranslatorGLSL(mShaderType, SH_GLES3_1_SPEC, SH_GLSL_COMPATIBILITY_OUTPUT));
+            new TranslatorGLSL(mShaderType, SH_GLES3_1_SPEC, SH_GLSL_150_CORE_OUTPUT));
         ASSERT_TRUE(mTranslator->Init(resources));
     }
 };
@@ -667,30 +670,8 @@ TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragDataUniform)
 }
 
 // Test that gl_FragDataEXT built-in usage in ESSL1 fragment shader is reflected in the output
-// variables list. Also test that the precision is mediump.
-TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragDepthMediump)
-{
-    const std::string &fragDepthShader =
-        "#extension GL_EXT_frag_depth : require\n"
-        "precision mediump float;\n"
-        "void main() {\n"
-        "   gl_FragDepthEXT = 0.7;"
-        "}\n";
-
-    ShBuiltInResources resources = mTranslator->getResources();
-    resources.EXT_frag_depth     = 1;
-    initTranslator(resources);
-
-    const ShaderVariable *outputVariable = nullptr;
-    validateOutputVariableForShader(fragDepthShader, 0u, "gl_FragDepthEXT", &outputVariable);
-    ASSERT_NE(outputVariable, nullptr);
-    EXPECT_FALSE(outputVariable->isArray());
-    EXPECT_GLENUM_EQ(GL_FLOAT, outputVariable->type);
-    EXPECT_GLENUM_EQ(GL_MEDIUM_FLOAT, outputVariable->precision);
-}
-
-// Test that gl_FragDataEXT built-in usage in ESSL1 fragment shader is reflected in the output
-// variables list. Also test that the precision is highp if user requests it.
+// variables list. Also test that the precision is highp because the translator assumes it's always
+// supported.
 TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragDepthHighp)
 {
     const std::string &fragDepthHighShader =
@@ -701,7 +682,6 @@ TEST_F(CollectFragmentVariablesTest, OutputVarESSL1FragDepthHighp)
 
     ShBuiltInResources resources    = mTranslator->getResources();
     resources.EXT_frag_depth        = 1;
-    resources.FragmentPrecisionHigh = 1;
     initTranslator(resources);
 
     const ShaderVariable *outputVariable = nullptr;

@@ -1,12 +1,12 @@
 {
   "scripts/egl_angle_ext.xml":
-    "8389749098fae1d5c832a06b5be51dc1",
+    "676627eae49a3ccadeafc3adbd7dba8d",
   "scripts/generate_loader.py":
     "93c78a8d11323fa311fed5118fbcf083",
   "scripts/gl_angle_ext.xml":
-    "da4ecccdd77635f1b0e9d4664f856706",
+    "df82dab93ee0204653ab74bd08db6496",
   "scripts/registry_xml.py":
-    "08a71b46d1660385ac20ec90f972655e",
+    "9244205c03f20bdb0ef1209a4db51717",
   "src/libEGL/egl_loader_autogen.cpp":
     "2aca2a57c51fc2b1c7e1da0a7ccf6107",
   "src/libEGL/egl_loader_autogen.h":
@@ -14,29 +14,29 @@
   "third_party/EGL-Registry/src/api/egl.xml":
     "2056d54ea07156f1988ca1366bdee21a",
   "third_party/OpenCL-Docs/src/xml/cl.xml":
-    "6d0bf09e20a8f8c3ae440d79eda08bf9",
+    "3c93f136de5049f4d9eca8240df1a025",
   "third_party/OpenGL-Registry/src/xml/gl.xml":
-    "d7ed846c15f72e084763c22d70adf1e2",
+    "1eb37882507017323d5e447e42e74f62",
   "third_party/OpenGL-Registry/src/xml/glx.xml":
-    "6e1745b04a1ac673c60aaa5dd819f3c4",
+    "848c20fce49f58e42a23b93005202739",
   "third_party/OpenGL-Registry/src/xml/wgl.xml":
-    "eae784bf4d1b983a42af5671b140b7c4",
+    "53f90180449a1abcd8fdfe56fc5c869c",
   "util/capture/trace_egl_loader_autogen.cpp":
     "a05c41eb1cc6e24c006cb3f462b694cf",
   "util/capture/trace_egl_loader_autogen.h":
     "9adc81af729078b16b36647f02401342",
   "util/capture/trace_gles_loader_autogen.cpp":
-    "81242937e728987adc15e39c0b007ff5",
+    "cd65356db08f7cca20761e6310d878c2",
   "util/capture/trace_gles_loader_autogen.h":
-    "d369496980c96dd58d2a00fd40386b08",
+    "67bcb6e47338598421ff9c91deed414b",
   "util/egl_loader_autogen.cpp":
     "ae6abfc6c2c0a997ad59258dfc0339ce",
   "util/egl_loader_autogen.h":
     "ea5f73048616a6fc80eaa7e93ef5f0ce",
   "util/gles_loader_autogen.cpp":
-    "33c532e70695584adb587d6c3e55789c",
+    "9987da4de3e2e697f066dcec1234b6a3",
   "util/gles_loader_autogen.h":
-    "09a4e0c77d71c01b44caa74b4da72eff",
+    "cffa3192c460ed247a48b120ef4774f3",
   "util/windows/wgl_loader_autogen.cpp":
     "373b062587eab8a163121255f54597dc",
   "util/windows/wgl_loader_autogen.h":

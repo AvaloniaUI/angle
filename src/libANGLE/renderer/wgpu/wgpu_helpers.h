@@ -52,10 +52,25 @@ struct SubresourceUpdate
                       BufferHandle targetBuffer,
                       const WGPUTexelCopyBufferLayout &targetBufferLayout)
     {
-        updateSource = targetUpdateSource;
-        textureData  = targetBuffer;
+        updateSource      = targetUpdateSource;
+        textureData       = targetBuffer;
         textureDataLayout = targetBufferLayout;
-        targetLevel  = newTargetLevel;
+        targetLevel       = newTargetLevel;
+    }
+
+    SubresourceUpdate(UpdateSource targetUpdateSource,
+                      gl::LevelIndex newTargetLevel,
+                      uint32_t newLayerIndex,
+                      uint32_t newLayerCount,
+                      BufferHandle targetBuffer,
+                      const WGPUTexelCopyBufferLayout &targetBufferLayout)
+    {
+        updateSource      = targetUpdateSource;
+        textureData       = targetBuffer;
+        textureDataLayout = targetBufferLayout;
+        targetLevel       = newTargetLevel;
+        layerIndex        = newLayerIndex;
+        layerCount        = newLayerCount;
     }
 
     SubresourceUpdate(UpdateSource targetUpdateSource,
@@ -64,8 +79,8 @@ struct SubresourceUpdate
                       bool hasDepth,
                       bool hasStencil)
     {
-        updateSource = targetUpdateSource;
-        targetLevel  = newTargetLevel;
+        updateSource          = targetUpdateSource;
+        targetLevel           = newTargetLevel;
         clearData.clearValues = clearValues;
         clearData.hasDepth    = hasDepth;
         clearData.hasStencil  = hasStencil;
@@ -77,6 +92,8 @@ struct SubresourceUpdate
     WGPUTexelCopyBufferLayout textureDataLayout;
 
     gl::LevelIndex targetLevel;
+    uint32_t layerIndex = 0;
+    uint32_t layerCount = 1;
 };
 
 WGPUTextureDimension ToWgpuTextureDimension(gl::TextureType glTextureType);
@@ -129,8 +146,29 @@ class ImageHelper : public angle::Subject
                     bool hasStencil);
 
     void removeStagedUpdates(gl::LevelIndex levelToRemove);
+    void removeSingleSubresourceStagedUpdates(gl::LevelIndex levelToRemove,
+                                              uint32_t layerIndex,
+                                              uint32_t layerCount);
 
     void resetImage();
+
+    angle::Result CopyImage(ContextWgpu *contextWgpu,
+                            ImageHelper *srcImage,
+                            const gl::ImageIndex &dstIndex,
+                            const gl::Offset &dstOffset,
+                            gl::LevelIndex sourceLevelGL,
+                            uint32_t sourceLayer,
+                            const gl::Box &sourceBox,
+                            WGPUTextureAspect aspect);
+
+    angle::Result copyImageCpuReadback(const gl::Context *context,
+                                       const gl::ImageIndex &index,
+                                       const gl::Rectangle &sourceArea,
+                                       const gl::Offset &dstOffset,
+                                       const gl::Extents &dstExtent,
+                                       const gl::InternalFormat &formatInfo,
+                                       ImageHelper *srcImage,
+                                       const gl::Extents &srcExtents);
 
     static angle::Result getReadPixelsParams(rx::ContextWgpu *contextWgpu,
                                              const gl::PixelPackState &packState,
@@ -145,11 +183,15 @@ class ImageHelper : public angle::Subject
     angle::Result readPixels(rx::ContextWgpu *contextWgpu,
                              const gl::Rectangle &area,
                              const rx::PackPixelsParams &packPixelsParams,
+                             webgpu::LevelIndex level,
+                             uint32_t layer,
                              void *pixels);
 
     angle::Result createTextureViewSingleLevel(gl::LevelIndex targetLevel,
                                                uint32_t layerIndex,
-                                               TextureViewHandle &textureViewOut);
+                                               TextureViewHandle &textureViewOut,
+                                               WGPUTextureAspect aspect,
+                                               WGPUTextureFormat format);
     angle::Result createFullTextureView(TextureViewHandle &textureViewOut,
                                         WGPUTextureViewDimension desiredViewDimension);
     angle::Result createTextureView(gl::LevelIndex targetLevel,
@@ -157,7 +199,9 @@ class ImageHelper : public angle::Subject
                                     uint32_t layerIndex,
                                     uint32_t arrayLayerCount,
                                     TextureViewHandle &textureViewOut,
-                                    WGPUTextureViewDimension desiredViewDimension);
+                                    Optional<WGPUTextureViewDimension> desiredViewDimension,
+                                    WGPUTextureAspect aspect,
+                                    WGPUTextureFormat format);
     LevelIndex toWgpuLevel(gl::LevelIndex levelIndexGl) const;
     gl::LevelIndex toGlLevel(LevelIndex levelIndexWgpu) const;
     bool isTextureLevelInAllocatedImage(gl::LevelIndex textureLevel) const;

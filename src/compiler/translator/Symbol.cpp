@@ -6,6 +6,10 @@
 // Symbol.cpp: Symbols representing variables, functions, structures and interface blocks.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #if defined(_MSC_VER)
 #    pragma warning(disable : 4718)
 #endif
@@ -27,8 +31,6 @@ constexpr const ImmutableString kImageStoreName("imageStore");
 constexpr const ImmutableString kImageSizeName("imageSize");
 constexpr const ImmutableString kImageAtomicExchangeName("imageAtomicExchange");
 constexpr const ImmutableString kAtomicCounterName("atomicCounter");
-
-static const char kFunctionMangledNameSeparator = '(';
 
 }  // anonymous namespace
 
@@ -163,7 +165,8 @@ TInterfaceBlock::TInterfaceBlock(TSymbolTable *symbolTable,
     : TSymbol(symbolTable, name, symbolType, SymbolClass::InterfaceBlock, extension),
       TFieldListCollection(fields),
       mBlockStorage(layoutQualifier.blockStorage),
-      mBinding(layoutQualifier.binding)
+      mBinding(layoutQualifier.binding),
+      mIsDefaultUniformBlock(false)
 {
     ASSERT(name != nullptr);
 }
@@ -177,7 +180,8 @@ TInterfaceBlock::TInterfaceBlock(TSymbolTable *symbolTable,
     : TSymbol(symbolTable, name, symbolType, SymbolClass::InterfaceBlock, extensions),
       TFieldListCollection(fields),
       mBlockStorage(layoutQualifier.blockStorage),
-      mBinding(layoutQualifier.binding)
+      mBinding(layoutQualifier.binding),
+      mIsDefaultUniformBlock(false)
 {
     ASSERT(name != nullptr);
 }
@@ -224,6 +228,8 @@ void TFunction::shareParameters(const TFunction &parametersSource)
 
 ImmutableString TFunction::buildMangledName() const
 {
+    constexpr char kFunctionMangledNameSeparator = '(';
+
     ImmutableString name = this->name();
     std::string newName(name.data(), name.length());
     newName += kFunctionMangledNameSeparator;

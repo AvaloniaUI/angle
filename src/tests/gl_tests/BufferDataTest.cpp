@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -1372,6 +1376,67 @@ void main()
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::cyan);
 }
 
+// Tests unaligned vertex attribute pointer, which should get to convertVertexBufferCPU in vulkan
+// backend.
+TEST_P(BufferDataTest, UnalignedVertexAttribPointer)
+{
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::UniformColor());
+    glUseProgram(program);
+
+    GLint positionLocation = glGetAttribLocation(program, essl1_shaders::PositionAttrib());
+    ASSERT_NE(positionLocation, -1);
+    glEnableVertexAttribArray(positionLocation);
+
+    GLint colorUniformLocation =
+        glGetUniformLocation(program, angle::essl1_shaders::ColorUniform());
+    ASSERT_NE(colorUniformLocation, -1);
+
+    // Allocate 8MB buffer to force non sub-allocation path
+    constexpr GLsizeiptr kBufferSize = 8 * 1024 * 1024;
+    std::vector<uint8_t> initialData(kBufferSize, 0);
+
+    GLBuffer positionBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+    glBufferData(GL_ARRAY_BUFFER, kBufferSize, initialData.data(), GL_DYNAMIC_DRAW);
+
+    // Trigger CPU downgrade conversion with unaligned stride/offset
+    const GLsizei stride      = 13;
+    const GLintptr offset     = 1;
+    const GLint components    = 3;
+    const GLsizei typeSize    = sizeof(GLfloat);
+    const GLsizei elementSize = components * typeSize;  // 12
+
+    // Calculate vertexCount equivalent to Math.floor in JS
+    GLsizei vertexCount     = (kBufferSize - offset - elementSize) / stride + 1;
+    GLsizei quadVertexCount = (vertexCount / 6) * 6;
+    GLsizei firstVertex     = vertexCount - quadVertexCount;
+
+    glVertexAttribPointer(positionLocation, components, GL_FLOAT, GL_FALSE, stride,
+                          reinterpret_cast<const void *>(offset));
+
+    // First draw: establishes the conversion buffer
+    glDrawArrays(GL_TRIANGLES, firstVertex, quadVertexCount);
+    // CRITICAL: glFinish() forces GPU pipeline flush, preventing buffer reallocation
+    glFinish();
+
+    // SubData near the end - must be >= 12 bytes to break ANGLE's dirty-range short-circuit
+    const std::array<Vector3, 6> &quadVertices = GetQuadVertices();
+    std::vector<uint8_t> updateData(stride * 6);
+    for (int vertexIndex = 0; vertexIndex < 6; vertexIndex++)
+    {
+        memcpy(updateData.data() + stride * vertexIndex, quadVertices[vertexIndex].data(),
+               quadVertices[vertexIndex].size() * sizeof(float));
+    }
+    GLintptr lastQuadVertexStartPtr = offset + (vertexCount - 6) * stride;
+    glBufferSubData(GL_ARRAY_BUFFER, lastQuadVertexStartPtr, updateData.size(), updateData.data());
+
+    // Draw green quad. This should trigger partial update but should not access out of bounds
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUniform4fv(colorUniformLocation, 1, &kFloatGreen.R);
+    glDrawArrays(GL_TRIANGLES, firstVertex, quadVertexCount);
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::green);
+}
+
 // Verify that previous draws are not affected when a buffer is respecified with null data
 // and updated by calling map.
 TEST_P(BufferDataTestES3, BufferDataWithNullFollowedByMap)
@@ -1962,6 +2027,40 @@ TEST_P(BufferStorageTestES3, VertexBufferMapped)
     EXPECT_GL_NO_ERROR();
 }
 
+// Verify that glReadPixels works with a persistently mapped buffer.
+TEST_P(BufferStorageTestES3, ReadPixelsPersistentBuffer)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_buffer_storage"));
+
+    GLBuffer buffer;
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer);
+    glBufferStorageEXT(GL_PIXEL_PACK_BUFFER, 4, nullptr,
+                       GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT);
+    ASSERT_GL_NO_ERROR();
+
+    void *mapPtr =
+        glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, 4,
+                         GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT);
+    ASSERT_NE(nullptr, mapPtr);
+    ASSERT_GL_NO_ERROR();
+
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    ASSERT_GL_NO_ERROR();
+
+    glFinish();
+
+    GLColor actual;
+    memcpy(&actual, mapPtr, sizeof(actual));
+
+    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_EQ(GLColor::green, actual);
+}
+
 void TestPageSharingBuffers(std::function<void(void)> swapCallback,
                             size_t bufferSize,
                             const std::array<Vector3, 6> &quadVertices,
@@ -2375,6 +2474,33 @@ TEST_P(BufferStorageTestES3, BufferStorageGetParameter)
     glBindBuffer(GL_COPY_READ_BUFFER, 0);
 }
 
+class BufferDataTest1gbLimit : public BufferDataTest
+{};
+
+// Allocating >1gb should generate an INVALID_OPERATION when LimitMaxBufferSizeTo1gb is enabled.
+TEST_P(BufferDataTest1gbLimit, ErrorGeneratedOnLargeAllocation)
+{
+    GLBuffer buffer;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    EXPECT_GL_NO_ERROR();
+
+    // First make sure a small allocation works
+    glBufferData(GL_ARRAY_BUFFER, (1 << 10) + 1, nullptr, GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // >1gb should fail.
+    glBufferData(GL_ARRAY_BUFFER, (1 << 30) + 1, nullptr, GL_STATIC_DRAW);
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    // glCopyBufferSubData can't be tested because a source buffer > 1gb cannot be created.
+
+    if (EnsureGLExtensionEnabled("GL_EXT_buffer_storage"))
+    {
+        glBufferStorageEXT(GL_ARRAY_BUFFER, (1 << 30) + 1, nullptr, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    }
+}
+
 ANGLE_INSTANTIATE_TEST_ES2(BufferDataTest);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BufferSubDataTest);
@@ -2399,6 +2525,10 @@ ANGLE_INSTANTIATE_TEST_ES3(IndexedBufferCopyTest);
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BufferStorageTestES3Threaded);
 ANGLE_INSTANTIATE_TEST_ES3(BufferStorageTestES3Threaded);
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BufferDataTest1gbLimit);
+ANGLE_INSTANTIATE_TEST(BufferDataTest1gbLimit,
+                       ES2_OPENGL().enable(Feature::LimitMaxBufferSizeTo1gb),
+                       ES3_OPENGL().enable(Feature::LimitMaxBufferSizeTo1gb));
 #ifdef _WIN64
 
 // Test a bug where an integer overflow bug could trigger a crash in D3D.

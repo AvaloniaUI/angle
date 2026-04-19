@@ -4,7 +4,11 @@
 // found in the LICENSE file.
 //
 
-// Buffer11.cpp Defines the Buffer11 class.
+// Buffer11.cpp: Defines the Buffer11 class.
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
 
 #include "libANGLE/renderer/d3d/d3d11/Buffer11.h"
 
@@ -268,7 +272,6 @@ class Buffer11::PackStorage : public Buffer11::BufferStorage
     TextureHelper11 mStagingTexture;
     angle::MemoryBuffer mMemoryBuffer;
     std::unique_ptr<PackPixelsParams> mQueuedPackCommand;
-    PackPixelsParams mPackParams;
     bool mDataModified;
 };
 
@@ -1593,23 +1596,29 @@ angle::Result Buffer11::PackStorage::packPixels(const gl::Context *context,
     RenderTarget11 *renderTarget = nullptr;
     ANGLE_TRY(readAttachment.getRenderTarget(context, 0, &renderTarget));
 
-    const TextureHelper11 &srcTexture = renderTarget->getTexture();
-    ASSERT(srcTexture.valid());
+    const TextureHelper11 *srcTexture = &renderTarget->getTexture();
+    ASSERT(srcTexture->valid());
     unsigned int srcSubresource = renderTarget->getSubresourceIndex();
+
+    TextureHelper11 resolvedTexture;
+    if (srcTexture->getSampleCount() > 1)
+    {
+        ANGLE_TRY(mRenderer->resolveMultisampledTexture(context, renderTarget, false, false,
+                                                        &resolvedTexture));
+        srcTexture     = &resolvedTexture;
+        srcSubresource = 0;
+    }
 
     mQueuedPackCommand.reset(new PackPixelsParams(params));
 
     gl::Extents srcTextureSize(params.area.width, params.area.height, 1);
-    if (!mStagingTexture.get() || mStagingTexture.getFormat() != srcTexture.getFormat() ||
+    if (!mStagingTexture.get() || mStagingTexture.getFormat() != srcTexture->getFormat() ||
         mStagingTexture.getExtents() != srcTextureSize)
     {
-        ANGLE_TRY(mRenderer->createStagingTexture(context, srcTexture.getTextureType(),
-                                                  srcTexture.getFormatSet(), srcTextureSize,
+        ANGLE_TRY(mRenderer->createStagingTexture(context, srcTexture->getTextureType(),
+                                                  srcTexture->getFormatSet(), srcTextureSize,
                                                   StagingAccess::READ, &mStagingTexture));
     }
-
-    // ReadPixels from multisampled FBOs isn't supported in current GL
-    ASSERT(srcTexture.getSampleCount() <= 1);
 
     ID3D11DeviceContext *immediateContext = mRenderer->getDeviceContext();
     D3D11_BOX srcBox;
@@ -1627,7 +1636,7 @@ angle::Result Buffer11::PackStorage::packPixels(const gl::Context *context,
     srcBox.back = srcBox.front + 1;
 
     // Asynchronous copy
-    immediateContext->CopySubresourceRegion(mStagingTexture.get(), 0, 0, 0, 0, srcTexture.get(),
+    immediateContext->CopySubresourceRegion(mStagingTexture.get(), 0, 0, 0, 0, srcTexture->get(),
                                             srcSubresource, &srcBox);
 
     return angle::Result::Continue;

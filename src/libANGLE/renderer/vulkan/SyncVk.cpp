@@ -248,8 +248,13 @@ angle::Result SyncHelper::serverWait(ContextVk *contextVk)
 
 angle::Result SyncHelper::getStatus(ErrorContext *context, ContextVk *contextVk, bool *signaledOut)
 {
-    // Submit commands if it was deferred on the context that issued the sync object
-    ANGLE_TRY(submitSyncIfDeferred(contextVk, RenderPassClosureReason::SyncObjectClientWait));
+    ASSERT(context);
+    if (!context->getFeatures().disableSubmitCommandsOnSyncStatusCheckForTesting.enabled)
+    {
+        // Submit commands if it was deferred on the context that issued the sync object
+        ANGLE_TRY(submitSyncIfDeferred(contextVk, RenderPassClosureReason::SyncObjectClientWait));
+    }
+
     ASSERT(mUse.valid());
     Renderer *renderer = context->getRenderer();
     if (renderer->hasResourceUseFinished(mUse))
@@ -441,7 +446,7 @@ angle::Result SyncHelperNativeFence::initializeWithFd(ContextVk *contextVk, int 
     */
     // Flush current pending set of commands providing the fence...
     ANGLE_TRY(contextVk->flushAndSubmitCommands(nullptr, &mExternalFence,
-                                                RenderPassClosureReason::SyncObjectWithFdInit));
+                                                QueueSubmitReason::SyncObjectWithFdInit));
 
     ANGLE_VK_TRY(contextVk, mExternalFence->getFenceFdStatus());
 
@@ -473,7 +478,7 @@ angle::Result SyncHelperNativeFence::prepareForClientWait(ErrorContext *context,
     if (flushCommands && contextVk)
     {
         ANGLE_TRY(contextVk->flushAndSubmitCommands(nullptr, nullptr,
-                                                    RenderPassClosureReason::SyncObjectClientWait));
+                                                    QueueSubmitReason::SyncObjectClientWait));
     }
 
     *resultOut = VK_INCOMPLETE;
@@ -529,7 +534,7 @@ angle::Result SyncHelperNativeFence::serverWait(ContextVk *contextVk)
     DeviceScoped<Semaphore> waitSemaphore(device);
     // Wait semaphore for next vkQueueSubmit().
     // Create a Semaphore with imported fenceFd.
-    ANGLE_VK_TRY(contextVk, waitSemaphore.get().init(device));
+    ANGLE_VK_TRY(contextVk, waitSemaphore.get().init(device, VK_SEMAPHORE_TYPE_BINARY));
 
     VkImportSemaphoreFdInfoKHR importFdInfo = {};
     importFdInfo.sType                      = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;

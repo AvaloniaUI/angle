@@ -3,9 +3,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Texture upload format tests:
+// TextureUploadFormatTest.cpp:
 //   Test all texture unpack/upload formats for sampling correctness.
 //
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
 
 #include "common/mathutil.h"
 #include "image_util/copyimage.h"
@@ -16,12 +20,20 @@ using namespace angle;
 
 namespace
 {
+enum class UploadSource
+{
+    ClientMemory,
+    PBO,
+};
 
 class TextureUploadFormatTest : public ANGLETest<>
 {
   protected:
-    void TestAll(const bool usePBO);
+    void TestAll(UploadSource uploadSource);
 };
+
+class TextureUploadFormatTest_ES3 : public TextureUploadFormatTest
+{};
 
 struct TexFormat final
 {
@@ -147,7 +159,7 @@ void EncodeThenZeroAndCopy(DestT &dest, const float srcVals[4])
 // Upload (1,2,5,3) to integer formats, and (1,2,5,3)/8.0 to float formats.
 // Draw a point into a 1x1 renderbuffer and readback the result for comparison with expectations.
 // Test all internalFormat/unpackFormat/unpackType combinations from ES3.0.
-void TextureUploadFormatTest::TestAll(const bool usePBO)
+void TextureUploadFormatTest::TestAll(UploadSource uploadSource)
 {
     ANGLE_SKIP_TEST_IF(IsD3D9());
 
@@ -295,6 +307,7 @@ void TextureUploadFormatTest::TestAll(const bool usePBO)
     std::array<uint8_t, srcBuffer.size() * 2> subrectBuffer;
 
     GLBuffer pboBuffer;
+    const bool usePBO = uploadSource == UploadSource::PBO;
     if (usePBO)
     {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboBuffer);
@@ -661,14 +674,42 @@ void TextureUploadFormatTest::TestAll(const bool usePBO)
 // Test uploadings without PBO
 TEST_P(TextureUploadFormatTest, All)
 {
-    TestAll(/*usePBO=*/false);
+    TestAll(UploadSource::ClientMemory);
 }
 
 // Test uploadings with PBO
-TEST_P(TextureUploadFormatTest, AllWithPBO)
+TEST_P(TextureUploadFormatTest_ES3, AllWithPBO)
 {
-    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
-    TestAll(/*usePBO=*/true);
+    TestAll(UploadSource::PBO);
+}
+
+// Test invalid upload format combinations in ES2
+TEST_P(TextureUploadFormatTest, InvalidTypeAndFormat)
+{
+    constexpr std::array<uint32_t, 16> kData{};
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    if (IsGLExtensionEnabled("GL_OES_rgb8_rgba8") && IsGLExtensionEnabled("GL_OES_texture_float"))
+    {
+        // Regression test for when the format check for GL_UNSIGNED_INT_2_10_10_10_REV_EXT
+        // accidentally allowed all formats.
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1, 1, 0, GL_RGB, GL_FLOAT, kData.data());
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    }
+
+    if (IsGLExtensionEnabled("GL_OES_required_internalformat") &&
+        IsGLExtensionEnabled("GL_OES_texture_float"))
+    {
+        // Regression test for when the format check for GL_UNSIGNED_INT_2_10_10_10_REV_EXT
+        // accidentally allowed all formats.
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB565_OES, 1, 1, 0, GL_RGB, GL_FLOAT, kData.data());
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    }
 }
 
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(TextureUploadFormatTest);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(TextureUploadFormatTest_ES3);
+ANGLE_INSTANTIATE_TEST_ES3(TextureUploadFormatTest_ES3);

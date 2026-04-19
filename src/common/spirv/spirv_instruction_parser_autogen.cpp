@@ -3792,7 +3792,7 @@ void ParseGroupNonUniformBroadcast(const uint32_t *_instruction,
                                    IdResult *idResult2,
                                    IdScope *execution,
                                    IdRef *value,
-                                   IdRef *id)
+                                   IdRef *invocationId)
 {
     spv::Op _op;
     uint32_t _length;
@@ -3803,7 +3803,7 @@ void ParseGroupNonUniformBroadcast(const uint32_t *_instruction,
     *idResult2     = IdResult(_instruction[_o++]);
     *execution     = IdScope(_instruction[_o++]);
     *value         = IdRef(_instruction[_o++]);
-    *id            = IdRef(_instruction[_o++]);
+    *invocationId  = IdRef(_instruction[_o++]);
 }
 void ParseGroupNonUniformBroadcastFirst(const uint32_t *_instruction,
                                         IdResultType *idResultType1,
@@ -3926,7 +3926,7 @@ void ParseGroupNonUniformShuffle(const uint32_t *_instruction,
                                  IdResult *idResult2,
                                  IdScope *execution,
                                  IdRef *value,
-                                 IdRef *id)
+                                 IdRef *invocationId)
 {
     spv::Op _op;
     uint32_t _length;
@@ -3937,7 +3937,7 @@ void ParseGroupNonUniformShuffle(const uint32_t *_instruction,
     *idResult2     = IdResult(_instruction[_o++]);
     *execution     = IdScope(_instruction[_o++]);
     *value         = IdRef(_instruction[_o++]);
-    *id            = IdRef(_instruction[_o++]);
+    *invocationId  = IdRef(_instruction[_o++]);
 }
 void ParseGroupNonUniformShuffleXor(const uint32_t *_instruction,
                                     IdResultType *idResultType1,
@@ -4442,6 +4442,18 @@ void ParsePtrNotEqual(const uint32_t *_instruction,
     *idResult2     = IdResult(_instruction[_o++]);
     *operand1      = IdRef(_instruction[_o++]);
     *operand2      = IdRef(_instruction[_o++]);
+}
+void ParseIsHelperInvocationEXT(const uint32_t *_instruction,
+                                IdResultType *idResultType1,
+                                IdResult *idResult2)
+{
+    spv::Op _op;
+    uint32_t _length;
+    GetInstructionOpAndLength(_instruction, &_op, &_length);
+    ASSERT(_op == spv::OpIsHelperInvocationEXT);
+    uint32_t _o    = 1;
+    *idResultType1 = IdResultType(_instruction[_o++]);
+    *idResult2     = IdResult(_instruction[_o++]);
 }
 
 }  // namespace spirv

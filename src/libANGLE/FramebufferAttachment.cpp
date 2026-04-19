@@ -130,6 +130,15 @@ void FramebufferAttachment::attach(const Context *context,
     mBaseViewIndex          = baseViewIndex;
     mIsMultiview            = isMultiview;
     mRenderToTextureSamples = type == GL_RENDERBUFFER ? kDefaultRenderToTextureSamples : samples;
+    if (mIsMultiview)
+    {
+        // Multiview framebuffer attachments can only be created through:
+        // 1) glFramebufferTextureMultiviewOVR
+        // 2) glNamedFramebufferTextureMultiviewOVR
+        // 3) glFramebufferTextureMultisampleMultiviewOVR
+        // All of the above method require the attachment to be texture, not renderbuffer.
+        ASSERT(type != GL_RENDERBUFFER);
+    }
     resource->onAttach(context, framebufferSerial);
 
     if (mResource != nullptr)
@@ -205,6 +214,11 @@ GLint FramebufferAttachment::layer() const
 
     const gl::ImageIndex &index = mTarget.textureIndex();
     return (index.has3DLayer() ? index.getLayerIndex() : 0);
+}
+
+bool FramebufferAttachment::hasLayer() const
+{
+    return mTarget.textureIndex().hasLayer();
 }
 
 bool FramebufferAttachment::isLayered() const

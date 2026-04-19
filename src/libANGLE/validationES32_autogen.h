@@ -18,6 +18,7 @@ namespace gl
 {
 class Context;
 class PrivateState;
+class PrivateStateCache;
 class ErrorSet;
 
 bool ValidateBlendBarrier(const Context *context, angle::EntryPoint entryPoint);
@@ -162,12 +163,12 @@ bool ValidateGetPointerv(const Context *context,
 bool ValidateGetSamplerParameterIiv(const Context *context,
                                     angle::EntryPoint entryPoint,
                                     SamplerID samplerPacked,
-                                    GLenum pname,
+                                    SamplerParameter pnamePacked,
                                     const GLint *params);
 bool ValidateGetSamplerParameterIuiv(const Context *context,
                                      angle::EntryPoint entryPoint,
                                      SamplerID samplerPacked,
-                                     GLenum pname,
+                                     SamplerParameter pnamePacked,
                                      const GLuint *params);
 bool ValidateGetTexParameterIiv(const Context *context,
                                 angle::EntryPoint entryPoint,
@@ -253,12 +254,12 @@ bool ValidateReadnPixels(const Context *context,
 bool ValidateSamplerParameterIiv(const Context *context,
                                  angle::EntryPoint entryPoint,
                                  SamplerID samplerPacked,
-                                 GLenum pname,
+                                 SamplerParameter pnamePacked,
                                  const GLint *param);
 bool ValidateSamplerParameterIuiv(const Context *context,
                                   angle::EntryPoint entryPoint,
                                   SamplerID samplerPacked,
-                                  GLenum pname,
+                                  SamplerParameter pnamePacked,
                                   const GLuint *param);
 bool ValidateTexBuffer(const Context *context,
                        angle::EntryPoint entryPoint,

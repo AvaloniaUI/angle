@@ -73,10 +73,11 @@ struct ParamCapture : angle::NonCopyable
     ParamType type;
     ParamValue value;
     gl::GLESEnum enumGroup;   // only used for param type GLenum, GLboolean and GLbitfield
-    gl::BigGLEnum bigGLEnum;  // only used for param type GLenum, GLboolean and GLbitfield
     ParamData data;
     int dataNElements           = 0;
     int arrayClientPointerIndex = -1;
+    int arrayClientPointerMergedIndex = -1;
+    int arrayClientPointerOffset      = 0;
     size_t readBufferSizeBytes  = 0;
     uint32_t uniqueID           = 0;
     static uint32_t nextID;
@@ -100,11 +101,6 @@ class ParamBuffer final : angle::NonCopyable
     template <typename T>
     void addEnumParam(const char *paramName,
                       gl::GLESEnum enumGroup,
-                      ParamType paramType,
-                      T paramValue);
-    template <typename T>
-    void addEnumParam(const char *paramName,
-                      gl::BigGLEnum enumGroup,
                       ParamType paramType,
                       T paramValue);
 
@@ -190,18 +186,6 @@ void ParamBuffer::addEnumParam(const char *paramName,
     ParamCapture capture(paramName, paramType);
     InitParamValue(paramType, paramValue, &capture.value);
     capture.enumGroup = enumGroup;
-    mParamCaptures.emplace_back(std::move(capture));
-}
-
-template <typename T>
-void ParamBuffer::addEnumParam(const char *paramName,
-                               gl::BigGLEnum enumGroup,
-                               ParamType paramType,
-                               T paramValue)
-{
-    ParamCapture capture(paramName, paramType);
-    InitParamValue(paramType, paramValue, &capture.value);
-    capture.bigGLEnum = enumGroup;
     mParamCaptures.emplace_back(std::move(capture));
 }
 

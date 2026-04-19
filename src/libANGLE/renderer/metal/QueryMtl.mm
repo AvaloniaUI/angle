@@ -7,6 +7,10 @@
 //    Defines the class interface for QueryMtl, implementing QueryImpl.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/metal/QueryMtl.h"
 
 #include "libANGLE/renderer/metal/ContextMtl.h"
@@ -38,7 +42,7 @@ angle::Result QueryMtl::begin(const gl::Context *context)
             {
                 // Allocate buffer
                 ANGLE_TRY(mtl::Buffer::MakeBuffer(contextMtl, mtl::kOcclusionQueryResultSize,
-                                                  nullptr, &mVisibilityResultBuffer));
+                                                  &mVisibilityResultBuffer));
 
                 ANGLE_MTL_OBJC_SCOPE
                 {
@@ -122,7 +126,8 @@ angle::Result QueryMtl::waitAndGetResult(const gl::Context *context, T *params)
                 contextMtl->flushCommandBuffer(mtl::NoWait);
             }
             // map() will wait for the pending GPU works to finish
-            const uint8_t *visibilityResultBytes = mVisibilityResultBuffer->mapReadOnly(contextMtl);
+            const uint8_t *visibilityResultBytes =
+                mVisibilityResultBuffer->mapReadOnly(contextMtl).data();
             uint64_t queryResult;
             memcpy(&queryResult, visibilityResultBytes, sizeof(queryResult));
             mVisibilityResultBuffer->unmap(contextMtl);

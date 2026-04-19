@@ -24,7 +24,7 @@ class ShCompileTest : public testing::Test
     {
         sh::InitBuiltInResources(&mResources);
         mCompiler = sh::ConstructCompiler(GL_FRAGMENT_SHADER, SH_WEBGL_SPEC,
-                                          SH_GLSL_COMPATIBILITY_OUTPUT, &mResources);
+                                          SH_GLSL_150_CORE_OUTPUT, &mResources);
         ASSERT_TRUE(mCompiler != nullptr) << "Compiler could not be constructed.";
     }
 
@@ -83,8 +83,8 @@ class ShCompileComputeTest : public ShCompileTest
     void SetUp() override
     {
         sh::InitBuiltInResources(&mResources);
-        mCompiler = sh::ConstructCompiler(GL_COMPUTE_SHADER, SH_WEBGL3_SPEC,
-                                          SH_GLSL_COMPATIBILITY_OUTPUT, &mResources);
+        mCompiler = sh::ConstructCompiler(GL_COMPUTE_SHADER, SH_GLES3_1_SPEC,
+                                          SH_GLSL_150_CORE_OUTPUT, &mResources);
         ASSERT_TRUE(mCompiler != nullptr) << "Compiler could not be constructed.";
     }
 };

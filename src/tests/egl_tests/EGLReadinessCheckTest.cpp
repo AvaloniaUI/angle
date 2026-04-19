@@ -7,6 +7,10 @@
 // EGLReadinessCheckTest.cpp:
 //      Tests used to check environment in which other tests are run.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_libc_calls
+#endif
+
 #include <gtest/gtest.h>
 
 #include "gpu_info_util/SystemInfo.h"
@@ -79,7 +83,6 @@ TEST_P(EGLReadinessCheckTest, DISABLED_AllowlistMatchesSupport)
     check(ES1_D3D11());
     check(ES2_D3D11());
     check(ES3_D3D11());
-    check(ES31_D3D11());
 
     check(ES1_VULKAN());
     check(ES2_VULKAN());

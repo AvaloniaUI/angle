@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <cctype>
 
 #include "compiler/translator/InfoSink.h"
@@ -113,7 +117,6 @@ class ProgramPrelude : public TIntermTraverser
     void degrees();
     void radians();
     void mod();
-    void mixBool();
     void postIncrementMatrix();
     void preIncrementMatrix();
     void postDecrementMatrix();
@@ -277,14 +280,7 @@ class ProgramPrelude : public TIntermTraverser
     void interpolateAtCentroid();
     void interpolateAtSample();
     void interpolateAtOffset();
-    void postIncrementInt();
-    void preIncrementInt();
-    void postDecrementInt();
-    void preDecrementInt();
-    void addInt();
-    void addAssignInt();
-    void subInt();
-    void subAssignInt();
+    void loopForwardProgress();
 
   private:
     TInfoSinkBase &mOut;
@@ -436,15 +432,6 @@ template <typename X, typename Y>
 ANGLE_ALWAYS_INLINE X ANGLE_mod(X x, Y y)
 {
     return x - y * metal::floor(x / y);
-}
-)")
-
-PROGRAM_PRELUDE_DECLARE(mixBool,
-                        R"(
-template <typename T, int N>
-ANGLE_ALWAYS_INLINE metal::vec<T,N> ANGLE_mix_bool(metal::vec<T, N> a, metal::vec<T, N> b, metal::vec<bool, N> c)
-{
-    return metal::mix(a, b, static_cast<metal::vec<T,N>>(c));
 }
 )")
 
@@ -2776,87 +2763,11 @@ template <typename T>
 ANGLE_ALWAYS_INLINE T ANGLE_interpolateAtOffset(T value, float2) { return value; }
 )")
 
-PROGRAM_PRELUDE_DECLARE(preIncrementInt,
+PROGRAM_PRELUDE_DECLARE(loopForwardProgress,
                         R"(
-template <typename T>
-ANGLE_ALWAYS_INLINE thread T &ANGLE_preIncrementInt(thread T &a)
+ANGLE_ALWAYS_INLINE void ANGLE_loopForwardProgress()
 {
-    a = as_type<T>(metal::make_unsigned_t<T>(a) + 1);
-    return a;
-}
-)")
-
-PROGRAM_PRELUDE_DECLARE(postIncrementInt,
-                        R"(
-template <typename T>
-ANGLE_ALWAYS_INLINE T ANGLE_postIncrementInt(thread T &a)
-{
-    T r = a;
-    a = as_type<T>(metal::make_unsigned_t<T>(a) + 1);
-    return r;
-}
-)")
-
-PROGRAM_PRELUDE_DECLARE(preDecrementInt,
-                        R"(
-template <typename T>
-ANGLE_ALWAYS_INLINE thread T &ANGLE_preDecrementInt(thread T &a)
-{
-    a = as_type<T>(metal::make_unsigned_t<T>(a) - 1);
-    return a;
-}
-)")
-
-PROGRAM_PRELUDE_DECLARE(postDecrementInt,
-                        R"(
-template <typename T>
-ANGLE_ALWAYS_INLINE T ANGLE_postDecrementInt(thread T &a)
-{
-    T r = a;
-    a = as_type<T>(metal::make_unsigned_t<T>(a) - 1);
-    return r;
-}
-)")
-
-// Avoid undefined behavior due to integer overflow.
-PROGRAM_PRELUDE_DECLARE(addInt,
-                        R"(
-template<typename X, typename Y, typename Z = metal::conditional_t<metal::is_scalar_v<Y>, X, Y>>
-ANGLE_ALWAYS_INLINE Z ANGLE_addInt(X x, Y y)
-{
-    return as_type<Z>(metal::make_unsigned_t<Z>(x) + metal::make_unsigned_t<Z>(y));
-}
-)")
-
-// Avoid undefined behavior due to integer overflow.
-PROGRAM_PRELUDE_DECLARE(addAssignInt,
-                        R"(
-template<typename X, typename Y>
-ANGLE_ALWAYS_INLINE thread X &ANGLE_addAssignInt(thread X &x, Y y)
-{
-    x = as_type<X>(metal::make_unsigned_t<X>(x) + metal::make_unsigned_t<Y>(y));
-    return x;
-}
-)")
-
-// Avoid undefined behavior due to integer underflow.
-PROGRAM_PRELUDE_DECLARE(subInt,
-                        R"(
-template<typename X, typename Y, typename Z = metal::conditional_t<metal::is_scalar_v<Y>, X, Y>>
-ANGLE_ALWAYS_INLINE Z ANGLE_subInt(X x, Y y)
-{
-    return as_type<Z>(metal::make_unsigned_t<Z>(x) - metal::make_unsigned_t<Z>(y));
-}
-)")
-
-// Avoid undefined behavior due to integer underflow.
-PROGRAM_PRELUDE_DECLARE(subAssignInt,
-                        R"(
-template<typename X, typename Y>
-ANGLE_ALWAYS_INLINE thread X &ANGLE_subAssignInt(thread X &x, Y y)
-{
-    x = as_type<X>(metal::make_unsigned_t<X>(x) - metal::make_unsigned_t<Y>(y));
-    return x;
+    volatile bool p = true;
 }
 )")
 
@@ -3494,14 +3405,7 @@ void ProgramPrelude::visitOperator(TOperator op,
         case TOperator::EOpMax:
         case TOperator::EOpStep:
         case TOperator::EOpSmoothstep:
-            break;
         case TOperator::EOpMix:
-            if (argType2->getBasicType() == TBasicType::EbtBool)
-            {
-                mixBool();
-            }
-            break;
-
         case TOperator::EOpAll:
         case TOperator::EOpAny:
         case TOperator::EOpIsnan:
@@ -3522,20 +3426,12 @@ void ProgramPrelude::visitOperator(TOperator op,
             {
                 addScalarMatrix();
             }
-            if (argType0->isSignedInt())
-            {
-                addInt();
-            }
             break;
 
         case TOperator::EOpAddAssign:
             if (argType0->isMatrix() && argType1->isScalar())
             {
                 addMatrixScalarAssign();
-            }
-            if (argType0->isSignedInt())
-            {
-                addAssignInt();
             }
             break;
 
@@ -3548,20 +3444,12 @@ void ProgramPrelude::visitOperator(TOperator op,
             {
                 subScalarMatrix();
             }
-            if (argType0->isSignedInt())
-            {
-                subInt();
-            }
             break;
 
         case TOperator::EOpSubAssign:
             if (argType0->isMatrix() && argType1->isScalar())
             {
                 subMatrixScalarAssign();
-            }
-            if (argType0->isSignedInt())
-            {
-                subAssignInt();
             }
             break;
 
@@ -3623,20 +3511,12 @@ void ProgramPrelude::visitOperator(TOperator op,
             {
                 preIncrementMatrix();
             }
-            if (argType0->isSignedInt())
-            {
-                preIncrementInt();
-            }
             break;
 
         case TOperator::EOpPostIncrement:
             if (argType0->isMatrix())
             {
                 postIncrementMatrix();
-            }
-            if (argType0->isSignedInt())
-            {
-                postIncrementInt();
             }
             break;
 
@@ -3645,20 +3525,12 @@ void ProgramPrelude::visitOperator(TOperator op,
             {
                 preDecrementMatrix();
             }
-            if (argType0->isSignedInt())
-            {
-                preDecrementInt();
-            }
             break;
 
         case TOperator::EOpPostDecrement:
             if (argType0->isMatrix())
             {
                 postDecrementMatrix();
-            }
-            if (argType0->isSignedInt())
-            {
-                postDecrementInt();
             }
             break;
 
@@ -3773,6 +3645,10 @@ void ProgramPrelude::visitOperator(TOperator op,
 
         case TOperator::EOpConstruct:
             ASSERT(!func);
+            break;
+
+        case TOperator::EOpLoopForwardProgress:
+            loopForwardProgress();
             break;
 
         case TOperator::EOpCallFunctionInAST:

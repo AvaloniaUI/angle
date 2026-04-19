@@ -260,7 +260,7 @@ HGLRC WGLWindow::createContext(const ConfigParameters &configParams, HGLRC share
         return context;
     }
 
-    if (mConfigParams.webGLCompatibility.valid() || mConfigParams.robustResourceInit.valid())
+    if (mConfigParams.webGLCompatibility || mConfigParams.robustResourceInit)
     {
         std::cerr << "WGLWindow does not support the requested feature set." << std::endl;
         return context;
@@ -418,6 +418,16 @@ EGLint WGLWindow::getEGLError()
 WGLWindow::Display WGLWindow::getCurrentDisplay()
 {
     return nullptr;
+}
+
+WGLWindow::Surface WGLWindow::getCurrentSurface(EGLint readdraw)
+{
+    return nullptr;
+}
+
+EGLContext WGLWindow::getCurrentContext()
+{
+    return _wglGetCurrentContext();
 }
 
 WGLWindow::Surface WGLWindow::createPbufferSurface(const EGLint *attrib_list)

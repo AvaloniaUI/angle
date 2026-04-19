@@ -75,11 +75,6 @@ std::shared_ptr<ShaderTranslateTask> ShaderVk::compile(const gl::Context *contex
         options->ignorePrecisionQualifiers = true;
     }
 
-    if (contextVk->getFeatures().forceFragmentShaderPrecisionHighpToMediump.enabled)
-    {
-        options->forceShaderPrecisionHighpToMediump = true;
-    }
-
     if (contextVk->getFeatures().clampFragDepth.enabled)
     {
         options->clampFragDepth = true;
@@ -100,6 +95,11 @@ std::shared_ptr<ShaderTranslateTask> ShaderVk::compile(const gl::Context *contex
         options->addVulkanXfbEmulationSupportCode = true;
     }
 
+    if (contextVk->getFeatures().emulateDithering.enabled)
+    {
+        options->emulateDithering = true;
+    }
+
     if (contextVk->getFeatures().roundOutputAfterDithering.enabled)
     {
         options->roundOutputAfterDithering = true;
@@ -108,11 +108,6 @@ std::shared_ptr<ShaderTranslateTask> ShaderVk::compile(const gl::Context *contex
     if (contextVk->getFeatures().appendAliasedMemoryDecorations.enabled)
     {
         options->aliasedUnlessRestrict = true;
-    }
-
-    if (contextVk->getFeatures().explicitlyCastMediumpFloatTo16Bit.enabled)
-    {
-        options->castMediumpFloatTo16Bit = true;
     }
 
     if (contextVk->getExtensions().shaderPixelLocalStorageANGLE)
@@ -135,11 +130,21 @@ std::shared_ptr<ShaderTranslateTask> ShaderVk::compile(const gl::Context *contex
         options->emulateR32fImageAtomicExchange = true;
     }
 
+    if (contextVk->getFeatures().supportsShaderDemoteToHelperInvocation.enabled)
+    {
+        options->useDemoteToHelperInvocation = true;
+    }
+
     // https://issuetracker.google.com/406827038
     // Unconditionally set this option to true for the Vulkan backend
     options->preserveDenorms = true;
 
     options->removeInactiveVariables = true;
+
+    if (contextVk->getFeatures().convertLowpAndMediumpFloatUniformsTo16Bits.enabled)
+    {
+        options->transformFloatUniformTo16Bits = true;
+    }
 
     // The Vulkan backend needs no post-processing of the translated shader.
     return std::shared_ptr<ShaderTranslateTask>(new ShaderTranslateTask);

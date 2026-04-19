@@ -43,6 +43,8 @@ class ShareGroupVk : public ShareGroupImpl
     void onContextAdd() override;
 
     FramebufferCache &getFramebufferCache() { return mFramebufferCache; }
+    SamplerCache &getSamplerCache() { return mSamplerCache; }
+    SamplerYcbcrConversionCache &getYuvConversionCache() { return mYuvConversionCache; }
 
     bool hasAnyContextWithRobustness() const { return mState.hasAnyContextWithRobustness(); }
 
@@ -101,8 +103,11 @@ class ShareGroupVk : public ShareGroupImpl
         }
     }
 
-    void onFramebufferBoundary();
+    void onFrameBoundary();
     uint32_t getCurrentFrameCount() const { return mCurrentFrameCount; }
+
+    void imageWillFallbackFromTileMemory(vk::ImageHelper *image);
+    void finalizeImageLayoutInAllSharedContexts(vk::ImageHelper *image);
 
   private:
     angle::Result updateContextsPriority(ContextVk *contextVk, egl::ContextPriority newPriority);
@@ -116,6 +121,10 @@ class ShareGroupVk : public ShareGroupImpl
 
     // VkFramebuffer caches
     FramebufferCache mFramebufferCache;
+
+    // VkSampler and VkSamplerYcbcrConversion caches
+    SamplerCache mSamplerCache;
+    SamplerYcbcrConversionCache mYuvConversionCache;
 
     void resetPrevTexture() { mTextureUpload.resetPrevTexture(); }
 

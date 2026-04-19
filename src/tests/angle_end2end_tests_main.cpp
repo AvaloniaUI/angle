@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "gtest/gtest.h"
 #if defined(ANGLE_HAS_RAPIDJSON)
 #    include "test_utils/runner/TestSuite.h"
@@ -41,8 +45,8 @@ int main(int argc, char **argv)
     if (!HasArg(argc, argv, "--list-tests") && !HasArg(argc, argv, "--gtest_list_tests") &&
         HasArg(argc, argv, "--use-gl"))
     {
-        std::cerr << "--use-gl isn't supported by end2end tests - use *_EGL configs instead "
-                     "(angle_test_enable_system_egl=true)\n";
+        std::cerr << "--use-gl isn't supported by end2end tests - use the GN arg instead: "
+                     "angle_test_enable_system_egl=true\n";
         return EXIT_FAILURE;
     }
 
@@ -68,9 +72,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    // end2end test expectations only allow SKIP at the moment.
+    // end2end test expectations only allow SKIP, TIMEOUT, and PASS at the moment.
     testSuite.setTestExpectationsAllowMask(angle::GPUTestExpectationsParser::kGpuTestSkip |
-                                           angle::GPUTestExpectationsParser::kGpuTestTimeout);
+                                           angle::GPUTestExpectationsParser::kGpuTestTimeout |
+                                           angle::GPUTestExpectationsParser::kGpuTestPass);
 
     if (!testSuite.loadAllTestExpectationsFromFile(std::string(foundDataPath.data())))
     {

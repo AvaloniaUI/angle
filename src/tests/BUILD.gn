@@ -110,6 +110,9 @@ angle_static_library("angle_test_expectations") {
     sources += test_expectation_sources_ios
     frameworks = [ "Foundation.framework" ]
   }
+  if (angle_ir) {
+    configs += [ "${angle_root}:angle_translator_ir" ]
+  }
 }
 
 config("angle_common_test_utils_config") {
@@ -254,6 +257,10 @@ angle_test("angle_unittests") {
   if (angle_has_rapidjson) {
     sources += [ "../common/serializer/JsonSerializer_unittest.cpp" ]
   }
+
+  if (angle_ir) {
+    configs += [ "${angle_root}:angle_translator_ir" ]
+  }
 }
 
 if (is_ios) {
@@ -329,24 +336,20 @@ if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
       deps += [ "$angle_root:angle_json_serializer" ]
     }
 
-    if (build_angle_end2end_tests_aosp) {
-      # AOSP end2end tests builds don't bundle ANGLE libs or Vulkan tests and don't need the NDK path
+    if (angle_enable_vulkan) {
+      sources += [
+        "gl_tests/VulkanExternalImageTest.cpp",
+        "gl_tests/VulkanImageTest.cpp",
+        "test_utils/VulkanHelper.cpp",
+        "test_utils/VulkanHelper.h",
+      ]
+      deps += [ "$angle_root/src/common/vulkan" ]
+    }
+
+    if (angle_test_enable_system_egl) {
+      # Don't bundle the ANGLE libraries.
     } else {
-      if (is_android) {
-        include_dirs += [ "${android_ndk_root}/sysroot/usr/includes" ]
-      }
-
       data_deps = [ "$angle_root:angle" ]
-
-      if (angle_enable_vulkan) {
-        sources += [
-          "gl_tests/VulkanExternalImageTest.cpp",
-          "gl_tests/VulkanImageTest.cpp",
-          "test_utils/VulkanHelper.cpp",
-          "test_utils/VulkanHelper.h",
-        ]
-        deps += [ "$angle_root/src/common/vulkan" ]
-      }
     }
 
     if (is_android) {
@@ -551,6 +554,14 @@ if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
       sources += angle_white_box_tests_vulkan_sources
       deps += [ "$angle_root/src/common/vulkan:angle_vulkan_entry_points" ]
     }
+
+    if (angle_ir) {
+      configs += [ "${angle_root}:angle_translator_ir" ]
+    }
+
+    if (angle_enable_metal) {
+      sources += angle_white_box_tests_metal_sources
+    }
   }
 }
 
@@ -598,7 +609,7 @@ template("angle_perftests_common") {
     public_deps = [
       "$angle_root:angle_gl_enum_utils",
       "$angle_root/src/tests:angle_test_expectations",
-      "$angle_root/third_party/rapidjson:rapidjson",
+      "$angle_root/third_party/rapidjson",
       "${invoker.test_utils}",
     ]
     public_configs += [
@@ -1546,7 +1557,7 @@ if (build_angle_deqp_tests && !is_fuchsia) {
     public_deps = [ ":angle_deqp_framework_debase" ]
   }
 
-  config("angle_deqp_framework_common_config") {
+  config("angle_deqp_framework_common_public_config") {
     include_dirs = [
       "$deqp_path/framework/common",
       "$deqp_path/framework/randomshaders",
@@ -1554,9 +1565,18 @@ if (build_angle_deqp_tests && !is_fuchsia) {
     ]
   }
 
+  config("angle_deqp_framework_common_private_config") {
+    cflags_cc = [
+      # Usage of deprecated std::float_denorm_style.
+      # https://github.com/KhronosGroup/VK-GL-CTS/blob/84f86d999680e3d8a416b578bfc6e86ce8910853/framework/common/tcuFloatFormat.cpp#L275C32-L279
+      "-Wno-deprecated-declarations",
+    ]
+  }
+
   angle_deqp_source_set("angle_deqp_framework_common") {
     sources = deqp_framework_common_sources
-    public_configs = [ ":angle_deqp_framework_common_config" ]
+    public_configs = [ ":angle_deqp_framework_common_public_config" ]
+    configs += [ ":angle_deqp_framework_common_private_config" ]
     public_deps = [
       ":angle_deqp_framework_decpp",
       ":angle_deqp_framework_qphelper",
@@ -1762,11 +1782,6 @@ if (build_angle_deqp_tests && !is_fuchsia) {
       ":angle_deqp_framework_egl",
       ":angle_deqp_glshared",
     ]
-
-    # TODO(http://anglebug.com/420728429): It should be removed once the issue is resolved on the CTS code.
-    if (is_clang) {
-      cflags_cc = [ "-Wno-unused-private-field" ]
-    }
   }
 
   angle_deqp_source_set("angle_deqp_gles3_common") {
@@ -1783,11 +1798,6 @@ if (build_angle_deqp_tests && !is_fuchsia) {
       ":angle_deqp_framework_egl",
       ":angle_deqp_glshared",
     ]
-
-    # TODO(http://anglebug.com/420728429): It should be removed once the issue is resolved on the CTS code.
-    if (is_clang) {
-      cflags_cc = [ "-Wno-unused-private-field" ]
-    }
   }
 
   template("angle_deqp_core_gtest") {
@@ -1881,6 +1891,7 @@ if (build_angle_deqp_tests && !is_fuchsia) {
   config("angle_deqp_khr_common_config") {
     include_dirs = [
       "$deqp_path/external/openglcts/modules/common",
+      "$deqp_path/external/openglcts/modules/common/meshShader",
       "$deqp_path/external/openglcts/modules/common/subgroups",
       "$deqp_path/external/openglcts/modules/gl",
       "$deqp_path/external/openglcts/modules/gles2",
@@ -2010,6 +2021,12 @@ if (build_angle_deqp_tests && !is_fuchsia) {
     api = "gles32"
   }
 
+  angle_deqp_khr_gtest("khr_glesext") {
+    defines = [ "ANGLE_DEQP_KHR_GLESEXT_TESTS" ]
+    mustpass_name = "gles32-khr-glesext.txt"
+    api = "gles32"
+  }
+
   template("angle_deqp_rotate_gtest") {
     split_target = string_split(target_name, "_")
     _api = split_target[0]
@@ -2133,6 +2150,7 @@ group("angle_tests") {
       ":angle_deqp_khr_gles31_tests",
       ":angle_deqp_khr_gles32_tests",
       ":angle_deqp_khr_gles3_tests",
+      ":angle_deqp_khr_glesext_tests",
       ":angle_deqp_khr_noctx_gles2_tests",
       ":angle_deqp_khr_noctx_gles32_tests",
       ":angle_deqp_khr_single_gles32_tests",

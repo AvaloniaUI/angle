@@ -134,7 +134,8 @@ LIBRARY_TYPES = ('shared_library', 'static_library')
 def flattened_target(target_name: str, descs: dict, stop_at_lib: bool =True) -> dict:
     flattened = dict(descs[target_name])
 
-    EXPECTED_TYPES = LIBRARY_TYPES + ('source_set', 'group', 'action')
+    EXPECTED_TYPES = LIBRARY_TYPES + ('source_set', 'group', 'action', 'action_foreach',
+                                      'executable')
 
     def pre(k):
         dep = descs[k]
@@ -187,6 +188,9 @@ IGNORED_INCLUDES = {
     b'compiler/translator/glsl/TranslatorESSL.h',
     b'compiler/translator/glsl/TranslatorGLSL.h',
     b'compiler/translator/hlsl/TranslatorHLSL.h',
+    b'compiler/translator/ir/src/builder.rs.h',
+    b'compiler/translator/ir/src/compile.rs.h',
+    b'compiler/translator/ir/src/output/legacy.rs.h',
     b'compiler/translator/msl/TranslatorMSL.h',
     b'compiler/translator/null/TranslatorNULL.h',
     b'compiler/translator/spirv/TranslatorSPIRV.h',
@@ -216,6 +220,7 @@ IGNORED_INCLUDES = {
     b'libANGLE/renderer/vulkan/win32/DisplayVkWin32.h',
     b'libANGLE/renderer/vulkan/xcb/DisplayVkXcb.h',
     b'libANGLE/renderer/vulkan/wayland/DisplayVkWayland.h',
+    b'libANGLE/renderer/wgpu/DisplayWgpu_api.h',
     b'loader_cmake_config.h',
     b'loader_linux.h',
     b'loader_windows.h',
@@ -232,6 +237,7 @@ IGNORED_INCLUDES = {
     b'vulkan_ios.h',
     b'vulkan_macos.h',
     b'vulkan_metal.h',
+    b'vulkan_ohos.h',
     b'vulkan_sci.h',
     b'vulkan_vi.h',
     b'vulkan_wayland.h',
@@ -247,6 +253,7 @@ IGNORED_INCLUDES = {
     b'parallel_hashmap/phmap.h',
     # Validation layers optionally use mimalloc
     b'mimalloc-new-delete.h',
+    b'mimalloc-stats.h',
     # From the Vulkan-Loader
     b'winres.h',
     # From a comment in vulkan-validation-layers/src/layers/vk_mem_alloc.h
@@ -258,6 +265,8 @@ IGNORED_INCLUDES = {
     b'contrib/qat/deflate_qat.h',
     # Behind #if defined(TRACY_ENABLE) in third_party/vulkan-validation-layers/src/layers/vulkan/generated/chassis.cpp
     b'profiling/profiling.h',
+    # Behind #ifdef HAVE_S390X_VX in third_party/zlib/crc32.c
+    b'contrib/crc32vx/crc32_vx_hooks.h',
 }
 
 IGNORED_INCLUDE_PREFIXES = {

@@ -7,6 +7,10 @@
 //   Unit tests for the utils defined in mathutil.h
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "mathutil.h"
 
 #include <gtest/gtest.h>
@@ -247,6 +251,34 @@ TEST(MathUtilTest, CheckedRoundUpInvalid)
     // Our implementation can't handle this query, despite the parameters being in range.
     auto checkedLimit = rx::CheckedRoundUp(limit - 1, limit);
     ASSERT_FALSE(checkedLimit.IsValid());
+}
+
+// Test basic correctness of rx::CheckedRoundUpPow2
+TEST(MathUtilTest, CheckedRoundUpPow2)
+{
+    auto checkedValue = rx::CheckedRoundUpPow2(1u, 4u);
+    ASSERT_TRUE(checkedValue.IsValid());
+    EXPECT_EQ(4u, checkedValue.ValueOrDie());
+
+    checkedValue = rx::CheckedRoundUpPow2(4u, 4u);
+    ASSERT_TRUE(checkedValue.IsValid());
+    EXPECT_EQ(4u, checkedValue.ValueOrDie());
+}
+
+// Test that rounding up zero produces zero for rx::CheckedRoundUpPow2.
+TEST(MathUtilTest, CheckedRoundUpPow2Zero)
+{
+    auto checkedValue = rx::CheckedRoundUpPow2(0u, 4u);
+    ASSERT_TRUE(checkedValue.IsValid());
+    EXPECT_EQ(0u, checkedValue.ValueOrDie());
+}
+
+// Test out-of-bounds with rx::CheckedRoundUpPow2
+TEST(MathUtilTest, CheckedRoundUpPow2Invalid)
+{
+    auto limit        = std::numeric_limits<unsigned int>::max();
+    auto checkedValue = rx::CheckedRoundUpPow2(limit, 4u);
+    ASSERT_FALSE(checkedValue.IsValid());
 }
 
 // Test BitfieldReverse which reverses the order of the bits in an integer.
@@ -1078,6 +1110,30 @@ TEST(MathUtilTest, NormalizedToFloatSnorm26)
     EXPECT_NEAR((normalizedToFloat<26>(+16777215)), +0.5f, 0.00000003);
     EXPECT_NEAR((normalizedToFloat<26>(-16777215)), -0.5f, 0.00000003);
     EXPECT_NEAR((normalizedToFloat<26>(-16777216)), -0.5f, 0.00000003);
+}
+
+// Test UnsignedCeilDivide
+TEST(MathUtilTest, UnsignedCeilDivide)
+{
+    EXPECT_EQ(0u, rx::UnsignedCeilDivide(0u, 5u));
+    EXPECT_EQ(1u, rx::UnsignedCeilDivide(1u, 5u));
+    EXPECT_EQ(1u, rx::UnsignedCeilDivide(4u, 5u));
+    EXPECT_EQ(1u, rx::UnsignedCeilDivide(5u, 5u));
+    EXPECT_EQ(2u, rx::UnsignedCeilDivide(6u, 5u));
+}
+
+// Test UnsignedCeilDivide64
+TEST(MathUtilTest, UnsignedCeilDivide64)
+{
+    EXPECT_EQ(0ull, rx::UnsignedCeilDivide64(0ull, 5ull));
+    EXPECT_EQ(1ull, rx::UnsignedCeilDivide64(1ull, 5ull));
+    EXPECT_EQ(1ull, rx::UnsignedCeilDivide64(4ull, 5ull));
+    EXPECT_EQ(1ull, rx::UnsignedCeilDivide64(5ull, 5ull));
+    EXPECT_EQ(2ull, rx::UnsignedCeilDivide64(6ull, 5ull));
+
+    uint64_t largeValue = 0xFFFFFFFF00000000ull;
+    EXPECT_EQ(0xFFFFFFFFull, rx::UnsignedCeilDivide64(largeValue, 0x100000000ull));
+    EXPECT_EQ(0x100000000ull, rx::UnsignedCeilDivide64(largeValue + 1, 0x100000000ull));
 }
 
 }  // anonymous namespace

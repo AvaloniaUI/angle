@@ -6,6 +6,10 @@
 // EGLSyncTest.cpp:
 //   Tests of EGL_KHR_fence_sync and EGL_KHR_wait_sync extensions.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <gtest/gtest.h>
 
 #include "test_utils/ANGLETest.h"
@@ -721,7 +725,7 @@ void main(void)
     EGLSyncKHR sync1 = eglCreateSyncKHR(display, EGL_SYNC_GLOBAL_FENCE_ANGLE, nullptr);
 
     // Wait for the global fence sync to finish.
-    constexpr GLuint64 kTimeout = 1'000'000'000;  // 1 second
+    constexpr GLuint64 kTimeout = 2'000'000'000;  // 2 seconds
     ASSERT_EQ(EGL_CONDITION_SATISFIED_KHR, eglClientWaitSyncKHR(display, sync1, 0, kTimeout));
 
     // If the global fence sync is signaled, then the signal from context2 must also be signaled.

@@ -184,9 +184,6 @@
         'args': [
           '--use-angle=metal',
         ],
-        'linux_args': [
-          '--no-xvfb',
-        ],
         'merge': {
           'script': '//scripts/angle_deqp_test_merge.py',
         },
@@ -292,6 +289,19 @@
       'angle_deqp_gles2_metal_tests': {
         'args': [
           '--use-angle=metal',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_gles2_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_gles2_metal_with_retry_gtests': {
+      'angle_deqp_gles2_metal_tests': {
+        'args': [
+          '--use-angle=metal',
           # Flaky crashes. http://anglebug.com/42265067
           '--flaky-retries=2',
         ],
@@ -384,22 +394,6 @@
       },
     },
 
-    'angle_deqp_gles31_d3d11_gtests': {
-      'angle_deqp_gles31_d3d11_tests': {
-        'args': [
-          '--use-angle=d3d11',
-        ],
-        'merge': {
-          'script': '//scripts/angle_deqp_test_merge.py',
-        },
-        'swarming': {
-          'shards': 2,
-        },
-        'test': 'angle_deqp_gles31_tests',
-        'use_isolated_scripts_api': True,
-      },
-    },
-
     'angle_deqp_gles31_gl_gtests': {
       'angle_deqp_gles31_gl_tests': {
         'args': [
@@ -476,9 +470,6 @@
         'merge': {
           'script': '//scripts/angle_deqp_test_merge.py',
         },
-        'swarming': {
-          'shards': 1,
-        },
         'test': 'angle_deqp_gles31_rotate180_tests',
         'use_isolated_scripts_api': True,
       },
@@ -495,9 +486,6 @@
         'merge': {
           'script': '//scripts/angle_deqp_test_merge.py',
         },
-        'swarming': {
-          'shards': 1,
-        },
         'test': 'angle_deqp_gles31_rotate270_tests',
         'use_isolated_scripts_api': True,
       },
@@ -513,9 +501,6 @@
         ],
         'merge': {
           'script': '//scripts/angle_deqp_test_merge.py',
-        },
-        'swarming': {
-          'shards': 1,
         },
         'test': 'angle_deqp_gles31_rotate90_tests',
         'use_isolated_scripts_api': True,
@@ -622,6 +607,22 @@
       'angle_deqp_gles3_metal_tests': {
         'args': [
           '--use-angle=metal',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'swarming': {
+          'shards': 2,
+        },
+        'test': 'angle_deqp_gles3_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_gles3_metal_with_retry_gtests': {
+      'angle_deqp_gles3_metal_tests': {
+        'args': [
+          '--use-angle=metal',
           # Flaky crashes. http://anglebug.com/42265067
           '--flaky-retries=2',
         ],
@@ -632,6 +633,19 @@
           'shards': 2,
         },
         'test': 'angle_deqp_gles3_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_gles3_multisample_metal_gtests': {
+      'angle_deqp_gles3_multisample_metal_tests': {
+        'args': [
+          '--use-angle=metal',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_gles3_multisample_tests',
         'use_isolated_scripts_api': True,
       },
     },
@@ -735,6 +749,41 @@
           'shards': 2,
         },
         'test': 'angle_deqp_gles3_rotate90_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_gles2_gl_gtests': {
+      'angle_deqp_khr_gles2_gl_tests': {
+        'args': [
+          '--use-angle=gl',
+          '--surface-height=64',
+          '--surface-width=64',
+          '--deqp-base-seed=1',
+        ],
+        'linux_args': [
+          '--no-xvfb',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_gles2_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_gles2_metal_gtests': {
+      'angle_deqp_khr_gles2_metal_tests': {
+        'args': [
+          '--use-angle=metal',
+          '--surface-height=64',
+          '--surface-width=64',
+          '--deqp-base-seed=1',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_gles2_tests',
         'use_isolated_scripts_api': True,
       },
     },
@@ -870,6 +919,41 @@
       },
     },
 
+    'angle_deqp_khr_gles3_gl_gtests': {
+      'angle_deqp_khr_gles3_gl_tests': {
+        'args': [
+          '--use-angle=gl',
+          '--surface-height=64',
+          '--surface-width=64',
+          '--deqp-base-seed=1',
+        ],
+        'linux_args': [
+          '--no-xvfb',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_gles3_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_gles3_metal_gtests': {
+      'angle_deqp_khr_gles3_metal_tests': {
+        'args': [
+          '--use-angle=metal',
+          '--surface-height=64',
+          '--surface-width=64',
+          '--deqp-base-seed=1',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_gles3_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
     'angle_deqp_khr_gles3_vulkan_gtests': {
       'angle_deqp_khr_gles3_vulkan_tests': {
         'args': [
@@ -889,6 +973,58 @@
           'script': '//scripts/angle_deqp_test_merge.py',
         },
         'test': 'angle_deqp_khr_gles3_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_glesext_vulkan_gtests': {
+      'angle_deqp_khr_glesext_vulkan_tests': {
+        'args': [
+          '--use-angle=vulkan',
+          '--surface-height=64',
+          '--surface-width=64',
+          '--deqp-base-seed=1',
+        ],
+        'android_args': [
+          '-v',
+          '--shard-timeout=500',
+        ],
+        'linux_args': [
+          '--no-xvfb',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_glesext_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_noctx_gles2_gl_gtests': {
+      'angle_deqp_khr_noctx_gles2_gl_tests': {
+        'args': [
+          '--use-angle=gl',
+        ],
+        'linux_args': [
+          '--no-xvfb',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_noctx_gles2_tests',
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_deqp_khr_noctx_gles2_metal_gtests': {
+      'angle_deqp_khr_noctx_gles2_metal_tests': {
+        'args': [
+          '--use-angle=metal',
+        ],
+        'merge': {
+          'script': '//scripts/angle_deqp_test_merge.py',
+        },
+        'test': 'angle_deqp_khr_noctx_gles2_tests',
         'use_isolated_scripts_api': True,
       },
     },
@@ -966,6 +1102,32 @@
         },
         'args': [
           '--gtest_filter=-*Vulkan_SwiftShader*',
+        ],
+        # Linux has issues with creating too many windows at once.
+        'linux_args': [
+          '--max-processes=4',
+          '--no-xvfb',
+        ],
+        'swarming': {
+          'shards': 3,
+        },
+        'use_isolated_scripts_api': True,
+      },
+    },
+
+    'angle_end2end_novulkan_gtests': {
+      'angle_end2end_tests': {
+        'android_args': [
+          '--shard-timeout=180',
+          '-v',
+          # We use this argument to save test artifacts.
+          '--render-test-output-dir=${ISOLATED_OUTDIR}',
+        ],
+        'android_swarming': {
+          'shards': 8,
+        },
+        'args': [
+          '--gtest_filter=-*Vulkan*',
         ],
         # Linux has issues with creating too many windows at once.
         'linux_args': [
@@ -1118,6 +1280,9 @@
         'mixins': [
           'angle_skia_gold_test',
         ],
+        'swarming': {
+          'shards': 3,
+        },
         'android_swarming': {
           'shards': 6,
         },
@@ -1395,7 +1560,7 @@
           '--use-angle=swiftshader',
         ],
         'swarming': {
-          'shards': 8,
+          'shards': 11,
         },
         'use_isolated_scripts_api': True,
       },
@@ -1488,7 +1653,7 @@
         ],
         'use_isolated_scripts_api': True,
         'swarming': {
-          'shards': 10,
+          'shards': 14,
         },
       },
     },
@@ -1499,6 +1664,7 @@
           '--test-machine-name',
           '${buildername}',
           '--swiftshader',
+          '--key-frame-limit=10',
         ],
         'linux_args': [
           '--xvfb',
@@ -1541,11 +1707,20 @@
       'angle_deqp_khr_gles31_vulkan_gtests',
       'angle_deqp_khr_gles32_vulkan_gtests',
       'angle_deqp_khr_gles3_vulkan_gtests',
+      'angle_deqp_khr_glesext_vulkan_gtests',
       'angle_deqp_khr_noctx_gles2_vulkan_gtests',
       'angle_deqp_khr_noctx_gles32_vulkan_gtests',
       'angle_deqp_khr_single_gles32_vulkan_gtests',
       'angle_end2end_gtests',
       'angle_gles1_conformance_vulkan_gtests',
+      'angle_unit_gtests',
+    ],
+
+    'android_novulkan_gtests': [
+      'angle_deqp_egl_gles_gtests',
+      'angle_deqp_gles2_gles_gtests',
+      'angle_deqp_gles3_gles_gtests',
+      'angle_end2end_novulkan_gtests',
       'angle_unit_gtests',
     ],
 
@@ -1562,6 +1737,7 @@
       'angle_deqp_khr_gles31_vulkan_gtests',
       'angle_deqp_khr_gles32_vulkan_gtests',
       'angle_deqp_khr_gles3_vulkan_gtests',
+      'angle_deqp_khr_glesext_vulkan_gtests',
       'angle_deqp_khr_noctx_gles2_vulkan_gtests',
       'angle_deqp_khr_noctx_gles32_vulkan_gtests',
       'angle_deqp_khr_single_gles32_vulkan_gtests',
@@ -1577,10 +1753,19 @@
       'angle_trace_perf_vulkan_smoke_isolated_scripts',
     ],
 
+    'isolated_scripts_group_common_notrace': [
+      'angle_capture_isolated_scripts',
+      'angle_perf_smoke_isolated_scripts',
+    ],
+
     'isolated_scripts_group_perf': [
       'angle_perf_isolated_scripts',
       'angle_trace_perf_native_isolated_scripts',
       'angle_trace_perf_vulkan_isolated_scripts',
+    ],
+
+    'isolated_scripts_group_perf_notrace': [
+      'angle_perf_isolated_scripts',
     ],
 
     'isolated_scripts_group_pixel6': [
@@ -1622,6 +1807,7 @@
       'angle_deqp_khr_gles31_vulkan_gtests',
       'angle_deqp_khr_gles32_vulkan_gtests',
       'angle_deqp_khr_gles3_vulkan_gtests',
+      'angle_deqp_khr_glesext_vulkan_gtests',
       'angle_deqp_khr_noctx_gles2_vulkan_gtests',
       'angle_deqp_khr_noctx_gles32_vulkan_gtests',
       'angle_deqp_khr_single_gles32_vulkan_gtests',
@@ -1647,17 +1833,33 @@
       'angle_deqp_egl_gl_gtests',
       'angle_deqp_egl_metal_gtests',
       'angle_deqp_gles2_gl_with_retry_gtests',
-      'angle_deqp_gles2_metal_gtests',
+      'angle_deqp_gles2_metal_with_retry_gtests',
       'angle_deqp_gles2_webgpu_with_retry_gtests',
       'angle_deqp_gles3_gl_with_retry_gtests',
-      'angle_deqp_gles3_metal_gtests',
+      'angle_deqp_gles3_metal_with_retry_gtests',
       'angle_end2end_with_retry_gtests',
       'angle_unit_gtests',
     ],
 
-    'mac_nvidia_gtests': [
+    'mac_apple_gtests': [
+      'angle_deqp_egl_gl_gtests',
+      'angle_deqp_egl_metal_gtests',
+      'angle_deqp_gles2_gl_gtests',
+      'angle_deqp_gles2_metal_gtests',
+      'angle_deqp_gles2_webgpu_gtests',
+      'angle_deqp_khr_gles2_gl_gtests',
+      'angle_deqp_khr_gles2_metal_gtests',
+      'angle_deqp_khr_noctx_gles2_gl_gtests',
+      'angle_deqp_khr_noctx_gles2_metal_gtests',
+      'angle_deqp_gles3_gl_gtests',
+      'angle_deqp_gles3_metal_gtests',
+      'angle_deqp_gles3_multisample_metal_gtests',
+      'angle_deqp_khr_gles3_gl_gtests',
+      'angle_deqp_khr_gles3_metal_gtests',
       'angle_end2end_with_retry_gtests',
+      'angle_gles1_conformance_gtests',
       'angle_unit_gtests',
+      'angle_white_box_gtests',
     ],
 
     'swangle_gtests': [
@@ -1733,7 +1935,6 @@
       'angle_deqp_gles2_gl_gtests',
       'angle_deqp_gles2_vulkan_gtests',
       'angle_deqp_gles2_webgpu_gtests',
-      'angle_deqp_gles31_d3d11_gtests',
       'angle_deqp_gles31_gl_gtests',
       'angle_deqp_gles31_multisample_vulkan_gtests',
       'angle_deqp_gles31_vulkan_gtests',
@@ -1751,6 +1952,7 @@
       'angle_deqp_khr_gles31_vulkan_gtests',
       'angle_deqp_khr_gles32_vulkan_gtests',
       'angle_deqp_khr_gles3_vulkan_gtests',
+      'angle_deqp_khr_glesext_vulkan_gtests',
       'angle_deqp_khr_noctx_gles2_vulkan_gtests',
       'angle_deqp_khr_noctx_gles32_vulkan_gtests',
       'angle_deqp_khr_single_gles32_vulkan_gtests',

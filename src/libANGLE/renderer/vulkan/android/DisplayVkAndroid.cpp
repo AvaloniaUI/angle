@@ -7,6 +7,10 @@
 //    Implements the class methods for DisplayVkAndroid.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/renderer/vulkan/android/DisplayVkAndroid.h"
 
 #include <android/log.h>
@@ -14,6 +18,7 @@
 #include <vulkan/vulkan.h>
 
 #include "common/angle_version_info.h"
+#include "common/system_utils.h"
 #include "libANGLE/renderer/driver_utils.h"
 #include "libANGLE/renderer/vulkan/android/HardwareBufferImageSiblingVkAndroid.h"
 #include "libANGLE/renderer/vulkan/android/WindowSurfaceVkAndroid.h"
@@ -33,6 +38,60 @@ egl::Error DisplayVkAndroid::initialize(egl::Display *display)
     strstr << "Version (" << angle::GetANGLEVersionString() << "), ";
     strstr << "Renderer (" << mRenderer->getRendererDescription() << ")";
     __android_log_print(ANDROID_LOG_INFO, "ANGLE", "%s", strstr.str().c_str());
+
+    // Ref:
+    // https://android.googlesource.com/platform/frameworks/native/+/android16-release/opengl/libs/EGL/egl_cache.cpp#237
+    bool roBlobcacheMultifileEnabled =
+        angle::GetEnvironmentVarOrAndroidProperty("", "ro.egl.blobcache.multifile") == "true";
+    bool debugBlobcacheMultifileEnabled =
+        angle::GetEnvironmentVarOrAndroidProperty("", "debug.egl.blobcache.multifile") == "true";
+    if (roBlobcacheMultifileEnabled || debugBlobcacheMultifileEnabled)
+    {
+        std::string androidVersionReleaseStr =
+            angle::GetEnvironmentVarOrAndroidProperty("", "ro.build.version.release");
+        size_t androidVersionRelease =
+            androidVersionReleaseStr.empty() ? 0 : std::stoul(androidVersionReleaseStr);
+        int recommendedBlobcacheSize = 128 * 1024 * 1024;
+        if (androidVersionRelease < 17)
+        {
+            recommendedBlobcacheSize = 32 * 1024 * 1024;
+        }
+        std::string roBlobcacheMultifileLimitStr =
+            angle::GetEnvironmentVarOrAndroidProperty("", "ro.egl.blobcache.multifile_limit");
+        int roBlobcacheMultifileLimit =
+            roBlobcacheMultifileLimitStr.empty() ? -1 : std::stoi(roBlobcacheMultifileLimitStr);
+        std::string debugBlobcacheMultifileLimitStr =
+            angle::GetEnvironmentVarOrAndroidProperty("", "debug.egl.blobcache.multifile_limit");
+        int debugBlobcacheMultifileLimit = debugBlobcacheMultifileLimitStr.empty()
+                                               ? -1
+                                               : std::stoi(debugBlobcacheMultifileLimitStr);
+        // Ref:
+        // https://android.googlesource.com/platform/frameworks/native/+/android16-release/opengl/libs/EGL/egl_cache.cpp#258
+        int blobcacheMultifileLimit = roBlobcacheMultifileLimit;
+        if (debugBlobcacheMultifileLimit >= 0)
+        {
+            blobcacheMultifileLimit = debugBlobcacheMultifileLimit;
+        }
+        if (blobcacheMultifileLimit == -1)
+        {
+            __android_log_print(
+                ANDROID_LOG_INFO, "ANGLE",
+                "GL performance: HIGH: EGL blobcache multifile size is not configured.");
+        }
+        else if (blobcacheMultifileLimit < recommendedBlobcacheSize)
+        {
+            __android_log_print(
+                ANDROID_LOG_INFO, "ANGLE",
+                "GL performance: HIGH: EGL blobcache multifile size (%d) is smaller "
+                "than the recommended size (%d).",
+                blobcacheMultifileLimit, recommendedBlobcacheSize);
+        }
+    }
+    else
+    {
+        __android_log_print(ANDROID_LOG_INFO, "ANGLE",
+                            "GL performance: HIGH: EGL blobcache multifile is not enabled.");
+    }
 
     return egl::NoError();
 }
@@ -79,6 +138,13 @@ egl::ConfigSet DisplayVkAndroid::generateConfigs()
         {
             VkFormat vkFormat =
                 mRenderer->getFormat(glFormat).getActualRenderableImageVkFormat(mRenderer);
+            // The config for display format should remain as R5G6B5, since creating B5G6R5 surfaces
+            // is currently not supported.
+            if (getFeatures().preferBGR565ToRGB565.enabled &&
+                vkFormat == VK_FORMAT_B5G6R5_UNORM_PACK16)
+            {
+                vkFormat = VK_FORMAT_R5G6B5_UNORM_PACK16;
+            }
             ASSERT(vkFormat != VK_FORMAT_UNDEFINED);
             if (isConfigFormatSupported(vkFormat))
             {

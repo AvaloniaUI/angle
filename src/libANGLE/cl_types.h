@@ -4,9 +4,14 @@
 // found in the LICENSE file.
 //
 // cl_types.h: Defines common types for the OpenCL support in ANGLE.
+//
 
 #ifndef LIBANGLE_CLTYPES_H_
 #define LIBANGLE_CLTYPES_H_
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
 
 #if defined(ANGLE_ENABLE_CL)
 #    include "libANGLE/CLBitField.h"
@@ -15,6 +20,7 @@
 #    include "libANGLE/angletypes.h"
 
 #    include "common/PackedCLEnums_autogen.h"
+#    include "common/WorkerThread.h"
 #    include "common/angleutils.h"
 
 // Include frequently used standard headers
@@ -72,8 +78,22 @@ template <typename T>
 using EventStatusMap = std::array<T, 3>;
 
 using Extents = angle::Extents<size_t>;
-using Offset  = angle::Offset<size_t>;
+constexpr Extents kExtentsZero(0, 0, 0);
+using Offset = angle::Offset<size_t>;
 constexpr Offset kOffsetZero(0, 0, 0);
+
+using ChannelMapping = std::array<uint32_t, 4>;
+union PixelColor
+{
+    uint8_t u8[4];
+    int8_t s8[4];
+    uint16_t u16[4];
+    int16_t s16[4];
+    uint32_t u32[4];
+    int32_t s32[4];
+    cl_half fp16[4];
+    cl_float fp32[4];
+};
 
 struct KernelArg
 {
@@ -114,9 +134,57 @@ struct BufferRect
         return ((mRowPitch * (mOrigin.y + row)) + (mOrigin.x * mElementSize)) +  // row offset
                (mSlicePitch * (mOrigin.z + slice));                              // slice offset
     }
+    // Calculates the offset of the starting position of the rectangle
+    size_t getBufferOffset() const { return getRowOffset(0, 0); }
 
-    size_t getRowPitch() { return mRowPitch; }
-    size_t getSlicePitch() { return mSlicePitch; }
+    size_t getRowPitch() const { return mRowPitch; }
+    size_t getSlicePitch() const { return mSlicePitch; }
+
+    // Given the offset, row pitch, slice pitch, this returns the size of the buffer in which this
+    // rect sits.
+    //
+    //            row_pitch
+    // +------------------------------+
+    // |   origin                     |
+    // |      +---------------+       |
+    // |      |               |height |
+    // |      |               |       |
+    // |      |   width       |       |
+    // +------+---------------+-------+
+    //   - size of the buffer is
+    //      - initial offset to start of rect
+    //      - + size of the rectangle
+    //      - - (extra regions for the last slice and row)
+    size_t getRectSize() const
+    {
+        // Treat:
+        //  S: mSlicePitch, R: mRowPitch, O: Offset(xyz_dim), D: mSize.depth, H: mSize.height,
+        //  W: mSize.width, E: mElementSize
+        //
+        //  strideHeightPadding == (S / R) - H
+        //  strideRowPadding    == R - (W * E)
+        //
+        // getRectSize() =
+        //    getBufferOffset()         // initial offset to the start of rect
+        //  + (S * D)                   // size of the rectangle
+        //  - (strideHeightPadding * R) // extraneous region for the last slice
+        //  - strideRowPadding          // extraneous region for the last row
+        //
+        // Where:
+        //  getBufferOffset()   == getRowOffset(0,0) == S(Oz) + R(Oy) + (Ox * E)
+        //  getRowOffset(s, r)  == S(Oz + s) + R(Oy + r) + (Ox * E)
+        //
+        // Simplifies to:
+        //  getRectSize() = S(Oz) + R(Oy) + (Ox * E) + (S * D) - R(S/R - H) - R - (W * E)
+        //  getRectSize() = S(Oz + (D - 1)) + R(Oy + (H - 1)) + (Ox * E) + (W * E)
+        //  ...
+        //  getRectSize() = getRowOffset((D - 1), (H - 1)) + (W * E)
+
+        // The end of the rect is the beginning of the last row + the length of the row.
+        // This logic excludes paddings for the last row / slice.
+        return getRowOffset(mSize.depth - 1, mSize.height - 1) + mSize.width * mElementSize;
+    }
+    const Extents &getExtents() const { return mSize; }
     Offset mOrigin;
     Extents mSize;
     size_t mRowPitch;
@@ -170,19 +238,16 @@ struct ImageDescriptor
             arraySize = 1;
         }
     }
-};
 
-struct MemOffsets
-{
-    size_t x, y, z;
+    bool operator==(const ImageDescriptor &other) const
+    {
+        return (type == other.type && width == other.width && height == other.height &&
+                depth == other.depth && arraySize == other.arraySize &&
+                rowPitch == other.rowPitch && slicePitch == other.slicePitch &&
+                numMipLevels == other.numMipLevels && numSamples == other.numSamples);
+    }
+    bool operator!=(const ImageDescriptor &other) const { return !(*this == other); }
 };
-constexpr MemOffsets kMemOffsetsZero{0, 0, 0};
-
-struct Coordinate
-{
-    size_t x, y, z;
-};
-constexpr Coordinate kCoordinateZero{0, 0, 0};
 
 struct NDRange
 {
@@ -240,18 +305,16 @@ struct NDRange
     std::vector<NDRange> createUniformRegions(
         const std::array<uint32_t, 3> maxComputeWorkGroupCount) const
     {
+        // Work-group sizes could be non-uniform in multiple dimensions, potentially producing
+        // work-groups of up to 4 different sizes in a 2D range and 8 different sizes in a 3D range.
+        constexpr size_t kMaxNonUniformWorkGroupShapes = 8u;
+
         std::vector<NDRange> regions;
+        regions.reserve(kMaxNonUniformWorkGroupShapes);
         regions.push_back(*this);
         regions.front().globalWorkOffset = {0};
-        uint32_t regionCount             = 1;
-        for (uint32_t regionPos = 0; regionPos < regionCount; ++regionPos)
+        for (uint32_t regionPos = 0; regionPos < regions.size(); ++regionPos)
         {
-            // "Work-group sizes could be non-uniform in multiple dimensions, potentially producing
-            // work-groups of up to 4 different sizes in a 2D range and 8 different sizes in a 3D
-            // range."
-            // https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html#_mapping_work_items_onto_an_nd_range
-            ASSERT(regionPos < 8);
-
             for (uint32_t dim = 0; dim < workDimensions; dim++)
             {
                 NDRange &region    = regions.at(regionPos);
@@ -268,21 +331,23 @@ struct NDRange
                     region.globalWorkSize[dim] = newRegion.globalWorkOffset[dim] =
                         (region.globalWorkSize[dim] - remainder);
                     regions.push_back(newRegion);
-                    regionCount++;
                 }
             }
         }
+        ASSERT(regions.size() <= kMaxNonUniformWorkGroupShapes);
+
         // Break into uniform regions that fit into given maxComputeWorkGroupCount (if needed)
-        uint32_t limitRegionCount = 1;
         std::vector<NDRange> regionsWithinDeviceLimits;
+        regionsWithinDeviceLimits.reserve(regions.size());
         for (const auto &region : regions)
         {
             regionsWithinDeviceLimits.push_back(region);
-            for (uint32_t regionPos = 0; regionPos < limitRegionCount; ++regionPos)
+            for (uint32_t regionPos = 0; regionPos < regionsWithinDeviceLimits.size(); ++regionPos)
             {
-                NDRange &currentRegion = regionsWithinDeviceLimits.at(regionPos);
                 for (uint32_t dim = 0; dim < workDimensions; dim++)
                 {
+                    NDRange &currentRegion = regionsWithinDeviceLimits.at(regionPos);
+
                     uint32_t maxGwsForRegion = gl::clampCast<uint32_t, uint64_t>(
                         static_cast<uint64_t>(maxComputeWorkGroupCount[dim]) *
                         static_cast<uint64_t>(currentRegion.localWorkSize[dim]));
@@ -299,7 +364,7 @@ struct NDRange
                                 (currentRegion.globalWorkSize[dim] - remainderGws);
                             currentRegion.globalWorkSize[dim] = maxGwsForRegion;
                             regionsWithinDeviceLimits.push_back(remainderRegion);
-                            limitRegionCount++;
+                            continue;
                         }
                     }
                 }
@@ -313,6 +378,26 @@ struct NDRange
     GlobalWorkSize globalWorkSize;
     WorkgroupSize localWorkSize;
     bool nullLocalWorkSize{false};
+};
+
+// name-value pair for cl_properties lists
+struct NameValueProperty
+{
+    cl_properties name;
+    cl_properties value;
+};
+
+// this Defer class provides the user with a closure that executes on its destruction
+template <typename F>
+class Defer : public angle::Closure
+{
+  public:
+    Defer(F &&func) : mFunc(std::forward<F>(func)) {}
+    ~Defer() override { operator()(); }
+    void operator()() override { mFunc(); }
+
+  private:
+    F mFunc;
 };
 
 }  // namespace cl

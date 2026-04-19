@@ -43,11 +43,9 @@
     void deleteShader(ShaderProgramID shaderPacked);                                               \
     void deleteTextures(GLsizei n, const TextureID *texturesPacked);                               \
     void detachShader(ShaderProgramID programPacked, ShaderProgramID shaderPacked);                \
-    void disableVertexAttribArray(GLuint index);                                                   \
     void drawArrays(PrimitiveMode modePacked, GLint first, GLsizei count);                         \
     void drawElements(PrimitiveMode modePacked, GLsizei count, DrawElementsType typePacked,        \
                       const void *indices);                                                        \
-    void enableVertexAttribArray(GLuint index);                                                    \
     void finish();                                                                                 \
     void flush();                                                                                  \
     void framebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget,      \
@@ -67,7 +65,7 @@
                             ShaderProgramID *shadersPacked);                                       \
     GLint getAttribLocation(ShaderProgramID programPacked, const GLchar *name);                    \
     void getBooleanv(GLenum pname, GLboolean *data);                                               \
-    void getBufferParameteriv(BufferBinding targetPacked, GLenum pname, GLint *params);            \
+    void getBufferParameteriv(BufferBinding targetPacked, BufferParam pnamePacked, GLint *params); \
     GLenum getError();                                                                             \
     void getFloatv(GLenum pname, GLfloat *data);                                                   \
     void getFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLenum pname,       \
@@ -83,7 +81,7 @@
                                   GLint *precision);                                               \
     void getShaderSource(ShaderProgramID shaderPacked, GLsizei bufSize, GLsizei *length,           \
                          GLchar *source);                                                          \
-    void getShaderiv(ShaderProgramID shaderPacked, GLenum pname, GLint *params);                   \
+    void getShaderiv(ShaderProgramID shaderPacked, ShaderParameter pnamePacked, GLint *params);    \
     const GLubyte *getString(GLenum name);                                                         \
     void getTexParameterfv(TextureType targetPacked, GLenum pname, GLfloat *params);               \
     void getTexParameteriv(TextureType targetPacked, GLenum pname, GLint *params);                 \

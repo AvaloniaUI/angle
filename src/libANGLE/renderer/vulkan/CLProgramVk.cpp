@@ -4,9 +4,16 @@
 // found in the LICENSE file.
 //
 // CLProgramVk.cpp: Implements the class methods for CLProgramVk.
+//
+
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
 
 #include "libANGLE/renderer/vulkan/CLProgramVk.h"
+#include "libANGLE/CLBuffer.h"
 #include "libANGLE/renderer/vulkan/CLContextVk.h"
+#include "libANGLE/renderer/vulkan/cl_types.h"
 #include "libANGLE/renderer/vulkan/clspv_utils.h"
 #include "libANGLE/renderer/vulkan/vk_cache_utils.h"
 #include "libANGLE/renderer/vulkan/vk_helpers.h"
@@ -236,6 +243,13 @@ spv_result_t ParseReflection(CLProgramVk::SpvReflectionData &reflectionData,
                     reflectionData.specConstantsUsed[SpecConstantType::WorkDimension] = true;
                     break;
                 }
+                case NonSemanticClspvReflectionSpecConstantSubgroupMaxSize:
+                {
+                    reflectionData.specConstantIDs[SpecConstantType::SubgroupMaxSize] =
+                        reflectionData.spvIntLookup[spvInstr.words[5]];
+                    reflectionData.specConstantsUsed[SpecConstantType::SubgroupMaxSize] = true;
+                    break;
+                }
                 case NonSemanticClspvReflectionSpecConstantGlobalOffset:
                     reflectionData.specConstantIDs[SpecConstantType::GlobalOffsetX] =
                         reflectionData.spvIntLookup[spvInstr.words[5]];
@@ -247,6 +261,35 @@ spv_result_t ParseReflection(CLProgramVk::SpvReflectionData &reflectionData,
                     reflectionData.specConstantsUsed[SpecConstantType::GlobalOffsetY] = true;
                     reflectionData.specConstantsUsed[SpecConstantType::GlobalOffsetZ] = true;
                     break;
+                case NonSemanticClspvReflectionConstantDataPointerPushConstant:
+                {
+                    std::string data = reflectionData.spvStrLookup[spvInstr.words[7]];
+
+                    // Data must be an OpString that encodes the hexbytes of the constant data.
+                    // https://github.khronos.org/SPIRV-Registry/nonsemantic/NonSemantic.ClspvReflection.html
+                    // Each byte of binary data is represented by two hexadecimal digits, so the
+                    // number of digits must be even
+                    ASSERT(data.size() % 2 == 0);
+
+                    reflectionData.constantDataBufferInfo.bufferData =
+                        angle::HexStringToUintVector(data);
+
+                    uint32_t set      = 0;
+                    uint32_t binding  = 0;
+                    uint32_t pcOffset = 0;
+                    pcOffset          = reflectionData.spvIntLookup[spvInstr.words[5]];
+
+                    // Add push constant
+                    reflectionData.pushConstants[spvInstr.words[4]] = {
+                        .stageFlags = 0, .offset = pcOffset, .size = CHAR_BIT};
+
+                    // Set constant data buffer
+                    reflectionData.constantDataBufferInfo.set      = set;
+                    reflectionData.constantDataBufferInfo.binding  = binding;
+                    reflectionData.constantDataBufferInfo.pcOffset = pcOffset;
+
+                    break;
+                }
                 case NonSemanticClspvReflectionPrintfInfo:
                 {
                     // Info on the format string used in the builtin printf call in kernel
@@ -275,11 +318,10 @@ spv_result_t ParseReflection(CLProgramVk::SpvReflectionData &reflectionData,
                 }
                 case NonSemanticClspvReflectionPrintfBufferPointerPushConstant:
                 {
-                    ERR() << "Shouldn't be here. Support of printf builtin function is enabled "
-                             "through "
-                             "PrintfBufferStorageBuffer. Check optins passed down to clspv";
-                    UNREACHABLE();
-                    return SPV_UNSUPPORTED;
+                    uint32_t pcOffset = reflectionData.spvIntLookup[spvInstr.words[5]];
+                    reflectionData.pushConstants[spvInstr.words[4]] = {
+                        .stageFlags = 0, .offset = pcOffset, .size = CHAR_BIT};
+                    break;
                 }
                 case NonSemanticClspvReflectionNormalizedSamplerMaskPushConstant:
                 case NonSemanticClspvReflectionImageArgumentInfoChannelOrderPushConstant:
@@ -345,6 +387,11 @@ std::string ProcessBuildOptions(const std::vector<std::string> &optionTokens,
             processedOptions += " --output-format=bc";
             continue;
         }
+        else if (optionToken == "-cl-std=CL2.0")
+        {
+            processedOptions += " -cl-std=CL2.0 -inline-entry-points";
+            continue;
+        }
         processedOptions += " " + optionToken;
     }
 
@@ -380,7 +427,8 @@ void CLAsyncBuildTask::operator()()
 CLProgramVk::CLProgramVk(const cl::Program &program)
     : CLProgramImpl(program),
       mContext(&program.getContext().getImpl<CLContextVk>()),
-      mAsyncBuildEvent(std::make_shared<angle::WaitableEventDone>())
+      mAsyncBuildEvent(std::make_shared<angle::WaitableEventDone>()),
+      mModuleConstantDataBuffer(nullptr)
 {}
 
 angle::Result CLProgramVk::init()
@@ -464,8 +512,8 @@ angle::Result CLProgramVk::init(const size_t *lengths,
         // Add device binary to program
         DeviceProgramData deviceBinary;
         deviceBinary.spirvVersion = device->getImpl<CLDeviceVk>().getSpirvVersion();
-        deviceBinary.binaryType  = binaryHeader->binaryType;
-        deviceBinary.buildStatus = binaryHeader->buildStatus;
+        deviceBinary.binaryType   = binaryHeader->binaryType;
+        deviceBinary.buildStatus  = binaryHeader->buildStatus;
         switch (deviceBinary.binaryType)
         {
             case CL_PROGRAM_BINARY_TYPE_EXECUTABLE:
@@ -496,7 +544,13 @@ angle::Result CLProgramVk::init(const size_t *lengths,
     return angle::Result::Continue;
 }
 
-CLProgramVk::~CLProgramVk() {}
+CLProgramVk::~CLProgramVk()
+{
+    if (mModuleConstantDataBuffer)
+    {
+        mModuleConstantDataBuffer.release();
+    }
+}
 
 angle::Result CLProgramVk::build(const cl::DevicePtrs &devices,
                                  const char *options,
@@ -561,7 +615,7 @@ angle::Result CLProgramVk::compile(const cl::DevicePtrs &devices,
             ERR() << "Failed to create output path(s) for header(s)!";
             ANGLE_CL_RETURN_ERROR(CL_INVALID_OPERATION);
         }
-        writeFile(headerFilePath.c_str(), inputHeaderSrc.data(), inputHeaderSrc.size());
+        writeFile(headerFilePath.c_str(), inputHeaderSrc);
     }
 
     setBuildStatus(devicePtrs, CL_BUILD_IN_PROGRESS);
@@ -832,6 +886,30 @@ const CLProgramVk::DeviceProgramData *CLProgramVk::getDeviceProgramData(
     return nullptr;
 }
 
+cl::MemoryPtr CLProgramVk::getOrCreateModuleConstantDataBuffer(const std::string &kernelName)
+{
+    const DeviceProgramData *devProgram = getDeviceProgramData(kernelName.c_str());
+    ASSERT(devProgram);
+    const std::vector<uint8_t> &initData =
+        devProgram->reflectionData.constantDataBufferInfo.bufferData;
+    void *initDataPtr = reinterpret_cast<void *>(const_cast<uint8_t *>(initData.data()));
+
+    if (!mModuleConstantDataBuffer)
+    {
+        mModuleConstantDataBuffer =
+            cl::MemoryPtr(cl::Buffer::Cast(this->mContext->getFrontendObject().createBuffer(
+                nullptr, cl::MemFlags(CL_MEM_USE_HOST_PTR), initData.size(), initDataPtr)));
+        // Release initialization reference, lifetime controlled by RefPointer.
+        mModuleConstantDataBuffer->release();
+    }
+    else
+    {
+        // reading that this buffer is already present and is sufficient to hold initData
+        ASSERT(mModuleConstantDataBuffer->getSize() == initData.size());
+    }
+    return mModuleConstantDataBuffer;
+}
+
 bool CLProgramVk::buildInternal(const cl::DevicePtrs &devices,
                                 std::string options,
                                 std::string internalOptions,
@@ -843,26 +921,23 @@ bool CLProgramVk::buildInternal(const cl::DevicePtrs &devices,
     // Cache original options string
     mProgramOpts = options;
 
-    // Process options and append any other internal (required) options for clspv
-    std::vector<std::string> optionTokens;
-    angle::SplitStringAlongWhitespace(options + " " + internalOptions, &optionTokens);
-    const bool createLibrary     = std::find(optionTokens.begin(), optionTokens.end(),
-                                             "-create-library") != optionTokens.end();
-    std::string processedOptions = ProcessBuildOptions(optionTokens, buildType);
-
     // Build for each associated device
     for (size_t i = 0; i < devices.size(); ++i)
     {
         const cl::RefPointer<cl::Device> &device = devices.at(i);
         DeviceProgramData &deviceProgramData     = mAssociatedDevicePrograms[device->getNative()];
         deviceProgramData.spirvVersion           = device->getImpl<CLDeviceVk>().getSpirvVersion();
-
-        // add clspv compiler options based on device features
-        processedOptions += ClspvGetCompilerOptions(&device->getImpl<CLDeviceVk>());
-
         if (buildType != BuildType::BINARY)
         {
-            // Invoke clspv
+            // Process options and append any other internal (required) options for clspv
+            std::vector<std::string> optionTokens;
+            angle::SplitStringAlongWhitespace(options + " " + internalOptions, &optionTokens);
+            const bool createLibrary     = std::find(optionTokens.begin(), optionTokens.end(),
+                                                     "-create-library") != optionTokens.end();
+            std::string processedOptions = ProcessBuildOptions(optionTokens, buildType);
+            // add clspv compiler options based on device features
+            processedOptions += ClspvGetCompilerOptions(&device->getImpl<CLDeviceVk>());
+
             switch (buildType)
             {
                 case BuildType::BUILD:
@@ -879,6 +954,8 @@ bool CLProgramVk::buildInternal(const cl::DevicePtrs &devices,
                     if (clspvRet != CLSPV_SUCCESS)
                     {
                         ERR() << "OpenCL build failed with: ClspvError(" << clspvRet << ")!";
+                        ERR() << "Clspv option: " << processedOptions;
+                        ERR() << "Build log: " << std::endl << deviceProgramData.buildLog;
                         deviceProgramData.buildStatus = CL_BUILD_ERROR;
                         return false;
                     }
@@ -920,6 +997,8 @@ bool CLProgramVk::buildInternal(const cl::DevicePtrs &devices,
                     if (clspvRet != CLSPV_SUCCESS)
                     {
                         ERR() << "OpenCL build failed with: ClspvError(" << clspvRet << ")!";
+                        ERR() << "Clspv option: " << processedOptions;
+                        ERR() << "Build log: " << std::endl << deviceProgramData.buildLog;
                         deviceProgramData.buildStatus = CL_BUILD_ERROR;
                         return false;
                     }

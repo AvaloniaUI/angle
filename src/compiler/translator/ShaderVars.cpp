@@ -7,6 +7,10 @@
 //  Methods for GL variable types (varyings, uniforms, etc)
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include <GLSLANG/ShaderLang.h>
 
 #include "common/debug.h"
@@ -56,6 +60,7 @@ ShaderVariable::ShaderVariable(GLenum typeIn)
       isPatch(false),
       texelFetchStaticUse(false),
       id(0),
+      isFloat16(false),
       flattenedOffsetInParentArrays(-1)
 {}
 
@@ -96,6 +101,7 @@ ShaderVariable::ShaderVariable(const ShaderVariable &other)
       isPatch(other.isPatch),
       texelFetchStaticUse(other.texelFetchStaticUse),
       id(other.id),
+      isFloat16(other.isFloat16),
       flattenedOffsetInParentArrays(other.flattenedOffsetInParentArrays)
 {}
 
@@ -130,6 +136,7 @@ ShaderVariable &ShaderVariable::operator=(const ShaderVariable &other)
     isPatch                       = other.isPatch;
     texelFetchStaticUse           = other.texelFetchStaticUse;
     id                            = other.id;
+    isFloat16                     = other.isFloat16;
     return *this;
 }
 
@@ -148,7 +155,7 @@ bool ShaderVariable::operator==(const ShaderVariable &other) const
         interpolation != other.interpolation || isInvariant != other.isInvariant ||
         isShaderIOBlock != other.isShaderIOBlock || isPatch != other.isPatch ||
         texelFetchStaticUse != other.texelFetchStaticUse ||
-        isFragmentInOut != other.isFragmentInOut)
+        isFragmentInOut != other.isFragmentInOut || isFloat16 != other.isFloat16)
     {
         return false;
     }
@@ -483,7 +490,6 @@ bool ShaderVariable::isSameNameAtLinkTime(const ShaderVariable &other) const
 InterfaceBlock::InterfaceBlock()
     : arraySize(0),
       layout(BLOCKLAYOUT_PACKED),
-      isRowMajorLayout(false),
       binding(-1),
       staticUse(false),
       active(false),
@@ -500,7 +506,6 @@ InterfaceBlock::InterfaceBlock(const InterfaceBlock &other)
       instanceName(other.instanceName),
       arraySize(other.arraySize),
       layout(other.layout),
-      isRowMajorLayout(other.isRowMajorLayout),
       binding(other.binding),
       staticUse(other.staticUse),
       active(other.active),
@@ -517,7 +522,6 @@ InterfaceBlock &InterfaceBlock::operator=(const InterfaceBlock &other)
     instanceName     = other.instanceName;
     arraySize        = other.arraySize;
     layout           = other.layout;
-    isRowMajorLayout = other.isRowMajorLayout;
     binding          = other.binding;
     staticUse        = other.staticUse;
     active           = other.active;
@@ -541,8 +545,7 @@ std::string InterfaceBlock::fieldMappedPrefix() const
 bool InterfaceBlock::isSameInterfaceBlockAtLinkTime(const InterfaceBlock &other) const
 {
     if (name != other.name || mappedName != other.mappedName || arraySize != other.arraySize ||
-        layout != other.layout || isRowMajorLayout != other.isRowMajorLayout ||
-        binding != other.binding || blockType != other.blockType ||
+        layout != other.layout || binding != other.binding || blockType != other.blockType ||
         fields.size() != other.fields.size())
     {
         return false;

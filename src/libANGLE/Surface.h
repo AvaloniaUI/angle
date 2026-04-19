@@ -105,6 +105,7 @@ class Surface : public LabeledObject, public gl::FramebufferAttachmentObject
 
     void setMipmapLevel(EGLint level);
     void setMultisampleResolve(EGLenum resolve);
+    void setRequestedSwapBehavior(EGLenum behavior);
     void setSwapBehavior(EGLenum behavior);
 
     void setFixedWidth(EGLint width);
@@ -112,16 +113,16 @@ class Surface : public LabeledObject, public gl::FramebufferAttachmentObject
 
     const Config *getConfig() const;
 
-    // width and height can change with client window resizing
-    EGLint getWidth() const;
-    EGLint getHeight() const;
-    // Sizes that Surface will have after render target is first accessed (e.g. after draw).
-    egl::Error getUserWidth(const egl::Display *display, EGLint *value) const;
-    egl::Error getUserHeight(const egl::Display *display, EGLint *value) const;
+    // size can change with client window resizing
+    // Size must be resolved before the call either during state synchronization or explicitly.
+    gl::Extents getSize() const;
+    // Unresolved Surface size until render target is first accessed (e.g. after draw).
+    egl::Error getUserSize(const egl::Display *display, EGLint *width, EGLint *height) const;
     EGLint getPixelAspectRatio() const;
     EGLenum getRenderBuffer() const;
     EGLenum getRequestedRenderBuffer() const;
     EGLenum getSwapBehavior() const;
+    EGLenum getRequestedSwapBehavior() const;
     TextureFormat getTextureFormat() const;
     EGLenum getTextureTarget() const;
     bool getLargestPbuffer() const;
@@ -147,7 +148,9 @@ class Surface : public LabeledObject, public gl::FramebufferAttachmentObject
     EGLint getLuminanceOffset() const;
     EGLint getBitmapPixelSize() const;
     EGLAttribKHR getBitmapPointer() const;
-    EGLint getCompressionRate(const egl::Display *display) const;
+    egl::Error getCompressionRate(const egl::Display *display,
+                                  const gl::Context *context,
+                                  EGLint *rate);
     egl::Error lockSurfaceKHR(const egl::Display *display, const AttributeMap &attributes);
     egl::Error unlockSurfaceKHR(const egl::Display *display);
 
@@ -159,6 +162,8 @@ class Surface : public LabeledObject, public gl::FramebufferAttachmentObject
     EGLint isFixedSize() const;
 
     // FramebufferAttachmentObject implementation
+    // Explicitly resolves surface size to use before state synchronization (e.g. validation).
+    angle::Result ensureSizeResolved(const gl::Context *context) const override;
     bool isAttachmentSpecified(const gl::ImageIndex &imageIndex) const override;
     gl::Extents getAttachmentSize(const gl::ImageIndex &imageIndex) const override;
     gl::Format getAttachmentFormat(GLenum binding, const gl::ImageIndex &imageIndex) const override;
@@ -275,7 +280,7 @@ class Surface : public LabeledObject, public gl::FramebufferAttachmentObject
     EGLint mPixelAspectRatio;        // Display aspect ratio
     EGLenum mRenderBuffer;           // Render buffer
     EGLenum mRequestedRenderBuffer;  // Requested render buffer
-
+    EGLenum mRequestedSwapBehavior;
     EGLint mRequestedSwapInterval;
 
     EGLint mOrientation;

@@ -11,13 +11,17 @@
 
 namespace sh
 {
+class TVariable;
+
 class TranslatorWGSL : public TCompiler
 {
   public:
     TranslatorWGSL(sh::GLenum type, ShShaderSpec spec, ShShaderOutput output);
 
   protected:
-    bool preTranslateTreeModifications(TIntermBlock *root);
+    bool preTranslateTreeModifications(TIntermBlock *root,
+                                       const ShCompileOptions &compileOptions,
+                                       const TVariable **defaultUniformBlockOut);
     bool translate(TIntermBlock *root,
                    const ShCompileOptions &compileOptions,
                    PerformanceDiagnostics *perfDiagnostics) override;

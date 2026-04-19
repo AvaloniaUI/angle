@@ -49,6 +49,14 @@ void InitExtensionBehavior(const ShBuiltInResources &resources, TExtensionBehavi
     {
         extBehavior[TExtension::EXT_frag_depth] = EBhUndefined;
     }
+    if (resources.EXT_fragment_shading_rate)
+    {
+        extBehavior[TExtension::EXT_fragment_shading_rate] = EBhUndefined;
+    }
+    if (resources.EXT_fragment_shading_rate_primitive)
+    {
+        extBehavior[TExtension::EXT_fragment_shading_rate_primitive] = EBhUndefined;
+    }
     if (resources.EXT_primitive_bounding_box)
     {
         extBehavior[TExtension::EXT_primitive_bounding_box] = EBhUndefined;
@@ -72,10 +80,6 @@ void InitExtensionBehavior(const ShBuiltInResources &resources, TExtensionBehavi
     if (resources.EXT_shader_framebuffer_fetch_non_coherent)
     {
         extBehavior[TExtension::EXT_shader_framebuffer_fetch_non_coherent] = EBhUndefined;
-    }
-    if (resources.NV_shader_framebuffer_fetch)
-    {
-        extBehavior[TExtension::NV_shader_framebuffer_fetch] = EBhUndefined;
     }
     if (resources.NV_shader_noperspective_interpolation)
     {
@@ -249,6 +253,17 @@ void ResetExtensionBehavior(const ShBuiltInResources &resources,
             // enabled by default.
             extBehavior[TExtension::ARB_texture_rectangle] = EBhEnable;
         }
+    }
+    // ANGLE_multi_draw and ANGLE_base_vertex_base_instance are always emulated, so remove them if
+    // emulation is not enabled.
+    if (resources.ANGLE_multi_draw && !compileOptions.emulateGLDrawID)
+    {
+        extBehavior.erase(TExtension::ANGLE_multi_draw);
+    }
+    if (resources.ANGLE_base_vertex_base_instance_shader_builtin &&
+        !compileOptions.emulateGLBaseVertexBaseInstance)
+    {
+        extBehavior.erase(TExtension::ANGLE_base_vertex_base_instance_shader_builtin);
     }
 }
 

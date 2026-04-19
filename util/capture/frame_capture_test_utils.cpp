@@ -7,6 +7,10 @@
 //   Helper functions for capture and replay of traces.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_libc_calls
+#endif
+
 #include "frame_capture_test_utils.h"
 
 #include "common/frame_capture_utils.h"
@@ -203,6 +207,15 @@ bool LoadTraceInfoFromJSON(const std::string &traceName,
             meta["IsBindGeneratesResourcesEnabled"].GetBool();
         traceInfoOut->isWebGLCompatibilityEnabled = meta["IsWebGLCompatibilityEnabled"].GetBool();
         traceInfoOut->isRobustResourceInitEnabled = meta["IsRobustResourceInitEnabled"].GetBool();
+
+        if (meta.HasMember("AreExtensionsEnabled"))
+        {
+            traceInfoOut->areExtensionsEnabled = meta["AreExtensionsEnabled"].GetBool();
+        }
+        else
+        {
+            traceInfoOut->areExtensionsEnabled = true;
+        }
     }
     else
     {
@@ -243,6 +256,68 @@ bool LoadTraceInfoFromJSON(const std::string &traceName,
             int frame = keyFrames[i].GetInt();
             traceInfoOut->keyFrames.push_back(frame);
         }
+    }
+
+    if (doc.HasMember("BinaryMetadata"))
+    {
+        const rapidjson::Document::Object &binaryData = doc["BinaryMetadata"].GetObj();
+        if (binaryData.HasMember("Version"))
+        {
+            traceInfoOut->binaryVersion = binaryData["Version"].GetInt();
+        }
+        else
+        {
+            traceInfoOut->binaryVersion = 0;
+        }
+
+        if (binaryData.HasMember("BlockCount"))
+        {
+            traceInfoOut->binaryBlockCount = binaryData["BlockCount"].GetInt();
+        }
+        else
+        {
+            traceInfoOut->binaryBlockCount = 0;
+        }
+
+        // The following three entries must be handled as strings as possible values may
+        // overflow internal rapidjson thresholds
+        if (binaryData.HasMember("BlockSize"))
+        {
+            std::string sizeString        = std::string(binaryData["BlockSize"].GetString());
+            traceInfoOut->binaryBlockSize = std::stoull(sizeString);
+        }
+        else
+        {
+            traceInfoOut->binaryBlockSize = 0;
+        }
+
+        if (binaryData.HasMember("ResidentSize"))
+        {
+            std::string sizeString           = std::string(binaryData["ResidentSize"].GetString());
+            traceInfoOut->binaryResidentSize = std::stoull(sizeString);
+        }
+        else
+        {
+            traceInfoOut->binaryResidentSize = kDefaultBinaryDataSize;
+        }
+
+        if (binaryData.HasMember("IndexOffset"))
+        {
+            std::string offsetString        = std::string(binaryData["IndexOffset"].GetString());
+            traceInfoOut->binaryIndexOffset = std::stoull(offsetString);
+        }
+        else
+        {
+            traceInfoOut->binaryIndexOffset = 0;
+        }
+    }
+    else
+    {
+        traceInfoOut->binaryVersion      = 0;
+        traceInfoOut->binaryBlockCount   = 0;
+        traceInfoOut->binaryBlockSize    = 0;
+        traceInfoOut->binaryResidentSize = 0;
+        traceInfoOut->binaryIndexOffset  = 0;
     }
 
     const rapidjson::Document::Array &traceFiles = doc["TraceFiles"].GetArray();
@@ -291,6 +366,7 @@ uint8_t *TraceLibrary::LoadBinaryData(const char *fileName)
 {
     std::ostringstream pathBuffer;
     pathBuffer << mBinaryDataDir << "/" << fileName;
+
     FILE *fp = fopen(pathBuffer.str().c_str(), "rb");
     if (fp == 0)
     {
@@ -300,6 +376,7 @@ uint8_t *TraceLibrary::LoadBinaryData(const char *fileName)
     fseek(fp, 0, SEEK_END);
     long size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
+
     if (mTraceInfo.isBinaryDataCompressed)
     {
         if (!strstr(fileName, ".gz"))
@@ -348,4 +425,19 @@ uint8_t *TraceLibrary::LoadBinaryData(const char *fileName)
     return mBinaryData.data();
 }
 
+FrameCaptureBinaryData *TraceLibrary::ConfigureBinaryDataLoader(const char *fileName)
+{
+    std::ostringstream pathBuffer;
+    pathBuffer << mBinaryDataDir << "/" << fileName;
+
+    FrameCaptureBinaryData *binaryData = new FrameCaptureBinaryData;
+
+    binaryData->configureBinaryDataLoader(
+        mTraceInfo.isBinaryDataCompressed, mTraceInfo.binaryBlockCount,
+        static_cast<size_t>(mTraceInfo.binaryBlockSize),
+        static_cast<size_t>(mTraceInfo.binaryResidentSize),
+        static_cast<size_t>(mTraceInfo.binaryIndexOffset), pathBuffer.str());
+
+    return binaryData;
+}
 }  // namespace angle

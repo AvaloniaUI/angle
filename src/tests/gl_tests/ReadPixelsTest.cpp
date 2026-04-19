@@ -7,6 +7,10 @@
 //   Tests calls related to glReadPixels.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "test_utils/ANGLETest.h"
 
 #include <array>
@@ -59,6 +63,49 @@ TEST_P(ReadPixelsTest, OutOfBounds)
         {
             EXPECT_EQ(GLColor::red, pixels[y * (pixelsWidth + offset) + x]);
         }
+    }
+}
+
+// Test readPixels with a large texture to verify no overflow in pitch calculations.
+TEST_P(ReadPixelsTest, LargeTexture)
+{
+    // Need ES3 for RGBA32F
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
+
+    GLint maxTextureSize;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    ANGLE_SKIP_TEST_IF(maxTextureSize < 16384);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 16384, 8193, 0, GL_RGBA, GL_FLOAT, nullptr);
+    ANGLE_SKIP_TEST_IF(glGetError() == GL_OUT_OF_MEMORY);
+    EXPECT_GL_NO_ERROR();
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    // Clear the row at 8192 to a specific color.
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 8192, 16384, 1);
+    glClearColor(0.5f, 0.5f, 0.5f, 0.5f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
+
+    ANGLE_SKIP_TEST_IF(glGetError() == GL_OUT_OF_MEMORY);
+    EXPECT_GL_NO_ERROR();
+
+    // Call gl.readPixels(0, 8192, 16384, 1, gl.RGBA, gl.FLOAT, outputBuffer).
+    std::vector<float> data(16384 * 4);
+    glReadPixels(0, 8192, 16384, 1, GL_RGBA, GL_FLOAT, data.data());
+    ANGLE_SKIP_TEST_IF(glGetError() == GL_OUT_OF_MEMORY);
+    EXPECT_GL_NO_ERROR();
+
+    for (size_t i = 0; i < 16384 * 4; ++i)
+    {
+        EXPECT_EQ(0.5f, data[i]);
     }
 }
 
@@ -1552,6 +1599,31 @@ TEST_P(ReadPixelsErrorTest, ColorBufferSnorm16)
                                    {GL_BYTE, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT});
 }
 
+// The test verifies that glReadnPixels* generates a GL_INVALID_OPERATION error if
+// the buffer size required to store the requested data is greater than bufSize if
+// PBO is bound.
+TEST_P(ReadPixelsErrorTest, PBOBufSizeTest)
+{
+    GLuint PBO;
+    glGenBuffers(1, &PBO);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, PBO);
+    glBufferData(GL_PIXEL_PACK_BUFFER, 4, nullptr, GL_STATIC_DRAW);
+    glBindFramebuffer(GL_FRAMEBUFFER, mFBO);
+
+    if (IsGLExtensionEnabled("GL_KHR_robustness"))
+    {
+        glReadnPixelsKHR(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, 2, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    }
+    if (IsGLExtensionEnabled("GL_EXT_robustness"))
+    {
+        glReadnPixelsEXT(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, 2, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    }
+
+    glDeleteBuffers(1, &PBO);
+}
+
 // texture internal format is GL_RGBA32F
 class ReadPixelsFloat32TypePBOTest : public ReadPixelsPBOTest
 {
@@ -1672,7 +1744,9 @@ TEST_P(ReadPixelsWebGLErrorTest, FormatIsDepthComponent)
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these
 // tests should be run against.
-ANGLE_INSTANTIATE_TEST_ES2(ReadPixelsTest);
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(
+    ReadPixelsTest,
+    ES3_METAL().enable(Feature::CopyTextureToBufferForReadOptimization));
 ANGLE_INSTANTIATE_TEST_ES2(ReadPixelsPBONVTest);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ReadPixelsPBOTest);

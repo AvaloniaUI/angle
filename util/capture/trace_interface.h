@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "common/frame_capture_binary_data.h"
+
 namespace angle
 {
 
@@ -44,10 +46,19 @@ struct TraceInfo
     int configDepthBits;
     int configStencilBits;
     bool isBinaryDataCompressed;
-    bool areClientArraysEnabled;
-    bool isBindGeneratesResourcesEnabled;
-    bool isWebGLCompatibilityEnabled;
-    bool isRobustResourceInitEnabled;
+    uint32_t binaryVersion;
+    uint32_t binaryBlockCount;
+    uint64_t binaryBlockSize;
+    uint64_t binaryResidentSize;
+    uint64_t binaryIndexOffset;
+
+    // ANGLE-specific EGL attributes.
+    bool areClientArraysEnabled;           // EGL_CONTEXT_CLIENT_ARRAYS_ENABLED_ANGLE
+    bool isBindGeneratesResourcesEnabled;  // EGL_CONTEXT_BIND_GENERATES_RESOURCE_CHROMIUM
+    bool isWebGLCompatibilityEnabled;      // EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE
+    bool isRobustResourceInitEnabled;      // EGL_ROBUST_RESOURCE_INITIALIZATION_ANGLE
+    bool areExtensionsEnabled;             // EGL_EXTENSIONS_ENABLED_ANGLE
+
     bool isCL;
     std::vector<std::string> traceFiles;
     int windowSurfaceContextId;
@@ -76,7 +87,7 @@ struct TraceFunctions
 struct TraceCallbacks
 {
     virtual uint8_t *LoadBinaryData(const char *fileName) = 0;
-
+    virtual FrameCaptureBinaryData *ConfigureBinaryDataLoader(const char *fileName) = 0;
     virtual ~TraceCallbacks() {}
 };
 

@@ -182,15 +182,14 @@ class TextureMtl : public TextureImpl
                                     int layer,
                                     GLenum format);
 
-    const mtl::Format &getFormat() const { return mFormat; }
-
   private:
     void deallocateNativeStorage(bool keepImages, bool keepSamplerStateAndFormat = false);
     angle::Result createNativeStorage(const gl::Context *context,
                                       gl::TextureType type,
                                       GLuint mips,
                                       GLuint samples,
-                                      const gl::Extents &size);
+                                      const gl::Extents &size,
+                                      const mtl::Format &format);
     angle::Result onBaseMaxLevelsChanged(const gl::Context *context);
     angle::Result ensureSamplerStateCreated(const gl::Context *context);
     // Ensure image at given index is created:
@@ -311,7 +310,7 @@ class TextureMtl : public TextureImpl
                                       size_t pixelsDepthPitch,
                                       gl::Buffer *unpackBuffer,
                                       const uint8_t *pixels,
-                                      const mtl::TextureRef &image);
+                                      const ImageDefinitionMtl &imageDef);
 
     // Convert pixels to suported format before uploading to texture
     angle::Result convertAndSetPerSliceSubImage(const gl::Context *context,
@@ -324,14 +323,14 @@ class TextureMtl : public TextureImpl
                                                 size_t pixelsDepthPitch,
                                                 gl::Buffer *unpackBuffer,
                                                 const uint8_t *pixels,
-                                                const mtl::TextureRef &image);
+                                                const ImageDefinitionMtl &imageDef);
 
     angle::Result generateMipmapCPU(const gl::Context *context);
 
-    bool needsFormatViewForPixelLocalStorage(const ShPixelLocalStorageOptions &) const;
+    bool needsFormatViewForPixelLocalStorage(const ShPixelLocalStorageOptions &,
+                                             const mtl::Format &format) const;
     bool isImmutableOrPBuffer() const;
 
-    mtl::Format mFormat;
     egl::Surface *mBoundSurface = nullptr;
     class NativeTextureWrapper;
     class NativeTextureWrapperWithViewSupport;
