@@ -1,0 +1,94 @@
+name: Build
+
+on:
+  push:
+    branches: [ avalonia-fork-master ]
+  pull_request:
+    branches: [ avalonia-fork-master ]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    env:
+      DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install depot_tools
+        shell: cmd
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git %RUNNER_TEMP%\depot_tools
+          echo %RUNNER_TEMP%\depot_tools>>%GITHUB_PATH%
+
+      - name: Bootstrap
+        shell: cmd
+        run: python scripts/bootstrap.py
+
+      - name: GClient Sync
+        shell: cmd
+        run: gclient sync
+
+      - name: Clear Output Dir
+        continue-on-error: true
+        shell: cmd
+        run: if exist out rmdir /Q /S out
+
+      - name: Generate Ninja (arm64)
+        shell: cmd
+        run: gn gen out/arm64 --args="is_debug=false target_cpu=\"arm64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false angle_assert_always_on=false angle_enable_d3d9=false angle_enable_metal=false angle_enable_gl_desktop_backend=false angle_enable_wgpu=false angle_enable_swiftshader=false"
+
+      - name: Build Angle (arm64)
+        shell: cmd
+        run: autoninja -C out/arm64 libGLESv2.dll.lib
+
+      - name: Generate Ninja (x64)
+        shell: cmd
+        run: gn gen out/x64 --args="is_debug=false target_cpu=\"x64\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false angle_assert_always_on=false angle_enable_d3d9=false angle_enable_metal=false angle_enable_gl_desktop_backend=false angle_enable_wgpu=false angle_enable_swiftshader=false"
+
+      - name: Build Angle (x64)
+        shell: cmd
+        run: autoninja -C out/x64 libGLESv2.dll.lib
+
+      - name: Generate Ninja (x86)
+        shell: cmd
+        run: gn gen out/x86 --args="is_debug=false target_cpu=\"x86\" dcheck_always_on=false angle_enable_vulkan=false angle_enable_gl=false angle_enable_null=false angle_assert_always_on=false angle_enable_d3d9=false angle_enable_metal=false angle_enable_gl_desktop_backend=false angle_enable_wgpu=false angle_enable_swiftshader=false"
+
+      - name: Build Angle (x86)
+        shell: cmd
+        run: autoninja -C out/x86 libGLESv2.dll.lib
+
+      - name: Prefix DLLs
+        shell: cmd
+        run: |
+          ren .\out\arm64\libGLESv2.dll av_libGLESv2.dll
+          ren .\out\x64\libGLESv2.dll av_libGLESv2.dll
+          ren .\out\x86\libGLESv2.dll av_libGLESv2.dll
+
+      - name: Clear Artifacts Dir
+        continue-on-error: true
+        shell: cmd
+        run: |
+          if exist artifacts rmdir /Q /S artifacts
+          if exist nuget\bin rmdir /Q /S nuget\bin
+
+      - name: Generate Nuget Package
+        shell: cmd
+        run: dotnet pack -c Release ${{ github.workspace }}\nuget\Avalonia.Angle.Windows.Natives.csproj
+
+      - name: Collect Nuget Artifacts
+        shell: cmd
+        run: |
+          if not exist artifacts\nuget mkdir artifacts\nuget
+          copy /Y nuget\bin\Release\*.nupkg artifacts\nuget\
+
+      - name: Publish Nuget Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nuget
+          path: ${{ github.workspace }}/artifacts/nuget
