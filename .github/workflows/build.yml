@@ -18,6 +18,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install depot_tools
+        shell: cmd
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git %RUNNER_TEMP%\depot_tools
+          echo %RUNNER_TEMP%\depot_tools>>%GITHUB_PATH%
 
       - name: Bootstrap
         shell: cmd
