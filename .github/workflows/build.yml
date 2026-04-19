@@ -2,10 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ avalonia-fork-master ]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ avalonia-fork-master ]
 
 permissions:
   contents: read
