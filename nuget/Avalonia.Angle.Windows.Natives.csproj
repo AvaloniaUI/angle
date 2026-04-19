@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
-		<PackageVersion>2.1.25547.20250602</PackageVersion>
+		<PackageVersion>2.1.27548.20260419</PackageVersion>
     	<Authors>Avalonia Team</Authors>
     	<Copyright>Copyright 2013-$([System.DateTime]::Now.ToString(`yyyy`)) &#169; The AvaloniaUI Project</Copyright>		
 		<PackageProjectUrl>https://avaloniaui.net</PackageProjectUrl>
